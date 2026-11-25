@@ -193,14 +193,14 @@ const adminUsers = [
   {
     email: "security-admin@payment-gateway.internal",
     role: "SECURITY_ADMIN",
-    authorities: ["security:read", "security:write", "credential:write", "system:storage:read", "system:storage:admin", "system:storage:legal-hold", "approval:read", "approval:check", "approval:write", "report_engine:run"],
+    authorities: ["security:read", "security:write", "credential:read", "credential:write", "settings:read", "settings:write", "system:storage:read", "system:storage:admin", "system:storage:legal-hold", "approval:read", "approval:check", "approval:write", "report_engine:run"],
     isMaker: true,
     isChecker: true,
   },
   {
     email: "finance@payment-gateway.internal",
     role: "FINANCE",
-    authorities: ["finance:read", "finance:write", "commission:write", "cashout:review", "dispute:read", "dispute:write", "approval:read", "approval:check", "approval:write", "case:read", "operator:read", "report_engine:run"],
+    authorities: ["finance:read", "finance:write", "commission:write", "cashout:review", "dispute:read", "dispute:write", "reconciliation:read", "reconciliation:write", "velocity:read", "velocity:write", "approval:read", "approval:check", "approval:write", "case:read", "operator:read", "report_engine:run"],
     isMaker: false,
     isChecker: true,
   },

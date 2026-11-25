@@ -191,7 +191,7 @@ export const recomputeMerchantKybStatus = async (
     }),
     db.beneficialOwner.findMany({
       where: { merchantId, active: true },
-      select: { ownershipPercent: true, screeningStatus: true },
+      select: { ownershipPercent: true, screeningStatus: true, role: true },
     }),
   ]);
   const today = startOfUtcDay(now);
@@ -206,8 +206,9 @@ export const recomputeMerchantKybStatus = async (
   );
   const documentsReady = requiredDocuments.every((type) => acceptedTypes.has(type));
   const ownersTotal = owners.reduce((sum, owner) => sum + Number(owner.ownershipPercent ?? 0), 0);
+  const hasController = owners.some((owner) => String(owner.role) === "CONTROLLER");
   const ownersReady = owners.length > 0
-    && ownersTotal >= ownerThreshold
+    && (hasController || ownersTotal >= ownerThreshold)
     && owners.every(
       (owner) => owner.screeningStatus !== "NOT_SCREENED" && owner.screeningStatus !== "CONFIRMED_MATCH",
     );

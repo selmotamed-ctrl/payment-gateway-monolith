@@ -1037,6 +1037,14 @@ Dashboard, merchant stats, finance profitability/liquidity, dispute/adjustment/c
 
 Dispute, adjustment and cash-out summaries return a `byCurrency` array in addition to selected-currency scalars. Sandbox overview, payments summary and links summary accept `currency` and return `byCurrency`; sandbox money is never a cross-currency scalar.
 
+## Second-pass accuracy remediation (2026-11-25)
+
+- `POST /join-requests/:id/decide` now rejects a `REJECTED` decision without a `reasonCode` and a written note (`JOIN_REQUEST_REJECTION_REASON_REQUIRED`), and re-evaluates the four-eyes policy at decision time: a reviewer who selects `HIGH` risk cannot avoid the second reviewer (`resolveFourEyesForDecision` / `applyFourEyesForDecision`).
+- `GET /stats/overview` now aggregates `grossVolume` with the requested reporting currency instead of a hard-coded LYD; the dashboard card uses the returned `currency`.
+- `POST /aml/reports/:id/file` now calls `validateRegulatoryReportForSubmission` before creating the external submission or dispatching the adapter, so a `PROVISIONAL` reporting rule can never reach the authority. `submitRegulatoryReport` shares the same validator.
+- AML route access accepts `aml:read`/`aml:write` as well as `aml.read_confidential`, matching `hasConfidentialAmlAccess`; the admin route table lists both vocabularies.
+- Credential-set reads accept `credential:write`/`gateway:write` as well as the read names, so a default Security Admin can open the screen before re-seeding.
+
 ## Core Engine
 
 > Status: `partial` · Last verified: 2026-11-25
@@ -2554,6 +2562,15 @@ The Reporting Studio now covers the full authoring and filing lane in addition t
 - **AML case reads.** `GET /aml/cases/:id` writes an `AML_CASE_VIEWED` audit row.
 - **Default roles.** `COMPLIANCE` now has merchant/KYB read-write, `OPERATOR` has merchant/KYB read and KYB write, and `MLRO` has merchant/KYB read, matching the documented onboarding workflows.
 
+## Second-pass accuracy remediation (2026-11-25)
+
+- **Four-eyes at decision time.** `resolveFourEyesForDecision` re-applies the stored reasons and adds `RISK_TIER_HIGH` when the reviewer selects `HIGH`; a stored requirement is never weakened. This closes the approval-time tier bypass.
+- **Ownership gate.** `computeJoinRequestReadiness` and `kybReview` accept a recorded `CONTROLLER` in place of the percentage total, matching the documented fallback.
+- **Join rejection.** A rejected join request now needs a reason code and a written note.
+- **Adjustment checker.** The approve route enforces `adjustmentApprovalCheckerAllowed` (role `FINANCE`) before it claims the approval and queues `ADJUSTMENT_EXECUTION`, matching the `DOMAIN_CHECKER_ROLES` map. Rejection already enforced the same domain.
+- **Merchant closure.** Closing a merchant revokes its active access tokens in the same transaction, and token authentication rejects a merchant that is not `ACTIVE`.
+- **Filing order.** The provisional-rule, submitter and output checks run before the external filing adapter is called, not after.
+
 ## Background Workers and Outboxes
 
 > Status: `partial` · Last verified: 2026-11-25
@@ -3048,6 +3065,10 @@ PSP-M refunds, disputes opened/decided and cash-outs are grouped by currency and
 
 - `PeriodicScreeningWorker` continues to open the confirmed-match AML case once and suspend an active merchant. The merchant-visible `suspensionReasonCode` is now `AML` (inside the closed code set and the exact-match redaction rule); the detailed `SCREENING_CONFIRMED_MATCH` trigger stays in the AML case and the `MERCHANT_SUSPENDED` audit row.
 - Settlement sweeps now run from `BackgroundJobHandlers` only for attempts that used `GATEWAY_CLEARING` (fee accrual or payer surcharge/split). See `core.ledger` section 18.
+
+## Second-pass settlement and reconciliation corrections (2026-11-25)
+
+`postSettlementSweeps` still excludes a statement line tied to a known merchant-direct, internal or fee-at-source attempt. A **batch-net** source line with no local attempt (the gateway reports a settled batch total) is now swept again; previously the absence of an attempt skipped the whole batch and lost the clearing settlement. A test in `test/remediation-high.test.ts` covers the no-attempt batch case and the USD account selection.
 
 ## Storage Engine
 

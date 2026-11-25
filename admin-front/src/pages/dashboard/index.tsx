@@ -324,8 +324,8 @@ const DashboardPage = dc(() => {
                 key: "volume",
                 label: t("Gross Volume"),
                 moneyAmount: data?.grossVolume ?? "0",
-                currency: "LYD",
-                subLabel: `${formatPlainNumber(data?.grossVolumeAttempts ?? 0)} ${t("succeeded")} · LYD`,
+                currency: data?.currency ?? "LYD",
+                subLabel: `${formatPlainNumber(data?.grossVolumeAttempts ?? 0)} ${t("succeeded")} · ${data?.currency ?? "LYD"}`,
             },
             {
                 key: "success",

@@ -5,8 +5,8 @@
     "books": 14,
     "articles": 137,
     "glossaryTerms": 154,
-    "safeguardCards": 26,
-    "safeguardChecklistItems": 115,
+    "safeguardCards": 25,
+    "safeguardChecklistItems": 111,
     "situations": 32,
     "readingPaths": 8,
     "quickAnswers": 60,
@@ -15,5 +15,5 @@
     "errorCodes": 19,
     "edgeCases": 140
   },
-  "sourceSha256": "1517f082785909406c1c6d283edd97dc9f97365826a30c744fd4cbf49c30641c"
+  "sourceSha256": "b1423a00b4c563b0a4eff60545079f2c8bc21b2ec404270638f1d6336c057fa7"
 }

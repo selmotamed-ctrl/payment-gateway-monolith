@@ -452,3 +452,7 @@ A "Sandbox Live Mirror" section reuses the Live pages under `/sandbox/mirror/*` 
 - A Live application created by an already-`ACTIVE` merchant is created `ACTIVE`. Existing `PENDING` applications are activated when the join request is approved. Before this, every new Live application stayed `PENDING` with no activation route.
 - `POST /links` rejects `409 LINK_WALLET_MUST_MATCH_APPLICATION` when the requested wallet differs from the application's assigned wallet; the link always settles to the application wallet.
 - The onboarding profile `PUT` refuses sensitive legal/tax/registration edits after activation (`MERCHANT_PROFILE_REQUIRES_APPROVAL`) and while a join request is under review (`JOIN_REQUEST_UNDER_REVIEW`). A new merchant withdraw route returns the join request to `DRAFT`; the onboarding page exposes **Withdraw application** and the normal submit flow can run again.
+
+## Second-pass sandbox visibility (2026-11-25)
+
+Sandbox menu entries are filtered with `canOpenRoute`; the route table now allows `gateways.edit`/`security:read` for the Sandbox Overview, Sandbox Merchants and Fake Rails screens, so the Gateway Admin and Security Admin roles named by the Guide can open them. The Sandbox Live Mirror is described as the same Live screens backed by sandbox data, not as read-only, because the proxy forwards the same methods.

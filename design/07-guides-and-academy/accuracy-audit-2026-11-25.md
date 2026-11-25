@@ -1,10 +1,10 @@
 # Guide and Academy accuracy audit — 2026-11-25
 
-Status: completed first pass (14 read-only scans); code and content remediation delivered on `guide-accuracy-remediation`. Remaining product decisions are listed below.
+Status: completed first and second passes (22 read-only scans); code and content remediation delivered on `guide-accuracy-remediation`. Remaining product decisions are listed below.
 
 ## Method
 
-- Scope: all 137 Admin Guide articles, 154 glossary terms, 60 quick answers, 32 situations, 26 safeguard cards, the 31-screen context map, 51 Academy lessons, 102 lesson checks, 224 exam-pool questions and 16 labs.
+- Scope: all 137 Admin Guide articles, 154 glossary terms, 60 quick answers, 32 situations, 25 safeguard cards, the 31-screen context map, 51 Academy lessons, 102 lesson checks, 224 exam-pool questions and 16 labs.
 - Authority: working-tree code and tests; `project-design/parts/**` as the canonical map. `design/**` historical claims and READMEs were not treated as evidence.
 - Each finding was classified as `DOC_WRONG`, `CODE_BUG`, `CODE_GAP`, `AMBIGUOUS` or `STALE_REFERENCE`, with severity and file evidence.
 - No production database or browser was available. The scans are static; runtime behaviour is inferred from code and existing tests.
@@ -72,3 +72,12 @@ The Guide/Academy now either describe the current behaviour or explicitly label 
 - `content:guide`, `content:academy`, `content:sync`, `content:check`, the extractor drift tests and the clarity gate.
 - `project-design/build.ts --check`, `check.ts`, `git diff --check`.
 - A full DB-backed run and live deployment remain environment-dependent.
+
+## Second pass (same day)
+
+Eight further read-only scans re-read every Guide book and Academy module against the working tree after the first remediation commit. They found residual claims that had been missed, plus a smaller set of code defects and role-wiring gaps:
+
+- **Code defects fixed:** provisional-rule check ran after the filing adapter; four-eyes could be bypassed by selecting `HIGH` risk at decision time; adjustment approval did not enforce a Finance checker at the route; a failed restore-drill check could render as `Passed`; the drill UI did not show the object-storage badge; Gross Volume ignored the currency selector; Security Admin could open credential sets/settings without their read authorities; Finance could not open reconciliation/pricing; sandbox menu routes were hidden from the roles the Guide names; API tokens remained usable after closing a merchant; a join rejection did not require a reason code and note.
+- **Code behaviour aligned:** `CONTROLLER` now satisfies the ownership gate; the join-request SLA starts at submission; a batch-net statement line with no local attempt still posts its clearing sweep (merchant-direct/internal/fee-at-source attempts remain excluded); checkout maps the slot error to “Payment in progress”.
+- **Content corrected:** join SLA pause/resume, gateway fee visibility, report-catalog filtering, read-only-mirror overclaim, dashboard tile list, role-table approvals, POS token enforcement, approval lifetimes, step-up, client-certificate enforcement, pre-migration backup step, release pruning, backups screen contents, pg-native-only WAL/encryption, cash-out/approval/AML/withdrawal claims, reconciliation severity, adjustment states, refund/dispute ceilings, suspense, merchant-direct zero-commission entries, unmatched 2xx, OTP resend, webhook retry/dedupe, mismatch-policy scope, backup-policy checker, retention basis, credential rotation overlap, `HIGH_RISK`, `COUNTERPARTY_COUNTRY` and controller/ownership wording.
+- **Remaining product decisions** are unchanged: cash-out second Finance approval; commission/settings/credential/velocity maker-checker; automatic payout stop on drift; daily AML monitoring; gateway-version canary split; OIDC/step-up/password change; generic approval withdraw; webhook replay/signature-spike alert; relationship-end retention; POS per-screen token.

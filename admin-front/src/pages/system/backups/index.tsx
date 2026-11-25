@@ -205,7 +205,8 @@ const readDrillCheck = (drill: DrillRow, candidates: string[]): boolean | null =
                 return passesStatus(value);
             }
             if (value && typeof value === "object") {
-                const nested = value as { passed?: unknown; status?: unknown };
+                const nested = value as { ok?: unknown; passed?: unknown; status?: unknown };
+                if (typeof nested.ok === "boolean") return nested.ok;
                 if (typeof nested.passed === "boolean") return nested.passed;
                 if (nested.status !== undefined) return passesStatus(nested.status);
             }
@@ -329,23 +330,31 @@ const SystemBackupsPage = dc(() => {
                 key: "double-entry",
                 label: t("Double-entry zero drift"),
                 passed:
-                    readDrillCheck(drill, ["DOUBLE_ENTRY_DRIFT", "DOUBLE_ENTRY_ZERO_DRIFT", "DOUBLE_ENTRY"]) ??
+                    readDrillCheck(drill, ["DOUBLE_ENTRY_DRIFT", "DOUBLE_ENTRY_ZERO_DRIFT", "DOUBLE_ENTRY", "doubleEntry", "doubleEntryDrift"]) ??
                     (drift === null ? null : drift === 0),
             },
             {
                 key: "balance-parity",
                 label: t("Sharded balance parity"),
                 passed:
-                    readDrillCheck(drill, ["BALANCE_PARITY", "SHARDED_BALANCE_PARITY", "BALANCE_MISMATCHES"]) ??
+                    readDrillCheck(drill, ["BALANCE_PARITY", "SHARDED_BALANCE_PARITY", "BALANCE_MISMATCHES", "balanceParity", "balanceMismatches"]) ??
                     (mismatches === null ? null : mismatches === 0),
             },
             {
                 key: "audit-chain",
                 label: t("Audit hash chain"),
                 passed:
-                    readDrillCheck(drill, ["AUDIT_CHAIN", "AUDIT_HASH_CHAIN", "AUDIT_BROKEN_LINKS"]) ??
+                    readDrillCheck(drill, ["AUDIT_CHAIN", "AUDIT_HASH_CHAIN", "AUDIT_BROKEN_LINKS", "auditChain", "auditBrokenLinks"]) ??
                     (brokenLinks === null ? null : brokenLinks === 0),
             },
+            ...(drill.checks && typeof drill.checks === "object" && !Array.isArray(drill.checks)
+                && (drill.checks as Record<string, unknown>).objectStorage !== undefined
+                ? [{
+                    key: "object-storage",
+                    label: t("Object storage parity"),
+                    passed: readDrillCheck(drill, ["OBJECT_STORAGE", "OBJECT_STORAGE_PARITY", "objectStorage"]),
+                }]
+                : []),
         ];
     });
 

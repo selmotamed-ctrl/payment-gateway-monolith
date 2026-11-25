@@ -771,3 +771,11 @@ Dashboard, merchant stats, finance profitability/liquidity, dispute/adjustment/c
 ### 20.1 Summary and sandbox currency breakdowns (2026-11-24)
 
 Dispute, adjustment and cash-out summaries return a `byCurrency` array in addition to selected-currency scalars. Sandbox overview, payments summary and links summary accept `currency` and return `byCurrency`; sandbox money is never a cross-currency scalar.
+
+## Second-pass accuracy remediation (2026-11-25)
+
+- `POST /join-requests/:id/decide` now rejects a `REJECTED` decision without a `reasonCode` and a written note (`JOIN_REQUEST_REJECTION_REASON_REQUIRED`), and re-evaluates the four-eyes policy at decision time: a reviewer who selects `HIGH` risk cannot avoid the second reviewer (`resolveFourEyesForDecision` / `applyFourEyesForDecision`).
+- `GET /stats/overview` now aggregates `grossVolume` with the requested reporting currency instead of a hard-coded LYD; the dashboard card uses the returned `currency`.
+- `POST /aml/reports/:id/file` now calls `validateRegulatoryReportForSubmission` before creating the external submission or dispatching the adapter, so a `PROVISIONAL` reporting rule can never reach the authority. `submitRegulatoryReport` shares the same validator.
+- AML route access accepts `aml:read`/`aml:write` as well as `aml.read_confidential`, matching `hasConfidentialAmlAccess`; the admin route table lists both vocabularies.
+- Credential-set reads accept `credential:write`/`gateway:write` as well as the read names, so a default Security Admin can open the screen before re-seeding.

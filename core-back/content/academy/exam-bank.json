@@ -1,6 +1,6 @@
 {
   "contentVersion": "1.0.0",
-  "contentHash": "32cae586b42e3a7615f004023665d3aee9dad938d02757ea3c19fd29dc452bb8",
+  "contentHash": "bf1a6a3c4412533487323f49b063768ab7a2e8075cd2d27e3ff1cbeb26013d72",
   "blueprints": [
     {
       "id": "exam-foundation",
@@ -776,7 +776,7 @@
       "options": [
         {
           "id": "o1",
-          "text": "COMPLIANCE, MLRO and, for audit, SECURITY_ADMIN.",
+          "text": "COMPLIANCE, MLRO, or an account explicitly granted aml:read/aml:write.",
           "correct": true
         },
         {
@@ -790,7 +790,7 @@
           "correct": false
         }
       ],
-      "why": "Confidentiality zones apply."
+      "why": "Confidentiality zones apply; SECURITY_ADMIN is not automatically allowed."
     },
     {
       "id": "q-m2-004",
@@ -1000,7 +1000,7 @@
       "options": [
         {
           "id": "o1",
-          "text": "Seven days.",
+          "text": "Seven days for most requests; three days for join-request, AML-case, operator-case and adjustment approvals.",
           "correct": true
         },
         {
@@ -1014,7 +1014,7 @@
           "correct": false
         }
       ],
-      "why": "After seven days it becomes EXPIRED and cannot be approved; the maker starts a new request."
+      "why": "An expired request is final and cannot be approved; the maker starts a new request. Read the countdown."
     },
     {
       "id": "q-m3-005",
@@ -1302,7 +1302,7 @@
           "correct": false
         }
       ],
-      "why": "Sessions are revoked."
+      "why": "The core re-reads the user and authorities on the next request, so the change takes effect without a new login; sessions are not revoked."
     },
     {
       "id": "q-m3-103",
@@ -1720,7 +1720,7 @@
       "options": [
         {
           "id": "o1",
-          "text": "a staff user with `merchant:write` and the maker switch to propose it, and a different Compliance, Finance or MLRO checker.",
+          "text": "a staff user with `merchant:write` to propose it, and a different Compliance or MLRO checker.",
           "correct": true
         },
         {
@@ -1969,7 +1969,7 @@
           "correct": false
         }
       ],
-      "why": "Readiness needs the active owners' shares to total at least 25%; a controller entry alone does not satisfy it."
+      "why": "Readiness needs the active owners' shares to total at least 25%, or a recorded controller when no owner reaches it."
     },
     {
       "id": "q-m4-018",
@@ -2832,7 +2832,7 @@
       "options": [
         {
           "id": "o1",
-          "text": "we confirm your payment; the merchant is credited.",
+          "text": "we confirm your payment; unless the substatus is SUSPENSE_SETTLEMENT, the merchant is credited.",
           "correct": true
         },
         {
@@ -2846,7 +2846,7 @@
           "correct": false
         }
       ],
-      "why": "Read the status."
+      "why": "Read the status and the substatus."
     },
     {
       "id": "q-m5-026",
@@ -4350,7 +4350,7 @@
       "options": [
         {
           "id": "o1",
-          "text": "restricted at once; payments continue unless CRITICAL.",
+          "text": "the merchant is suspended; new payments and cash-out stop.",
           "correct": true
         },
         {
@@ -4364,7 +4364,7 @@
           "correct": false
         }
       ],
-      "why": "A case opens."
+      "why": "A confirmed match opens a case and suspends."
     },
     {
       "id": "q-m7-112",
@@ -4812,7 +4812,7 @@
       "options": [
         {
           "id": "o1",
-          "text": "5 years after the relationship ends.",
+          "text": "5 years from the record's own date.",
           "correct": true
         },
         {
@@ -4826,7 +4826,7 @@
           "correct": false
         }
       ],
-      "why": "A setting to be confirmed."
+      "why": "The retention worker deletes by row age, not by a relationship-end date."
     },
     {
       "id": "q-m7-126",
@@ -5080,12 +5080,12 @@
       "options": [
         {
           "id": "o1",
-          "text": "HIGH_RISK.",
+          "text": "whatever the operator selected; it is not derived automatically.",
           "correct": true
         },
         {
           "id": "o2",
-          "text": "NORMAL.",
+          "text": "always HIGH_RISK.",
           "correct": false
         },
         {
@@ -5094,7 +5094,7 @@
           "correct": false
         }
       ],
-      "why": "Going live needs a signed executive risk acceptance."
+      "why": "HIGH_RISK is manual; if selected, going live needs a signed executive risk acceptance."
     },
     {
       "id": "q-m8-004",
@@ -5278,7 +5278,7 @@
           "correct": false
         }
       ],
-      "why": "No match on a money step is UNKNOWN."
+      "why": "An unmatched 2xx is SUCCEEDED; an unmatched non-2xx or no answer is UNKNOWN."
     },
     {
       "id": "q-m8-010",
@@ -6486,12 +6486,12 @@
       "options": [
         {
           "id": "o1",
-          "text": "both versions work for a time.",
+          "text": "the new credential set replaces the old one immediately; there is no overlap for a gateway credential set.",
           "correct": true
         },
         {
           "id": "o2",
-          "text": "downtime.",
+          "text": "both versions work for a time.",
           "correct": false
         },
         {
@@ -6500,7 +6500,7 @@
           "correct": false
         }
       ],
-      "why": "No payments fail while the partner switches."
+      "why": "Verify the new set at once; only merchant webhook secrets support overlap."
     },
     {
       "id": "q-m9-110",
@@ -7291,7 +7291,7 @@
           "correct": false
         }
       ],
-      "why": "Policy changes use maker-checker (`BACKUP_POLICY`), and the checker must be a different Security Admin."
+      "why": "Policy changes use maker-checker (`BACKUP_POLICY`), and the checker must be a different Security Admin or Finance user."
     },
     {
       "id": "q-m10-116",

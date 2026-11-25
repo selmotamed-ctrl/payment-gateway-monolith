@@ -93,3 +93,32 @@ Checked against the v38-v39 parallel execution plane and the inbound webhook cod
 | `b12-06`, glossary `sandbox`/`fake-rails`, `q-055`, `q-056` | Sandbox described only as the partner's environment; Fake Rails described as an internal drill service. | Our Sandbox plane and Fake Rails' role as its rail emulator are described; production refusal is stated accurately. | `project-design/parts/00-platform/05-sandbox-execution-plane.md`, `deploy/lib/configSchema.ts` |
 | `l-m5-5`, `q-m1-009` | A sandbox webhook at the live address "raises an alert". | It is rejected and cannot change a live payment. | `core-back/api/internal/checkout.ts` |
 | Merchant shell | The drawer showed `LIVE` inside `/sandbox/*`. | The route lives at `/portal/sandbox/*`, but `isSandboxPath()` only matched `/sandbox*`, so `sandboxMode` never turned on: the badge stayed `LIVE` and the Sandbox Live Mirror called Live API paths. `isSandboxPath()` now accepts both forms; the badge follows the route and mirror calls stay under `/api/v1/merchant/sandbox/...`. | `merchant-front/src/state/sandbox/index.ts`, `merchant-front/src/layouts/default.tsx`, `state/api/index.ts`, `tests/e2e/merchant/shell.spec.ts` |
+
+## Second-pass accuracy sweep (2026-11-25)
+
+A second read-only sweep covered Books 1-13 against the working tree after the first remediation commit. It found another set of claims that described the target state rather than the code. The Guide was corrected, and the code was fixed where the code was the defect:
+
+| Area | Correction |
+| :--- | :--- |
+| Join-request SLA | `INFO_REQUESTED` pauses the five-day clock and resumes with the remaining time; the SLA now starts at submission, not at draft creation. |
+| Four-eyes | Raising the risk tier to `HIGH` at decision time now forces a second reviewer; the Guide lists large ownership share and duplicate/related flags as risk-based triggers. |
+| Beneficial owners | A recorded `CONTROLLER` satisfies the ownership gate when no owner reaches the threshold; the Academy was aligned. |
+| Join rejection | A rejection now requires a reason code and a written note. |
+| Applications | Resuming after a platform pause is maker-checker; contact phone/e-mail are sensitive maker-checker fields. |
+| Merchant close | Closing revokes API tokens and token authentication rejects a non-`ACTIVE` merchant; there is no final payout after close. |
+| AML | `aml:read`/`aml:write` now open the AML screens and confidential operator cases; a confirmed match is a direct suspension, not the emergency-ratification path. |
+| AML output | There is no daily batch, no historical screening replay, no rule-precision metric, no automatic STR draft, and no generic maker withdraw for an AML case. |
+| Adjustments | Only a `FINANCE` checker may approve an adjustment; the state paths and the per-adjustment commission reversal are described from the code. |
+| Refunds and disputes | A ceiling breach refuses a refund or holds a chargeback; it does not always open a P1 case or notify the merchant. |
+| Reconciliation | `MISSING_AT_GATEWAY` opens P2/24 h and `MISSING_LOCALLY` P3/72 h. The same bytes return the existing ingest run; a changed file creates a new one. |
+| Reporting | The catalog is filtered by run authority; provisional rules are rejected before the filing adapter is called; report corrections are not linked. |
+| Gateway checks | The wizard `CREDENTIAL_CHECK` button only previews phases and does not test credentials; an unmatched 2xx on a money step is `SUCCEEDED`. |
+| Webhooks | Verification is synchronous; dedupe is permanent; an unknown reference is stored and rejected, not matched later; retention can purge old inbox rows. |
+| OTP | The resend button only refreshes the cooldown and does not send a new SMS. |
+| Cash-out | One Finance actor processes the payout; the merchant requester and the audit row are the separation. |
+| Drift | The invariant opens a P1 case; it does not stop payouts automatically. |
+| Backups | The pg-native engine owns zstd/AES-256-GCM and `pg_receivewal`; the drill UI reads the daemon's `ok` flags and shows the object-storage badge. Pruning happens during each service deploy. |
+| Security | There is no step-up re-authentication or self-service password change; a reset returns the account to `INVITED` and re-issues the invitation. Storage client certificates are provisioned but not yet enforced. |
+| Dashboard and roles | Gross Volume follows the selected currency; the Security Admin default can read credential sets and settings; the Finance default can open reconciliation and pricing; sandbox routes are visible to the roles the Guide names. |
+
+These corrections keep the Guide and the Academy consistent with each other and with the working tree.

@@ -563,3 +563,7 @@ PSP-M refunds, disputes opened/decided and cash-outs are grouped by currency and
 
 - `PeriodicScreeningWorker` continues to open the confirmed-match AML case once and suspend an active merchant. The merchant-visible `suspensionReasonCode` is now `AML` (inside the closed code set and the exact-match redaction rule); the detailed `SCREENING_CONFIRMED_MATCH` trigger stays in the AML case and the `MERCHANT_SUSPENDED` audit row.
 - Settlement sweeps now run from `BackgroundJobHandlers` only for attempts that used `GATEWAY_CLEARING` (fee accrual or payer surcharge/split). See `core.ledger` section 18.
+
+## Second-pass settlement and reconciliation corrections (2026-11-25)
+
+`postSettlementSweeps` still excludes a statement line tied to a known merchant-direct, internal or fee-at-source attempt. A **batch-net** source line with no local attempt (the gateway reports a settled batch total) is now swept again; previously the absence of an attempt skipped the whole batch and lost the clearing settlement. A test in `test/remediation-high.test.ts` covers the no-attempt batch case and the USD account selection.

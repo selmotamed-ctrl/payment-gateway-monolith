@@ -48,7 +48,7 @@
 | `core-back/test/automation/stale-unknown-attempts.test.ts` | 274 | 11 |
 | `core-back/test/automation/statement-schedule.test.ts` | 214 | 11 |
 | `core-back/test/automation/worker-health-registry.test.ts` | 237 | 12 |
-| `core-back/test/background-jobs.test.ts` | 681 | 11 |
+| `core-back/test/background-jobs.test.ts` | 684 | 11 |
 | `core-back/test/backup-admin/backup-admin-routes.test.ts` | 839 | 19 |
 | `core-back/test/backup-admin/backup-control-client.test.ts` | 369 | 7 |
 | `core-back/test/blueprint-seed.test.ts` | 720 | 30 |
@@ -60,7 +60,7 @@
 | `core-back/test/commission-tiers.test.ts` | 60 | 7 |
 | `core-back/test/compliance-input-validation.test.ts` | 244 | 15 |
 | `core-back/test/content-disposition.test.ts` | 106 | 9 |
-| `core-back/test/create-admin-plan.test.ts` | 83 | 6 |
+| `core-back/test/create-admin-plan.test.ts` | 99 | 8 |
 | `core-back/test/db-connection-config.test.ts` | 46 | 4 |
 | `core-back/test/db-wait-budgets.test.ts` | 50 | 3 |
 | `core-back/test/dev-users-plan.test.ts` | 114 | 6 |
@@ -163,7 +163,7 @@
 | `core-back/test/notifications-and-gl-accounts.test.ts` | 536 | 21 |
 | `core-back/test/objectStorageEngine.test.ts` | 806 | 32 |
 | `core-back/test/objectStorageOrphanSweepGuard.test.ts` | 24 | 3 |
-| `core-back/test/onboarding-four-eyes.test.ts` | 200 | 18 |
+| `core-back/test/onboarding-four-eyes.test.ts` | 233 | 21 |
 | `core-back/test/operator-case-catalog.test.ts` | 56 | 4 |
 | `core-back/test/operator-cases.test.ts` | 87 | 5 |
 | `core-back/test/partition-truncate-guard.test.ts` | 86 | 5 |
@@ -173,7 +173,7 @@
 | `core-back/test/phase4-onboarding-aml-disputes-recon.test.ts` | 237 | 16 |
 | `core-back/test/refund-and-aml-guards.test.ts` | 142 | 6 |
 | `core-back/test/refund-merchant-direct.test.ts` | 381 | 14 |
-| `core-back/test/refund-three-phase.test.ts` | 129 | 3 |
+| `core-back/test/refund-three-phase.test.ts` | 131 | 3 |
 | `core-back/test/regulatory-report-lifecycle.test.ts` | 252 | 6 |
 | `core-back/test/remediation-high.test.ts` | 1051 | 19 |
 | `core-back/test/report-engine-body-path.test.ts` | 17 | 8 |
@@ -440,7 +440,7 @@
 | `tests/unit/frontend-security-checkout.test.ts` | 335 | 42 |
 | `tests/unit/frontend-security-merchant.test.ts` | 167 | 17 |
 | `tests/unit/global-search.test.ts` | 208 | 10 |
-| `tests/unit/guide-content.test.ts` | 186 | 10 |
+| `tests/unit/guide-content.test.ts` | 185 | 10 |
 | `tests/unit/guide-markdown-refs.test.ts` | 70 | 6 |
 | `tests/unit/guide-search.test.ts` | 80 | 9 |
 | `tests/unit/guide-widgets.test.ts` | 221 | 25 |
@@ -457,4 +457,4 @@
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
 - Total files: **451**
-- Total literal test declarations: **4448**
+- Total literal test declarations: **4453**

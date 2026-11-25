@@ -540,6 +540,44 @@ export const resolveFourEyesForSubmission = async (
   );
 };
 
+/**
+ * Re-evaluates the four-eyes policy at decision time. A reviewer must not be able to choose a HIGH
+ * risk tier at approval and bypass the second pair of eyes that the same tier would have required
+ * at submission. The stored decision is never weakened: later reasons can only add a review.
+ */
+export const applyFourEyesForDecision = (
+  joinRequest: { fourEyesRequired: boolean; fourEyesReasons: unknown },
+  setting: FourEyesPolicySetting,
+  proposedRiskTier: string | null,
+): FourEyesDecision => {
+  const stored = Array.isArray(joinRequest.fourEyesReasons)
+    ? joinRequest.fourEyesReasons.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const reasons = [...stored];
+  if (setting.policy === "ALWAYS") reasons.push("POLICY_ALWAYS");
+  if ((proposedRiskTier ?? "").toUpperCase() === "HIGH") reasons.push("RISK_TIER_HIGH");
+  const unique = [...new Set(reasons)];
+  const required = setting.policy === "ALWAYS"
+    ? true
+    : setting.policy === "NEVER"
+      ? joinRequest.fourEyesRequired
+      : joinRequest.fourEyesRequired || unique.length > 0;
+  return { policy: setting.policy, required, reasons: unique };
+};
+
+/**
+ * Re-evaluates the four-eyes policy at decision time. A reviewer must not be able to choose a HIGH
+ * risk tier at approval and bypass the second pair of eyes that the same tier would have required
+ * at submission. The stored decision is never weakened: later reasons can only add a review.
+ */
+export const resolveFourEyesForDecision = async (
+  joinRequest: { fourEyesRequired: boolean; fourEyesReasons: unknown },
+  proposedRiskTier: string | null,
+): Promise<FourEyesDecision> => {
+  const setting = await readFourEyesSetting();
+  return applyFourEyesForDecision(joinRequest, setting, proposedRiskTier);
+};
+
 const idSchema = z.object({ id: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/) });
 
 const registerSchema = z
@@ -1637,6 +1675,11 @@ router.post("/onboarding/submit", async (request: Request, response: Response) =
     data: {
       fourEyesRequired: fourEyes.required,
       fourEyesReasons: fourEyes.reasons,
+      // The review SLA starts when the applicant submits, not when the draft was first created.
+      // A draft that took days to complete must still give the reviewer the full window.
+      ...(joinRequest.status === "DRAFT"
+        ? { slaDueAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000), slaPausedAt: null, slaRemainingSeconds: null }
+        : {}),
     },
   });
 

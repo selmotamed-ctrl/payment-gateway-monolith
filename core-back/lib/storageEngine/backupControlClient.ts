@@ -57,6 +57,7 @@ export interface DrillReport {
     doubleEntry: DrillCheck;
     balanceParity: DrillCheck;
     auditChain: DrillCheck;
+    objectStorage?: DrillCheck;
   };
   errorMessage?: string;
   reportSignature?: string;

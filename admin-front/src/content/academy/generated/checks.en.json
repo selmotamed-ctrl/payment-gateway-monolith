@@ -2379,11 +2379,11 @@
     "refs": [
       "b06-08"
     ],
-    "stem": "No status rule matches on a money step. Result?",
+    "stem": "No status rule matches a 2xx response on a money step. Result?",
     "options": [
       {
         "id": "o1",
-        "text": "UNKNOWN.",
+        "text": "SUCCEEDED.",
         "correct": true
       },
       {
@@ -2393,11 +2393,11 @@
       },
       {
         "id": "o3",
-        "text": "SUCCEEDED.",
+        "text": "UNKNOWN.",
         "correct": false
       }
     ],
-    "why": "When we do not understand we do not guess."
+    "why": "On a money step, an unmatched 2xx is SUCCEEDED; an unmatched non-2xx is UNKNOWN."
   },
   {
     "id": "c-l-m8-4-1",

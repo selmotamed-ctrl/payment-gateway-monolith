@@ -179,7 +179,7 @@
       "b08-06",
       "b10-05"
     ],
-    "body": "### What to do\nCheck the file, source and time zone. `MISSING_AT_GATEWAY` is the most serious. Never edit the file."
+    "body": "### What to do\nCheck the file, source and time zone. `MISSING_AT_GATEWAY` opens a P2 case with a 24-hour SLA; `MISSING_LOCALLY` opens a P3 case. Never edit the file."
   },
   {
     "id": "s-ledger-drift",
@@ -245,7 +245,7 @@
     "articles": [
       "b08-13"
     ],
-    "body": "### What to do\nIf it would breach the ceiling, it does not post; a P1 case opens. Finance chooses to collect, net or suspend."
+    "body": "### What to do\nIf it would breach the ceiling, a refund is refused; a chargeback opens a P1 `HELD` case. Finance chooses to collect, net or suspend."
   },
   {
     "id": "s-merchant-restricted",
@@ -296,7 +296,7 @@
       "b09-06",
       "b04-04"
     ],
-    "body": "### What to do\nA different Compliance user or the MLRO reviews within 24 hours. If nobody does, a P2 alert fires and the suspension stays in force."
+    "body": "### What to do\nA different Compliance user or the MLRO reviews within 24 hours. If nobody does, a P1 operator case and an SLA-breach notice go to the MLRO/compliance queue and the suspension stays in force."
   },
   {
     "id": "s-join-duplicate",

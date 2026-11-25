@@ -517,3 +517,12 @@ The Reporting Studio now covers the full authoring and filing lane in addition t
 - **Cash-out AML stop.** `executeCashout` refuses with `409 CASHOUT_AML_HOLD` while a merchant AML case is `OPEN`, `IN_REVIEW`, `PENDING_CHECKER`, `FROZEN` or `ESCALATED_STR`.
 - **AML case reads.** `GET /aml/cases/:id` writes an `AML_CASE_VIEWED` audit row.
 - **Default roles.** `COMPLIANCE` now has merchant/KYB read-write, `OPERATOR` has merchant/KYB read and KYB write, and `MLRO` has merchant/KYB read, matching the documented onboarding workflows.
+
+## Second-pass accuracy remediation (2026-11-25)
+
+- **Four-eyes at decision time.** `resolveFourEyesForDecision` re-applies the stored reasons and adds `RISK_TIER_HIGH` when the reviewer selects `HIGH`; a stored requirement is never weakened. This closes the approval-time tier bypass.
+- **Ownership gate.** `computeJoinRequestReadiness` and `kybReview` accept a recorded `CONTROLLER` in place of the percentage total, matching the documented fallback.
+- **Join rejection.** A rejected join request now needs a reason code and a written note.
+- **Adjustment checker.** The approve route enforces `adjustmentApprovalCheckerAllowed` (role `FINANCE`) before it claims the approval and queues `ADJUSTMENT_EXECUTION`, matching the `DOMAIN_CHECKER_ROLES` map. Rejection already enforced the same domain.
+- **Merchant closure.** Closing a merchant revokes its active access tokens in the same transaction, and token authentication rejects a merchant that is not `ACTIVE`.
+- **Filing order.** The provisional-rule, submitter and output checks run before the external filing adapter is called, not after.

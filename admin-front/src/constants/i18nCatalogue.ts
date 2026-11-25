@@ -1565,6 +1565,7 @@ export const appCatalogue: Record<string, [string, string]> = {
     "Replayed LSN": ["Replayed LSN", "LSN المُعاد تشغيله"],
     "Journal lines": ["Journal lines", "أسطر اليومية"],
     "Double-entry zero drift": ["Double-entry zero drift", "انعدام انحراف القيد المزدوج"],
+    "Object storage parity": ["Object storage parity", "تطابق التخزين الكائني"],
     "Sharded balance parity": ["Sharded balance parity", "تطابق أرصدة الحسابات المجزأة"],
     "Audit hash chain": ["Audit hash chain", "سلسلة تجزئة التدقيق"],
     "Scheduled backups": ["Scheduled backups", "النسخ الاحتياطية المجدولة"],

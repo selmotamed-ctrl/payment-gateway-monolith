@@ -896,6 +896,13 @@ const executeMerchantLifecycle = async (
     where: { id: input.merchantId },
     data,
   });
+  if (kind === "CLOSE") {
+    // Closing ends the merchant's API access in the same transaction as the status change.
+    await modelOf(tx, "accessToken").updateMany({
+      where: { merchantId: input.merchantId, revokedAt: null },
+      data: { revokedAt: now },
+    });
+  }
   const detailLogs = modelOf(tx, "detailChangeLog");
   const auditAction = kind === "REINSTATE"
     ? "MERCHANT_REINSTATED"

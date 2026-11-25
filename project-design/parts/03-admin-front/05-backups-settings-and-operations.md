@@ -327,3 +327,7 @@ Backups page: actions are disabled unless backups are configured and the daemon 
 ## Safeguard checklists (2026-11-23)
 
 Backup trigger, restore drill and policy changes now require the shared checklist before submission. Trigger keys: `BACKUP_TARGET_VERIFIED`, `LOAD_IMPACT_REVIEWED`, `AUTHORITY_CONFIRMED`; drill keys: `DRILL_SCOPE_VERIFIED`, `SCRATCH_ISOLATION_REVIEWED`, `AUTHORITY_CONFIRMED`; policy keys: `POLICY_SCOPE_REVIEWED`, `RETENTION_IMPACT_REVIEWED`, `APPROVAL_PATH_CONFIRMED`. The drill is now a checklist modal instead of an immediate confirm. Core filters the keys and records them in `BACKUP_TRIGGERED` / `BACKUP_DRILL_TRIGGERED` (including deduplicated retries) and the policy approval payload. Jobs/Outbox retries, notification retries, object-storage legal holds/maintenance, notification-template edits and settings/checkout-help exports use the same pattern. `ADMIN_SHOW_CHECKLISTS` hides the UI gate without changing the server path.
+
+## Second-pass restore-drill rendering (2026-11-25)
+
+The Backups page now reads the daemon's camelCase check objects (`doubleEntry`, `balanceParity`, `auditChain`, `objectStorage`) and their `ok` boolean before falling back to counters. A failed check with a successful query counter can no longer render as **Passed**. The object-storage parity check is shown as a fourth badge when the daemon includes it; the core DTO exposes `checks.objectStorage` as optional.

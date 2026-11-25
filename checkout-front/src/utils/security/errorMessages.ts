@@ -13,6 +13,7 @@ const CODE_TO_KEY: Record<string, string> = {
     ATTEMPT_EXPIRED: "Payment Attempt Expired",
     APP_SUSPENDED: "Payment Temporarily Unavailable",
     PLATFORM_SUSPENDED: "Payment Temporarily Unavailable",
+    PAYMENT_LINK_SLOT_UNAVAILABLE: "Payment In Progress",
 };
 
 export const DEFAULT_ERROR_KEY = "Something went wrong";

@@ -590,6 +590,7 @@ export const appCatalogue: Record<string, [string, string]> = {
     "Invalid Payment Details": ["Please check the payment details and try again.", "يرجى التحقق من بيانات الدفع والمحاولة مرة أخرى."],
     "Payment Attempt Expired": ["This payment attempt has expired.", "انتهت صلاحية محاولة الدفع هذه."],
     "Payment Temporarily Unavailable": ["Payment is temporarily unavailable.", "الدفع غير متاح مؤقتًا."],
+    "Payment In Progress": ["Another payment is already in progress for this link.", "هناك عملية دفع أخرى قيد التنفيذ لهذا الرابط."],
     "Certificate verification": ["Certificate verification", "التحقق من الشهادة"],
     "The certificate link is incomplete": ["The certificate link is incomplete", "رابط الشهادة غير مكتمل"],
     "The certificate could not be verified": ["The certificate could not be verified", "تعذر التحقق من الشهادة"],

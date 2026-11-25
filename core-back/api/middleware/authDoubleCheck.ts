@@ -126,6 +126,19 @@ const resolveApiTokenPrincipal = async (token: string, request: Request): Promis
   if (record.expiresAt && record.expiresAt.getTime() <= Date.now()) {
     throw new ApiError(401, "ACCESS_TOKEN_EXPIRED", "The supplied access token has expired");
   }
+  if (record.merchantId) {
+    // A suspended or closed merchant must not keep reading or writing through an API token.
+    const merchant = await client.merchant.findUnique({
+      where: { id: record.merchantId },
+      select: { status: true },
+    });
+    if (!merchant) {
+      throw new ApiError(401, "ACCESS_TOKEN_INVALID", "The token's merchant no longer exists");
+    }
+    if (merchant.status !== "ACTIVE") {
+      throw new ApiError(403, "MERCHANT_NOT_ACTIVE", "The merchant is not active", { status: merchant.status });
+    }
+  }
   await client.accessToken.update({
     where: { id: record.id },
     data: { lastUsedAt: new Date() },

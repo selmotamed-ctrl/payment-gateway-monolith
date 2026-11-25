@@ -82,7 +82,7 @@ The canonical content is `design/07-guides-and-academy/guide_system_design_and_c
 | `books.json` | 14 books |
 | `articles.en.json` | 137 articles with headings, plain text, roles, UI status and related ids |
 | `glossary.en.json` | 154 terms with aliases, Arabic term and related slugs |
-| `cards.en.json` | 26 cards and 115 required checklist items |
+| `cards.en.json` | 25 cards and 111 required checklist items |
 | `playbook.en.json` | 32 situations with screens, cases and articles |
 | `paths.json` | 8 reading paths (`ALL` plus seven staff roles) |
 | `faq.en.json` | 60 quick answers |
@@ -314,7 +314,7 @@ screen: legal holds, KEK rotation and maintenance jobs", plus card
 `sg-place-legal-hold`, terms `object-storage-vault`/`storage-object-lock`/
 `legal-hold`, FAQ `q-059`/`q-060` and context-map screen `SystemObjectStorage`.
 Academy module 10 adds lesson `l-m10-5`, checks `c-l-m10-5-1/2` and exam
-question `q-m10-118`. Counts are 137 articles, 154 terms, 26 cards, 51
+question `q-m10-118`. Counts are 137 articles, 154 terms, 25 cards, 51
 lessons, 102 checks and 224 exam-pool questions. Generated Guide/Academy and
 Companion snapshots were regenerated.
 
@@ -326,7 +326,7 @@ the effective/computed/override split. `b10-02` (RB-01) and the Dashboard
 screen article (`b03-05`) describe the Routes health drawer, forced/conflict
 counts, probe action and the maker-checker force-HEALTHY path. Academy
 `l-m8-1`, `l-m8-5` and `l-m9-1` were updated with the same facts. Counts and
-exam structure are unchanged (137 articles, 154 terms, 26 cards, 51 lessons,
+exam structure are unchanged (137 articles, 154 terms, 25 cards, 51 lessons,
 224 pool questions); the generated Guide/Academy and Companion snapshot were
 regenerated.
 
@@ -346,9 +346,23 @@ regenerated.
 
 ## Full Guide/Academy accuracy audit (2026-11-25)
 
-Fourteen read-only domain scans covered all 137 Guide articles, 154 terms, 60 quick answers, 32 situations, 26 safeguard cards, the 31-screen context map, 51 Academy lessons, 102 lesson checks, 224 exam-pool questions and 16 labs. The deduplicated register is `design/07-guides-and-academy/accuracy-audit-2026-11-25.md`.
+Fourteen read-only domain scans covered all 137 Guide articles, 154 terms, 60 quick answers, 32 situations, 25 safeguard cards, the 31-screen context map, 51 Academy lessons, 102 lesson checks, 224 exam-pool questions and 16 labs. The deduplicated register is `design/07-guides-and-academy/accuracy-audit-2026-11-25.md`.
 
-- **Content corrections.** Counts, menu/screen lists, statuses, timings, action labels and workflow prose were corrected to the working tree: 119 models, 10 menu sections, 5 reporting screens, 31 context screens, 4 report types, 17 ledger scenarios, 14 deploy steps, 21 named networks, 7 runtime phases, 4 backup-drill checks, approval expiry, flat join SLA, 4/24/72/120-hour AML SLAs, emergency auto-lift, permanent inbound dedupe, 64 KiB unverified bodies, dashboard tiles, shard widths and error codes. The Guide no longer claims unsupported maker-checker, cash-out, AML-monitoring, canary, OIDC, webhook-replay, step-up-auth, password-change, retention or POS-token behavior; where a feature is intended but missing, the text says so.
+- **Content corrections.** Counts, menu/screen lists, statuses, timings, action labels and workflow prose were corrected to the working tree: 119 models, 10 menu sections, 5 reporting screens, 31 context screens, 4 report types, 17 ledger scenarios, 14 deploy steps, 21 named networks, 7 runtime phases, 4 backup-drill checks, approval expiry, pausing join-request SLA, 4/24/72/120-hour AML SLAs, emergency auto-lift, permanent inbound dedupe, 64 KiB unverified bodies, dashboard tiles, shard widths and error codes. The Guide no longer claims unsupported maker-checker, cash-out, AML-monitoring, canary, OIDC, webhook-replay, step-up-auth, password-change, retention or POS-token behavior; where a feature is intended but missing, the text says so.
 - **Academy corrections.** Wrong keys were fixed (`q-m0-002`, the 60/40 four-eyes example, masked-token visibility, approval expiry, check recording, report types, SLA hours, stored shard balances, cash-out/reserve behavior, breaker classes), counts were aligned to 51/102/224/16/92, and role examples now name the authority a task needs rather than a default role that lacks it. The Academy still carries open product-decision notes in `academy_content_questions.md`.
 - **Code changes made in the same pass.** See the 2026-11-25 rows in `TRACKER.md` and the affected core/edge/merchant parts. The highest-risk fixes are AML `TRUE_MATCH` case/suspension, neutral screening reasons, AML approval-context confidentiality, provisional-report gate, object-GC lock/retention, refund/chargeback ceilings, settlement-fee eligibility, OTP render fields, read-only inquiry, link/application/wallet enforcement, merchant profile protection and withdraw, default role authorities, dashboard Webhook Inbox Lag, adjustments deep link, Jobs `REFUND_INQUIRY` filter, empty-journal tile and backup alert fallback.
 - **Verification.** Guide/Academy extractors, Companion snapshot, content/clarity gates, typechecks, targeted DB-free suites, front builds and Playwright are run after regeneration; the DB-backed full core suite and live deployment remain environment-dependent.
+
+## Second-pass accuracy sweep (2026-11-25)
+
+A second read-only sweep of all Guide books and Academy modules found residual target-state claims after the first remediation commit. The Guide/Academy now state:
+
+- the join-request clock pauses on `INFO_REQUESTED` and starts at submission;
+- a `HIGH` tier chosen at decision time re-runs four eyes; a `CONTROLLER` satisfies the ownership gate;
+- only a `FINANCE` checker approves an adjustment; a legal-name/payout/category change screens on the next periodic cycle, not immediately;
+- one `cashout:review` actor processes a payout, drift opens a P1 case but does not stop payouts, and a confirmed screening match is a direct suspension rather than the emergency-ratification path;
+- the report catalog is authority-filtered, provisional rules are rejected before filing, report corrections are not linked, and a correction is a new report;
+- OTP resend only refreshes the cooldown; unmatched 2xx is `SUCCEEDED`; the wizard `CREDENTIAL_CHECK` only previews phases; an unknown-reference webhook is rejected and not matched later;
+- the dashboard Gross Volume follows the selected currency; the restore-drill UI reads the daemon `ok` flags and shows object storage; the sandbox mirror is a full sandbox-data copy, not read-only;
+- Security Admin defaults can read credential sets and settings; Finance defaults can open reconciliation and pricing; sandbox routes are visible to Gateway/Security roles;
+- no step-up re-authentication, self-service password change, storage client-certificate enforcement or gateway-credential overlap is claimed. Counts remain 137 articles, 154 terms, 25 cards, 60 FAQ, 51 lessons, 102 checks, 224 exam-pool questions, 16 labs and 92 lab tasks.

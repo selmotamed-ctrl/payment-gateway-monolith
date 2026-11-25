@@ -115,7 +115,7 @@ router.use("/gateways", gatewayGuard, gatewaysRouter);
 router.use("/gateway-versions", gatewayGuard, gatewayVersionsRouter);
 router.use(
   "/credential-sets",
-  guard({ read: ["credential:read", "gateway:read"], write: ["credential:write", "gateway:write"] }),
+  guard({ read: ["credential:read", "credential:write", "gateway:read", "gateway:write"], write: ["credential:write", "gateway:write"] }),
   credentialSetsRouter,
 );
 router.use("/rails", gatewayGuard, railsRouter);

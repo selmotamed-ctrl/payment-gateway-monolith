@@ -78,6 +78,7 @@ import {
 } from "../../lib/joinRequestOnboarding";
 import {
   assertUploadSignature,
+  resolveFourEyesForDecision,
   resolveFourEyesForSubmission,
   runOnboardingScreening,
 } from "./merchant";
@@ -533,18 +534,10 @@ export const createRegulatoryReportViaApproval = async (
   });
 };
 
-export const submitRegulatoryReport = async (
+export const validateRegulatoryReportForSubmission = async (
   db: typeof client,
-  input: {
-    reportId: string;
-    submissionRef: string;
-    submittedAt?: Date | null;
-    filingChannel?: string | null;
-    recordManual?: boolean;
-    actorUserId: string;
-    actorRole: string | null;
-  },
-): Promise<{ id: string; status: string; submissionRef: string | null; submittedAt: Date | null }> => {
+  input: { reportId: string; actorUserId: string },
+) => {
   const report = await db.regulatoryReport.findUnique({
     where: { id: input.reportId },
     include: { outputs: { where: { supersededAt: null }, include: { schema: true } } },
@@ -638,6 +631,25 @@ export const submitRegulatoryReport = async (
     );
   }
 
+  return { report, ruleId };
+};
+
+export const submitRegulatoryReport = async (
+  db: typeof client,
+  input: {
+    reportId: string;
+    submissionRef: string;
+    submittedAt?: Date | null;
+    filingChannel?: string | null;
+    recordManual?: boolean;
+    actorUserId: string;
+    actorRole: string | null;
+  },
+): Promise<{ id: string; status: string; submissionRef: string | null; submittedAt: Date | null }> => {
+  const { report, ruleId } = await validateRegulatoryReportForSubmission(db, {
+    reportId: input.reportId,
+    actorUserId: input.actorUserId,
+  });
   const submittedAt = input.submittedAt ?? new Date();
   return db.$transaction(async (tx) => {
     const current = await tx.regulatoryReport.findUnique({ where: { id: report.id } });
@@ -1229,7 +1241,7 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
       _sum: { totalChargedAmount: true },
     }),
     client.paymentAttempt.aggregate({
-      where: { createdAt: { gte: since }, status: "SUCCEEDED", currency: "LYD" },
+      where: { createdAt: { gte: since }, status: "SUCCEEDED", currency: requestedCurrency },
       _count: { _all: true },
       _sum: { totalChargedAmount: true },
     }),
@@ -3660,6 +3672,13 @@ router.post("/join-requests/:id/decide", async (request: Request, response: Resp
       .strict(),
     request.body,
   );
+  if (body.decision === "REJECTED" && (!body.reasonCode || !body.notes?.trim())) {
+    throw new ApiError(
+      400,
+      "JOIN_REQUEST_REJECTION_REASON_REQUIRED",
+      "A rejection needs a reason code and a written note",
+    );
+  }
   const actor = actorFromRequest(request);
   const joinRequest = await client.joinRequest.findUnique({ where: { id } });
   if (!joinRequest) {
@@ -3720,12 +3739,18 @@ router.post("/join-requests/:id/decide", async (request: Request, response: Resp
       );
     }
   }
-  if (joinRequest.fourEyesRequired) {
+  const fourEyesDecision = body.decision === "APPROVED"
+    ? await resolveFourEyesForDecision(joinRequest, body.proposedRiskTier ?? null)
+    : { required: joinRequest.fourEyesRequired, reasons: [] as string[] };
+  if (fourEyesDecision.required) {
     const approval = await client.approvalRequest.create({
       data: {
         subjectType: "JOIN_REQUEST",
         subjectId: joinRequest.id,
-        payloadDiffJson: body as Prisma.InputJsonValue,
+        payloadDiffJson: {
+          ...body,
+          fourEyesReasons: fourEyesDecision.reasons,
+        } as Prisma.InputJsonValue,
         mode: "STANDARD",
         makerUserId: actor.userId,
         state: "PENDING_REVIEW",
@@ -4765,6 +4790,8 @@ const merchantApprovalKind = (payload: unknown): string => {
   return "EDIT";
 };
 
+const adjustmentApprovalCheckerAllowed = (role: string | null): boolean => role === "FINANCE";
+
 const merchantApprovalCheckerAllowed = (
   role: string | null,
   payload: unknown,
@@ -4812,6 +4839,9 @@ const approvalCheckBlockReason = async (
   }
   if (subjectType === "MERCHANT" && !merchantApprovalCheckerAllowed(actor.role, approval.payloadDiffJson)) {
     return "MERCHANT_CHECKER_DOMAIN_FORBIDDEN";
+  }
+  if (subjectType === "ADJUSTMENT" && !adjustmentApprovalCheckerAllowed(actor.role)) {
+    return "ADJUSTMENT_CHECKER_DOMAIN_FORBIDDEN";
   }
   if (subjectType === "ROUTE_HEALTH_OVERRIDE" && !(actor.authorities ?? []).includes("gateway:write")) {
     return "ROUTE_HEALTH_CHECKER_AUTHORITY_REQUIRED";
@@ -7089,6 +7119,13 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
       403,
       "MERCHANT_CHECKER_DOMAIN_FORBIDDEN",
       "The principal's role cannot check this merchant change",
+    );
+  }
+  if (subjectType === "ADJUSTMENT" && !adjustmentApprovalCheckerAllowed(actor.role ?? null)) {
+    throw new ApiError(
+      403,
+      "ADJUSTMENT_CHECKER_DOMAIN_FORBIDDEN",
+      "An adjustment may only be checked by a finance user",
     );
   }
   if (subjectType === "BACKUP_POLICY") {
@@ -11493,8 +11530,11 @@ const scheduleOperatorCaseInquiry = async (
 
 const operatorCaseVisibilityWhere = (request: Request, where: Record<string, unknown>): Record<string, unknown> => {
   const principal = principalOf(request);
-  const canReadAml = principal.authorities.some((authority) => authority === "*" || authority === "aml.read_confidential")
-    || ["COMPLIANCE", "MLRO"].includes(String(principal.role ?? ""));
+  const canReadAml = hasConfidentialAmlAccess({
+    id: principal.userId ?? principal.tokenId ?? "system",
+    role: principal.role ?? "",
+    authorities: principal.authorities,
+  });
   return canReadAml ? where : { AND: [where, { confidentiality: { not: "AML" } }] };
 };
 
@@ -12044,8 +12084,11 @@ router.get("/operator-cases/:id", async (request: Request, response: Response) =
   }
   if (operatorCase.confidentiality === "AML") {
     const principal = principalOf(request);
-    const canReadAml = principal.authorities.some((authority) => authority === "*" || authority === "aml.read_confidential")
-      || ["COMPLIANCE", "MLRO"].includes(String(principal.role ?? ""));
+  const canReadAml = hasConfidentialAmlAccess({
+    id: principal.userId ?? principal.tokenId ?? "system",
+    role: principal.role ?? "",
+    authorities: principal.authorities,
+  });
     if (!canReadAml) {
       throw new ApiError(403, "CASE_CONFIDENTIAL", "This case contains AML-confidential information");
     }
@@ -13658,7 +13701,7 @@ const credentialSetView = (credentialSet: {
 });
 
 router.get("/credential-sets", async (request: Request, response: Response) => {
-  requireAuthorities(request, ["credential:read", "gateway:read"]);
+  requireAuthorities(request, ["credential:read", "credential:write", "gateway:read", "gateway:write"]);
   const built = buildListQuery(request.query, {
     search: ["externalMerchantId", "gateway.code"],
     in: { status: "status" }, equals: {gatewayCode: "gateway.code", env: "env", ownerType: "ownerType",},
@@ -13693,7 +13736,7 @@ router.get("/credential-sets", async (request: Request, response: Response) => {
 });
 
 router.get("/credential-sets/:id", async (request: Request, response: Response) => {
-  requireAuthorities(request, ["credential:read", "gateway:read"]);
+  requireAuthorities(request, ["credential:read", "credential:write", "gateway:read", "gateway:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
   const credentialSet = await client.credentialSet.findUnique({
     where: { id },
@@ -20680,6 +20723,12 @@ router.post("/aml/reports/:id/file", async (request: Request, response: Response
     if (!output.schema || output.schema.status !== "CONFIRMED") throw new ApiError(409, "REPORT_OUTPUT_NOT_READY", `The ${format} schema is not CONFIRMED`, { format, reason: "SCHEMA_NOT_CONFIRMED" });
     if (output.payloadSha256 && output.payloadSha256 !== report.payloadSha256) throw new ApiError(409, "REPORT_OUTPUT_NOT_READY", `The ${format} output is stale`, { format, reason: "OUTPUT_STALE" });
   }
+  // The provisional-rule gate, submitter check and output readiness must run before the adapter is
+  // dispatched. A report whose rule is PROVISIONAL must never reach the authority and then fail locally.
+  await validateRegulatoryReportForSubmission(client, {
+    reportId: report.id,
+    actorUserId: actorFromRequest(request).userId,
+  });
   const artifacts: FilingArtifact[] = [];
   const filingActor = actorFromRequest(request);
   for (const output of report.outputs) {

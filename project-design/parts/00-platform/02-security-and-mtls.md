@@ -491,3 +491,10 @@ Done on top of `7cc40cf` (the remediation described above), after re-reading the
 ## Admin MFA resend (2026-11-23)
 
 `POST /internal/admin/auth/mfa/resend` (admin edge `POST /api/v1/admin/auth/mfa/resend`) accepts only an opaque `challengeId` UUID. It requires a live, unconsumed, unexpired `ADMIN` challenge whose user is `ACTIVE`, `mfaRequired`, back-office, and issues a fresh challenge under a per-user row lock. The old challenge is superseded and its queued `LOGIN_MFA` notification is set to `SUPPRESSED`, so a late SMS cannot deliver the old code after the new one. Issuance keeps the existing 5-per-15-minute window, 5-minute TTL and 5-attempt/15-minute lock. Core writes `ADMIN_MFA_CHALLENGE_RESENT` with the old/new challenge IDs and request IP (never the code or phone). Invalid/consumed/expired challenges are counted by the shared MFA IP throttle. The client shows a 30-second resend cooldown and restarts it on failure.
+
+## Second-pass access-control corrections (2026-11-25)
+
+- **API-token status gate.** `resolveApiTokenPrincipal` now loads the token's merchant and refuses a merchant that is not `ACTIVE` with `403 MERCHANT_NOT_ACTIVE`. A suspended or closed merchant's existing token can no longer read or write.
+- **Closure revocation.** `executeMerchantLifecycle` revokes every unrevoked `access_token` row for the merchant inside the close transaction.
+- **AML authority vocabulary.** Confidential AML access accepts `COMPLIANCE`/`MLRO` or `aml:read`/`aml:write`; the AML operator-case visibility check now uses the same helper instead of a separate `aml.read_confidential` test. The admin route table accepts the raw and projected names.
+- **Default roles.** `SECURITY_ADMIN` now seeds `credential:read`, `settings:read` and `settings:write`; `FINANCE` seeds `reconciliation:read/write` and `velocity:read/write`. Credential-set reads also accept the write authorities for existing users.

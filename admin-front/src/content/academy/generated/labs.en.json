@@ -1023,7 +1023,7 @@
             "id": "b",
             "label": "Note the finding, review the related records, require a second reviewer and escalate to Compliance",
             "correct": true,
-            "feedback": "Correct. The duplicate flag adds review and raises the proposed tier."
+            "feedback": "Correct. The duplicate flag adds review and shows the related records; the reviewer decides the risk tier."
           },
           {
             "id": "c",

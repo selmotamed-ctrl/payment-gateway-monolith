@@ -285,7 +285,10 @@ export const computeJoinRequestReadiness = async (
     )
     .map((doc) => doc.id);
   const ownersTotal = activeOwners.reduce((sum, owner) => sum + Number(owner.ownershipPercent ?? 0), 0);
-  const ownersReady = activeOwners.length > 0 && ownersTotal >= ownerThreshold;
+  // A recorded CONTROLLER covers the case where no owner reaches the share threshold. The
+  // controller still has to be a real, screened person; the sum is not required when one exists.
+  const hasController = activeOwners.some((owner) => String(owner.role) === "CONTROLLER");
+  const ownersReady = activeOwners.length > 0 && (hasController || ownersTotal >= ownerThreshold);
   const ownersScreened = activeOwners.every(
     (owner) => ["CLEAR", "POTENTIAL_MATCH"].includes(String(owner.screeningStatus))
       && owner.screeningStatus !== "NOT_SCREENED",

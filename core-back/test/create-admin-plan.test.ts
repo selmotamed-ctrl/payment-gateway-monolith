@@ -80,3 +80,19 @@ describe("create-admin bootstrap", () => {
     expect(data.authoritiesMap).toContain("settings:write");
   });
 });
+
+
+describe("default role authorities", () => {
+  test("the Security Admin can read credential sets and manage platform settings", () => {
+    expect(ROLE_AUTHORITIES.SECURITY_ADMIN).toContain("credential:read");
+    expect(ROLE_AUTHORITIES.SECURITY_ADMIN).toContain("settings:read");
+    expect(ROLE_AUTHORITIES.SECURITY_ADMIN).toContain("settings:write");
+  });
+
+  test("the Finance role can open reconciliation and pricing without an extra grant", () => {
+    expect(ROLE_AUTHORITIES.FINANCE).toContain("reconciliation:read");
+    expect(ROLE_AUTHORITIES.FINANCE).toContain("reconciliation:write");
+    expect(ROLE_AUTHORITIES.FINANCE).toContain("velocity:read");
+    expect(ROLE_AUTHORITIES.FINANCE).toContain("velocity:write");
+  });
+});

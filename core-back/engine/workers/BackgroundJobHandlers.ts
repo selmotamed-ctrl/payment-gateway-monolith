@@ -189,7 +189,12 @@ const postSettlementSweeps = async (
     if (item.result === "DUPLICATE") {
       continue;
     }
-    if (!item.attemptId || sweepable.get(item.attemptId) !== true) {
+    // A batch-net statement line may carry no local attempt (the gateway reports a
+    // settled batch total). It is still a real clearing settlement. Only a line
+    // tied to a known non-clearing attempt (merchant-direct, internal or
+    // fee-at-source) is skipped.
+    const itemSweepable = item.attemptId ? sweepable.get(item.attemptId) === true : batchSource;
+    if (!itemSweepable) {
       continue;
     }
     const gross = decimal(item.statementAmount as never);

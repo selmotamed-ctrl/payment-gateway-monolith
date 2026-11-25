@@ -467,6 +467,9 @@ describe("the dispute and the adjustment execution", () => {
         amount: new Decimal(1000),
       },
     });
+    // The reserve and refund tests exercise the money movement, not the ceiling.
+    // Give the fixture room so the ceiling guard does not refuse the posting.
+    fakeTable("merchant")[0]!.negativeBalanceCeiling = new Decimal(1000);
   };
 
   const worker = (client: FakePrisma): BackgroundJobWorker =>

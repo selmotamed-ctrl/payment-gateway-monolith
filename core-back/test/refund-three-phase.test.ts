@@ -10,6 +10,8 @@ const refundEntries = (adjustmentId: string) =>
 describe("F-C: three-phase refund execution", () => {
   test("an approved refund never holds the attempt lock across the gateway call and posts once", async () => {
     const { client, context } = createGovernanceFixture();
+    // This test is about lock ordering, not the ceiling: allow the refund.
+    fakeTable("merchant")[0]!.negativeBalanceCeiling = new Decimal(1000);
     client.adjustment.create({
       data: {
         id: "refund-1",

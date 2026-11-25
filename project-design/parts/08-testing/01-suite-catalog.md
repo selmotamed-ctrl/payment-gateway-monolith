@@ -624,3 +624,14 @@ The full core suite runs against PostgreSQL 18 + Redis (25,316 tests, 0 failures
 - Existing targeted suites re-run for the changed paths: `governance-execution`, `approval-queue`, `onboarding-four-eyes`, `phase4-onboarding-aml-disputes-recon`, `reconciliation-follow-up`, `spec-validator`, `engine/step-executor`, `callback-inbound-handler`, `security-regressions/h8-webhook`, `refund-and-aml-guards`, `backup-admin`, `objectStorageOrphanSweepGuard`, `objectStorage`.
 - `merchant-back/test/core-forwarding.test.ts` covers the new `/onboarding/join-request/withdraw` forwarding.
 - The Guide/Academy extractor drift tests must be re-run after the content regeneration; live DB/Playwright runs remain environment-dependent.
+
+## Second-pass accuracy remediation (2026-11-25)
+
+New or extended DB-free suites:
+
+- `core-back/test/onboarding-four-eyes.test.ts` — approval-time four-eyes (`HIGH` at decision time adds a reviewer; a stored requirement is never weakened; `NEVER` stays single-reviewer).
+- `core-back/test/create-admin-plan.test.ts` — Security Admin `credential:read`/`settings:*` and Finance `reconciliation:*`/`velocity:*` defaults.
+- `core-back/test/remediation-high.test.ts` — a batch-net statement line with no local attempt still posts its clearing sweep; USD accounts stay in USD.
+- `core-back/test/background-jobs.test.ts`, `core-back/test/refund-three-phase.test.ts` — fixtures now give the merchant ceiling headroom so the tests exercise the reserve/refund path rather than the ceiling guard.
+
+The final core run was 20,265 pass / 5,066 skip / 4 fail; the 4 failures are the known audit-chain/vault environment tests that need PostgreSQL and `KMS_MASTER_KEY`. Admin-back 835, merchant-back 157, checkout-back 275, deploy 685, backup-daemon 238, object-storage-daemon 16, fake-rails-back 113, root Vitest 534, admin-front 48, merchant-front 23, companion 27; all front builds pass.

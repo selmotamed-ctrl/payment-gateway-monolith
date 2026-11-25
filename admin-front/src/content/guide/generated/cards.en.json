@@ -35,7 +35,7 @@
     "screen": "Adjustments",
     "risk": "HIGH",
     "irreversible": true,
-    "body": "**What this does**\nYou are proposing a money movement: a refund, a chargeback, a manual credit or debit, or a correction. A different Finance user must approve it.\n\n**Check first**\n- [ ] I found the original payment by its **reference**.\n- [ ] The amount does not exceed the original payment, and the currency is the same.\n- [ ] I chose the correct type and the correct account.\n- [ ] I decided deliberately whether the commission is reversed.\n- [ ] I checked whether a dispute already covers this payment, so money is not returned twice.\n- [ ] My reason says what I checked, what I found and why ([[a:b04-06|Writing a reason that survives an audit]]).\n\n**Never**\n- Never propose from a screenshot, phone call or chat alone.\n- Never split one adjustment into several to avoid review.\n\n**If you made a mistake**\nIf it is still pending, reject or withdraw it through the flow that supports it. If it was executed, propose an offsetting adjustment with a written reason; there is no **Reverse** button (the **Reverse commission** field only reverses commission). Never edit an executed adjustment.",
+    "body": "**What this does**\nYou are proposing a money movement: a refund, a chargeback, a manual credit or debit, or a correction. A different Finance user must approve it.\n\n**Check first**\n- [ ] I found the original payment by its **reference**.\n- [ ] The amount does not exceed the original payment, and the currency is the same.\n- [ ] I chose the correct type and the correct account.\n- [ ] I decided deliberately whether the commission is reversed.\n- [ ] I checked whether a dispute already covers this payment, so money is not returned twice.\n- [ ] My reason says what I checked, what I found and why ([[a:b04-06|Writing a reason that survives an audit]]).\n\n**Never**\n- Never propose from a screenshot, phone call or chat alone.\n- Never split one adjustment into several to avoid review.\n\n**If you made a mistake**\nIf it is still pending, ask a Finance checker to reject it; there is no maker withdraw for an adjustment. If it was executed, propose an offsetting adjustment with a written reason; there is no **Reverse** button (the **Reverse commission** field only reverses commission). Never edit an executed adjustment.",
     "checklist": [
       "I found the original payment by its **reference**.",
       "The amount does not exceed the original payment, and the currency is the same.",
@@ -46,32 +46,18 @@
     ]
   },
   {
-    "id": "sg-reverse-adjustment",
-    "title": "Reverse an adjustment",
-    "screen": "Adjustments",
-    "risk": "HIGH",
-    "irreversible": true,
-    "body": "**What this does**\nYou are proposing a new adjustment that cancels the effect of an earlier one. The earlier one stays in the books.\n\n**Check first**\n- [ ] I confirmed the earlier adjustment is the wrong one, by reading its details.\n- [ ] I understand the money will move in the opposite direction.\n- [ ] I wrote the reason, including what went wrong the first time.\n- [ ] The merchant name, amount and currency match the earlier adjustment.\n\n**Never**\n- Never reverse to hide a mistake without telling your manager.\n- Never reverse the same adjustment twice.\n\n**If you made a mistake**\nWithdraw the pending reversal if it is wrong, and tell Finance. See [[a:b08-08|Adjustments]].",
-    "checklist": [
-      "I confirmed the earlier adjustment is the wrong one, by reading its details.",
-      "I understand the money will move in the opposite direction.",
-      "I wrote the reason, including what went wrong the first time.",
-      "The merchant name, amount and currency match the earlier adjustment."
-    ]
-  },
-  {
     "id": "sg-process-cashout",
     "title": "Process or approve a cash-out",
     "screen": "Cashouts",
     "risk": "CRITICAL",
     "irreversible": true,
-    "body": "**What this does**\nYou are starting or finalising a payout of a merchant's balance to a real bank account. It cannot be undone by the platform.\n\n**Check first**\n- [ ] The destination is the merchant's verified bank account in its legal name (check the snapshot).\n- [ ] The merchant is `ACTIVE`: not suspended, no negative balance, no hold.\n- [ ] The amount is no more than the wallet balance.\n- [ ] The ledger invariant shows zero drift and payouts are not halted.\n- [ ] I am not the person who made the bank transfer (for the final approval).\n- [ ] I read the amount aloud once: the figure, the merchant and the bank.\n\n**Never**\n- Never change the bank details yourself.\n- Never process because a merchant phoned and said it is urgent.\n- Never approve and execute your own processing.\n\n**If you made a mistake**\nTell your manager and the Security Admin immediately. If a wrong transfer was made at the bank, contact the bank at once. Books are corrected by approved adjustments.",
+    "body": "**What this does**\nYou are starting or finalising a payout of a merchant's balance to a real bank account. It cannot be undone by the platform. There is no second Finance approval today: the merchant requester is a different principal and the decision is audited.\n\n**Check first**\n- [ ] The destination is the merchant's verified bank account in its legal name (check the snapshot).\n- [ ] The merchant is `ACTIVE`: not suspended, no negative balance, no hold.\n- [ ] The amount is no more than the wallet balance.\n- [ ] The ledger invariant shows zero drift, or Finance has deliberately paused cash-outs.\n- [ ] The bank transfer matches the amount and the snapshot exactly.\n- [ ] I read the amount aloud once: the figure, the merchant and the bank.\n\n**Never**\n- Never change the bank details yourself.\n- Never process because a merchant phoned and said it is urgent.\n- Never process a transfer whose bank details or amount do not match the snapshot.\n\n**If you made a mistake**\nTell your manager and the Security Admin immediately. If a wrong transfer was made at the bank, contact the bank at once. Books are corrected by approved adjustments.",
     "checklist": [
       "The destination is the merchant's verified bank account in its legal name (check the snapshot).",
       "The merchant is `ACTIVE`: not suspended, no negative balance, no hold.",
       "The amount is no more than the wallet balance.",
-      "The ledger invariant shows zero drift and payouts are not halted.",
-      "I am not the person who made the bank transfer (for the final approval).",
+      "The ledger invariant shows zero drift, or Finance has deliberately paused cash-outs.",
+      "The bank transfer matches the amount and the snapshot exactly.",
       "I read the amount aloud once: the figure, the merchant and the bank."
     ]
   },
@@ -165,12 +151,12 @@
     "screen": "Merchants",
     "risk": "CRITICAL",
     "irreversible": false,
-    "body": "**What this does**\nYou are stopping a business from taking payments and cashing out. It takes effect now and must be ratified within 24 hours.\n\n**Check first**\n- [ ] Delay would cause harm (fraud, sanctions, expired documents, merchant request).\n- [ ] I chose the correct reason code.\n- [ ] I wrote the reason so a stranger can understand it.\n- [ ] I know who will ratify it.\n- [ ] I will not tell the merchant the real reason if it is AML.\n\n**Never**\n- Never suspend casually or as a bargaining tool.\n- Never tell the merchant it is because of compliance.\n\n**If you made a mistake**\nAsk a `COMPLIANCE` or `MLRO` user to review immediately. Reinstatement needs prior approval.",
+    "body": "**What this does**\nYou are stopping a business from taking payments and cashing out. An **emergency** suspension takes effect now and must be ratified within 24 hours; a standard suspension waits for a different Compliance or MLRO checker.\n\n**Check first**\n- [ ] Delay would cause harm (fraud, sanctions, expired documents, merchant request), or this is a standard request that can wait for approval.\n- [ ] I chose the correct reason code.\n- [ ] I wrote the reason so a stranger can understand it.\n- [ ] For an emergency, I know who will ratify it.\n- [ ] I will not tell the merchant the real reason if it is AML.\n\n**Never**\n- Never suspend casually or as a bargaining tool.\n- Never tell the merchant it is because of compliance.\n\n**If you made a mistake**\nAsk a `COMPLIANCE` or `MLRO` user to review immediately. Reinstatement needs prior approval.",
     "checklist": [
-      "Delay would cause harm (fraud, sanctions, expired documents, merchant request).",
+      "Delay would cause harm (fraud, sanctions, expired documents, merchant request), or this is a standard request that can wait for approval.",
       "I chose the correct reason code.",
       "I wrote the reason so a stranger can understand it.",
-      "I know who will ratify it.",
+      "For an emergency, I know who will ratify it.",
       "I will not tell the merchant the real reason if it is AML."
     ]
   },
@@ -208,7 +194,7 @@
     "screen": "AmlCases",
     "risk": "CRITICAL",
     "irreversible": true,
-    "body": "**What this does**\nYou are proposing to release, void, freeze or escalate a case. The MLRO approves. Money moves only after approval.\n\n**Check first**\n- [ ] I reviewed all evidence and the rule that caused the case.\n- [ ] My rationale states what I found and why the resolution is right.\n- [ ] The rationale contains nothing a merchant could later read.\n- [ ] I considered whether a report is required.\n- [ ] I am not the checker.\n\n**Never**\n- Never tell the merchant or customer anything about the case.\n- Never release to meet a deadline.\n\n**If you made a mistake**\nWithdraw before the MLRO acts. Tell the MLRO if you proposed in error.",
+    "body": "**What this does**\nYou are proposing to release, void, freeze or escalate a case. The MLRO approves. Money moves only after approval.\n\n**Check first**\n- [ ] I reviewed all evidence and the rule that caused the case.\n- [ ] My rationale states what I found and why the resolution is right.\n- [ ] The rationale contains nothing a merchant could later read.\n- [ ] I considered whether a report is required.\n- [ ] I am not the checker.\n\n**Never**\n- Never tell the merchant or customer anything about the case.\n- Never release to meet a deadline.\n\n**If you made a mistake**\nAsk the MLRO or another checker to reject the pending proposal. If it was already approved, correct it with a new proposal. Tell the MLRO if you proposed in error.",
     "checklist": [
       "I reviewed all evidence and the rule that caused the case.",
       "My rationale states what I found and why the resolution is right.",
@@ -223,11 +209,11 @@
     "screen": "AmlScreenings",
     "risk": "HIGH",
     "irreversible": false,
-    "body": "**What this does**\nYou are deciding whether a possible name match is a false positive, a true match or needs escalation.\n\n**Check first**\n- [ ] I compared date of birth, nationality, ID and other attributes.\n- [ ] I wrote the evidence for my decision.\n- [ ] If I suppress future matches I set an expiry date.\n- [ ] If it may be a sanctions match I will escalate, not decide alone.\n\n**Never**\n- Never mark a match false because the merchant is large or important.\n- Never discuss the result outside Compliance.\n\n**If you made a mistake**\nTell the MLRO immediately; a wrong disposition can be re-opened.",
+    "body": "**What this does**\nYou are deciding whether a possible name match is a false positive, a true match or needs escalation.\n\n**Check first**\n- [ ] I compared date of birth, nationality, ID and other attributes.\n- [ ] I wrote the evidence for my decision.\n- [ ] If I suppress future matches I set an expiry date and understand the current screening path does not consult it.\n- [ ] If it may be a sanctions match I will escalate, not decide alone.\n\n**Never**\n- Never mark a match false because the merchant is large or important.\n- Never rely on a suppression to stop future matches; the current path does not consult it.\n- Never discuss the result outside Compliance.\n\n**If you made a mistake**\nTell the MLRO immediately; a wrong disposition can be re-opened.",
     "checklist": [
       "I compared date of birth, nationality, ID and other attributes.",
       "I wrote the evidence for my decision.",
-      "If I suppress future matches I set an expiry date.",
+      "If I suppress future matches I set an expiry date and understand the current screening path does not consult it.",
       "If it may be a sanctions match I will escalate, not decide alone."
     ]
   },
@@ -237,9 +223,9 @@
     "screen": "AmlRules",
     "risk": "CRITICAL",
     "irreversible": false,
-    "body": "**What this does**\nYou are changing the rules that hold money and open cases. The MLRO must approve.\n\n**Check first**\n- [ ] I ran the dry-run and read how many holds and cases it would create.\n- [ ] I know whether this tightens or loosens the rule.\n- [ ] If loosening, I accept that it needs full review.\n- [ ] The scope is correct.\n\n**Never**\n- Never loosen a rule to reduce workload.\n- Never test on live.\n\n**If you made a mistake**\nWithdraw the proposal. If activated wrongly, propose the corrective change with the MLRO.",
+    "body": "**What this does**\nYou are changing the rules that hold money and open cases. The MLRO must approve.\n\n**Check first**\n- [ ] I reviewed the parameters and expected effect manually; the current screen has no dry-run.\n- [ ] I know whether this tightens or loosens the rule.\n- [ ] If loosening, I accept that it needs full review.\n- [ ] The scope is correct.\n\n**Never**\n- Never loosen a rule to reduce workload.\n- Never create a live test rule only to see what it does.\n\n**If you made a mistake**\nAsk the MLRO to reject the pending proposal. If it was activated wrongly, propose the corrective change with the MLRO.",
     "checklist": [
-      "I ran the dry-run and read how many holds and cases it would create.",
+      "I reviewed the parameters and expected effect manually; the current screen has no dry-run.",
       "I know whether this tightens or loosens the rule.",
       "If loosening, I accept that it needs full review.",
       "The scope is correct."
@@ -251,7 +237,7 @@
     "screen": "AmlReports",
     "risk": "CRITICAL",
     "irreversible": true,
-    "body": "**What this does**\nYou are drafting or saving a report to the authority. Once approved and submitted it is frozen.\n\n**Check first**\n- [ ] The reporting rule is `CONFIRMED`, not `PROVISIONAL`.\n- [ ] Facts in the report match the case.\n- [ ] The report is stored as confidential.\n- [ ] No other system or person is told about it.\n\n**Never**\n- Never tell the subject.\n- Never file from a provisional rule.\n\n**If you made a mistake**\nCorrections are new linked reports. Tell the MLRO.",
+    "body": "**What this does**\nYou are drafting or saving a report to the authority. Once approved and submitted it is frozen.\n\n**Check first**\n- [ ] The reporting rule is `CONFIRMED`, not `PROVISIONAL`.\n- [ ] Facts in the report match the case.\n- [ ] The report is stored as confidential.\n- [ ] No other system or person is told about it.\n\n**Never**\n- Never tell the subject.\n- Never file from a provisional rule.\n\n**If you made a mistake**\nCorrections are new, unlinked reports; record the old reference in the reason. Tell the MLRO.",
     "checklist": [
       "The reporting rule is `CONFIRMED`, not `PROVISIONAL`.",
       "Facts in the report match the case.",

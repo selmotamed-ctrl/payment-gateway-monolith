@@ -58,7 +58,7 @@ The app mirrors the true content during build:
 4. `scripts/check-content.ts` re-runs the extractors and fails if the committed snapshot is
    stale, or if `admin-front` generated content has drifted.
 
-The current snapshot contains 14 guide books, 137 articles, 154 glossary terms, 26 safeguard
+The current snapshot contains 14 guide books, 137 articles, 154 glossary terms, 25 safeguard
 cards, 32 situations, 60 quick answers, 19 error codes, 140 edge cases; and 8 Academy tracks,
 11 modules, 51 lessons, 102 practice checks, 16 labs / 92 tasks, 11 drills and 7 learner pages.
 The exam bank has 223 questions with keys but is not in the bundle.

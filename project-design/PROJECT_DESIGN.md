@@ -1066,6 +1066,13 @@ Done on top of `7cc40cf` (the remediation described above), after re-reading the
 
 `POST /internal/admin/auth/mfa/resend` (admin edge `POST /api/v1/admin/auth/mfa/resend`) accepts only an opaque `challengeId` UUID. It requires a live, unconsumed, unexpired `ADMIN` challenge whose user is `ACTIVE`, `mfaRequired`, back-office, and issues a fresh challenge under a per-user row lock. The old challenge is superseded and its queued `LOGIN_MFA` notification is set to `SUPPRESSED`, so a late SMS cannot deliver the old code after the new one. Issuance keeps the existing 5-per-15-minute window, 5-minute TTL and 5-attempt/15-minute lock. Core writes `ADMIN_MFA_CHALLENGE_RESENT` with the old/new challenge IDs and request IP (never the code or phone). Invalid/consumed/expired challenges are counted by the shared MFA IP throttle. The client shows a 30-second resend cooldown and restarts it on failure.
 
+## Second-pass access-control corrections (2026-11-25)
+
+- **API-token status gate.** `resolveApiTokenPrincipal` now loads the token's merchant and refuses a merchant that is not `ACTIVE` with `403 MERCHANT_NOT_ACTIVE`. A suspended or closed merchant's existing token can no longer read or write.
+- **Closure revocation.** `executeMerchantLifecycle` revokes every unrevoked `access_token` row for the merchant inside the close transaction.
+- **AML authority vocabulary.** Confidential AML access accepts `COMPLIANCE`/`MLRO` or `aml:read`/`aml:write`; the AML operator-case visibility check now uses the same helper instead of a separate `aml.read_confidential` test. The admin route table accepts the raw and projected names.
+- **Default roles.** `SECURITY_ADMIN` now seeds `credential:read`, `settings:read` and `settings:write`; `FINANCE` seeds `reconciliation:read/write` and `velocity:read/write`. Credential-set reads also accept the write authorities for existing users.
+
 ---
 
 <a id="platformruntime"></a>
@@ -3182,6 +3189,14 @@ Dashboard, merchant stats, finance profitability/liquidity, dispute/adjustment/c
 
 Dispute, adjustment and cash-out summaries return a `byCurrency` array in addition to selected-currency scalars. Sandbox overview, payments summary and links summary accept `currency` and return `byCurrency`; sandbox money is never a cross-currency scalar.
 
+## Second-pass accuracy remediation (2026-11-25)
+
+- `POST /join-requests/:id/decide` now rejects a `REJECTED` decision without a `reasonCode` and a written note (`JOIN_REQUEST_REJECTION_REASON_REQUIRED`), and re-evaluates the four-eyes policy at decision time: a reviewer who selects `HIGH` risk cannot avoid the second reviewer (`resolveFourEyesForDecision` / `applyFourEyesForDecision`).
+- `GET /stats/overview` now aggregates `grossVolume` with the requested reporting currency instead of a hard-coded LYD; the dashboard card uses the returned `currency`.
+- `POST /aml/reports/:id/file` now calls `validateRegulatoryReportForSubmission` before creating the external submission or dispatching the adapter, so a `PROVISIONAL` reporting rule can never reach the authority. `submitRegulatoryReport` shares the same validator.
+- AML route access accepts `aml:read`/`aml:write` as well as `aml.read_confidential`, matching `hasConfidentialAmlAccess`; the admin route table lists both vocabularies.
+- Credential-set reads accept `credential:write`/`gateway:write` as well as the read names, so a default Security Admin can open the screen before re-seeding.
+
 ---
 
 <a id="coreengine"></a>
@@ -4711,6 +4726,15 @@ The Reporting Studio now covers the full authoring and filing lane in addition t
 - **AML case reads.** `GET /aml/cases/:id` writes an `AML_CASE_VIEWED` audit row.
 - **Default roles.** `COMPLIANCE` now has merchant/KYB read-write, `OPERATOR` has merchant/KYB read and KYB write, and `MLRO` has merchant/KYB read, matching the documented onboarding workflows.
 
+## Second-pass accuracy remediation (2026-11-25)
+
+- **Four-eyes at decision time.** `resolveFourEyesForDecision` re-applies the stored reasons and adds `RISK_TIER_HIGH` when the reviewer selects `HIGH`; a stored requirement is never weakened. This closes the approval-time tier bypass.
+- **Ownership gate.** `computeJoinRequestReadiness` and `kybReview` accept a recorded `CONTROLLER` in place of the percentage total, matching the documented fallback.
+- **Join rejection.** A rejected join request now needs a reason code and a written note.
+- **Adjustment checker.** The approve route enforces `adjustmentApprovalCheckerAllowed` (role `FINANCE`) before it claims the approval and queues `ADJUSTMENT_EXECUTION`, matching the `DOMAIN_CHECKER_ROLES` map. Rejection already enforced the same domain.
+- **Merchant closure.** Closing a merchant revokes its active access tokens in the same transaction, and token authentication rejects a merchant that is not `ACTIVE`.
+- **Filing order.** The provisional-rule, submitter and output checks run before the external filing adapter is called, not after.
+
 ---
 
 <a id="coreworkers"></a>
@@ -5209,6 +5233,10 @@ PSP-M refunds, disputes opened/decided and cash-outs are grouped by currency and
 
 - `PeriodicScreeningWorker` continues to open the confirmed-match AML case once and suspend an active merchant. The merchant-visible `suspensionReasonCode` is now `AML` (inside the closed code set and the exact-match redaction rule); the detailed `SCREENING_CONFIRMED_MATCH` trigger stays in the AML case and the `MERCHANT_SUSPENDED` audit row.
 - Settlement sweeps now run from `BackgroundJobHandlers` only for attempts that used `GATEWAY_CLEARING` (fee accrual or payer surcharge/split). See `core.ledger` section 18.
+
+## Second-pass settlement and reconciliation corrections (2026-11-25)
+
+`postSettlementSweeps` still excludes a statement line tied to a known merchant-direct, internal or fee-at-source attempt. A **batch-net** source line with no local attempt (the gateway reports a settled batch total) is now swept again; previously the absence of an attempt skipped the whole batch and lost the clearing settlement. A test in `test/remediation-high.test.ts` covers the no-attempt batch case and the USD account selection.
 
 ---
 
@@ -10824,7 +10852,7 @@ The canonical content is `design/07-guides-and-academy/guide_system_design_and_c
 | `books.json` | 14 books |
 | `articles.en.json` | 137 articles with headings, plain text, roles, UI status and related ids |
 | `glossary.en.json` | 154 terms with aliases, Arabic term and related slugs |
-| `cards.en.json` | 26 cards and 115 required checklist items |
+| `cards.en.json` | 25 cards and 111 required checklist items |
 | `playbook.en.json` | 32 situations with screens, cases and articles |
 | `paths.json` | 8 reading paths (`ALL` plus seven staff roles) |
 | `faq.en.json` | 60 quick answers |
@@ -11056,7 +11084,7 @@ screen: legal holds, KEK rotation and maintenance jobs", plus card
 `sg-place-legal-hold`, terms `object-storage-vault`/`storage-object-lock`/
 `legal-hold`, FAQ `q-059`/`q-060` and context-map screen `SystemObjectStorage`.
 Academy module 10 adds lesson `l-m10-5`, checks `c-l-m10-5-1/2` and exam
-question `q-m10-118`. Counts are 137 articles, 154 terms, 26 cards, 51
+question `q-m10-118`. Counts are 137 articles, 154 terms, 25 cards, 51
 lessons, 102 checks and 224 exam-pool questions. Generated Guide/Academy and
 Companion snapshots were regenerated.
 
@@ -11068,7 +11096,7 @@ the effective/computed/override split. `b10-02` (RB-01) and the Dashboard
 screen article (`b03-05`) describe the Routes health drawer, forced/conflict
 counts, probe action and the maker-checker force-HEALTHY path. Academy
 `l-m8-1`, `l-m8-5` and `l-m9-1` were updated with the same facts. Counts and
-exam structure are unchanged (137 articles, 154 terms, 26 cards, 51 lessons,
+exam structure are unchanged (137 articles, 154 terms, 25 cards, 51 lessons,
 224 pool questions); the generated Guide/Academy and Companion snapshot were
 regenerated.
 
@@ -11088,12 +11116,26 @@ regenerated.
 
 ## Full Guide/Academy accuracy audit (2026-11-25)
 
-Fourteen read-only domain scans covered all 137 Guide articles, 154 terms, 60 quick answers, 32 situations, 26 safeguard cards, the 31-screen context map, 51 Academy lessons, 102 lesson checks, 224 exam-pool questions and 16 labs. The deduplicated register is `design/07-guides-and-academy/accuracy-audit-2026-11-25.md`.
+Fourteen read-only domain scans covered all 137 Guide articles, 154 terms, 60 quick answers, 32 situations, 25 safeguard cards, the 31-screen context map, 51 Academy lessons, 102 lesson checks, 224 exam-pool questions and 16 labs. The deduplicated register is `design/07-guides-and-academy/accuracy-audit-2026-11-25.md`.
 
-- **Content corrections.** Counts, menu/screen lists, statuses, timings, action labels and workflow prose were corrected to the working tree: 119 models, 10 menu sections, 5 reporting screens, 31 context screens, 4 report types, 17 ledger scenarios, 14 deploy steps, 21 named networks, 7 runtime phases, 4 backup-drill checks, approval expiry, flat join SLA, 4/24/72/120-hour AML SLAs, emergency auto-lift, permanent inbound dedupe, 64 KiB unverified bodies, dashboard tiles, shard widths and error codes. The Guide no longer claims unsupported maker-checker, cash-out, AML-monitoring, canary, OIDC, webhook-replay, step-up-auth, password-change, retention or POS-token behavior; where a feature is intended but missing, the text says so.
+- **Content corrections.** Counts, menu/screen lists, statuses, timings, action labels and workflow prose were corrected to the working tree: 119 models, 10 menu sections, 5 reporting screens, 31 context screens, 4 report types, 17 ledger scenarios, 14 deploy steps, 21 named networks, 7 runtime phases, 4 backup-drill checks, approval expiry, pausing join-request SLA, 4/24/72/120-hour AML SLAs, emergency auto-lift, permanent inbound dedupe, 64 KiB unverified bodies, dashboard tiles, shard widths and error codes. The Guide no longer claims unsupported maker-checker, cash-out, AML-monitoring, canary, OIDC, webhook-replay, step-up-auth, password-change, retention or POS-token behavior; where a feature is intended but missing, the text says so.
 - **Academy corrections.** Wrong keys were fixed (`q-m0-002`, the 60/40 four-eyes example, masked-token visibility, approval expiry, check recording, report types, SLA hours, stored shard balances, cash-out/reserve behavior, breaker classes), counts were aligned to 51/102/224/16/92, and role examples now name the authority a task needs rather than a default role that lacks it. The Academy still carries open product-decision notes in `academy_content_questions.md`.
 - **Code changes made in the same pass.** See the 2026-11-25 rows in `TRACKER.md` and the affected core/edge/merchant parts. The highest-risk fixes are AML `TRUE_MATCH` case/suspension, neutral screening reasons, AML approval-context confidentiality, provisional-report gate, object-GC lock/retention, refund/chargeback ceilings, settlement-fee eligibility, OTP render fields, read-only inquiry, link/application/wallet enforcement, merchant profile protection and withdraw, default role authorities, dashboard Webhook Inbox Lag, adjustments deep link, Jobs `REFUND_INQUIRY` filter, empty-journal tile and backup alert fallback.
 - **Verification.** Guide/Academy extractors, Companion snapshot, content/clarity gates, typechecks, targeted DB-free suites, front builds and Playwright are run after regeneration; the DB-backed full core suite and live deployment remain environment-dependent.
+
+## Second-pass accuracy sweep (2026-11-25)
+
+A second read-only sweep of all Guide books and Academy modules found residual target-state claims after the first remediation commit. The Guide/Academy now state:
+
+- the join-request clock pauses on `INFO_REQUESTED` and starts at submission;
+- a `HIGH` tier chosen at decision time re-runs four eyes; a `CONTROLLER` satisfies the ownership gate;
+- only a `FINANCE` checker approves an adjustment; a legal-name/payout/category change screens on the next periodic cycle, not immediately;
+- one `cashout:review` actor processes a payout, drift opens a P1 case but does not stop payouts, and a confirmed screening match is a direct suspension rather than the emergency-ratification path;
+- the report catalog is authority-filtered, provisional rules are rejected before filing, report corrections are not linked, and a correction is a new report;
+- OTP resend only refreshes the cooldown; unmatched 2xx is `SUCCEEDED`; the wizard `CREDENTIAL_CHECK` only previews phases; an unknown-reference webhook is rejected and not matched later;
+- the dashboard Gross Volume follows the selected currency; the restore-drill UI reads the daemon `ok` flags and shows object storage; the sandbox mirror is a full sandbox-data copy, not read-only;
+- Security Admin defaults can read credential sets and settings; Finance defaults can open reconciliation and pricing; sandbox routes are visible to Gateway/Security roles;
+- no step-up re-authentication, self-service password change, storage client-certificate enforcement or gateway-credential overlap is claimed. Counts remain 137 articles, 154 terms, 25 cards, 60 FAQ, 51 lessons, 102 checks, 224 exam-pool questions, 16 labs and 92 lab tasks.
 
 ---
 
@@ -11481,6 +11523,10 @@ Backups page: actions are disabled unless backups are configured and the daemon 
 
 Backup trigger, restore drill and policy changes now require the shared checklist before submission. Trigger keys: `BACKUP_TARGET_VERIFIED`, `LOAD_IMPACT_REVIEWED`, `AUTHORITY_CONFIRMED`; drill keys: `DRILL_SCOPE_VERIFIED`, `SCRATCH_ISOLATION_REVIEWED`, `AUTHORITY_CONFIRMED`; policy keys: `POLICY_SCOPE_REVIEWED`, `RETENTION_IMPACT_REVIEWED`, `APPROVAL_PATH_CONFIRMED`. The drill is now a checklist modal instead of an immediate confirm. Core filters the keys and records them in `BACKUP_TRIGGERED` / `BACKUP_DRILL_TRIGGERED` (including deduplicated retries) and the policy approval payload. Jobs/Outbox retries, notification retries, object-storage legal holds/maintenance, notification-template edits and settings/checkout-help exports use the same pattern. `ADMIN_SHOW_CHECKLISTS` hides the UI gate without changing the server path.
 
+## Second-pass restore-drill rendering (2026-11-25)
+
+The Backups page now reads the daemon's camelCase check objects (`doubleEntry`, `balanceParity`, `auditChain`, `objectStorage`) and their `ok` boolean before falling back to counters. A failed check with a successful query counter can no longer render as **Passed**. The object-storage parity check is shown as a fourth badge when the daemon includes it; the core DTO exposes `checks.objectStorage` as optional.
+
 ---
 
 <a id="admin-uiguide-v2"></a>
@@ -11497,7 +11543,7 @@ implemented. The earlier 12-book embedded-content page has been replaced.
 
 Delivered:
 
-- 14 books, 137 articles, 154 glossary terms, 26 safeguard cards (115 checks), 32 situations, 8 reading paths, 60 quick answers, 19 error codes and the 140-case catalog.
+- 14 books, 137 articles, 154 glossary terms, 25 safeguard cards (111 checks), 32 situations, 8 reading paths, 60 quick answers, 19 error codes and the 140-case catalog.
 - A deterministic extractor and committed JSON under `src/content/guide/generated/`.
 - Eight guide routes: home, book, article, glossary, tools, playbook, cards and edge cases.
 - Markdown reader with callouts, diagram fences, tables, stable heading ids, safe article/card/situation/glossary links and first-occurrence glossary popovers.
@@ -12050,6 +12096,10 @@ A "Sandbox Live Mirror" section reuses the Live pages under `/sandbox/mirror/*` 
 - A Live application created by an already-`ACTIVE` merchant is created `ACTIVE`. Existing `PENDING` applications are activated when the join request is approved. Before this, every new Live application stayed `PENDING` with no activation route.
 - `POST /links` rejects `409 LINK_WALLET_MUST_MATCH_APPLICATION` when the requested wallet differs from the application's assigned wallet; the link always settles to the application wallet.
 - The onboarding profile `PUT` refuses sensitive legal/tax/registration edits after activation (`MERCHANT_PROFILE_REQUIRES_APPROVAL`) and while a join request is under review (`JOIN_REQUEST_UNDER_REVIEW`). A new merchant withdraw route returns the join request to `DRAFT`; the onboarding page exposes **Withdraw application** and the normal submit flow can run again.
+
+## Second-pass sandbox visibility (2026-11-25)
+
+Sandbox menu entries are filtered with `canOpenRoute`; the route table now allows `gateways.edit`/`security:read` for the Sandbox Overview, Sandbox Merchants and Fake Rails screens, so the Gateway Admin and Security Admin roles named by the Guide can open them. The Sandbox Live Mirror is described as the same Live screens backed by sandbox data, not as read-only, because the proxy forwards the same methods.
 
 ---
 
@@ -12747,6 +12797,10 @@ or canary `visibleRails` list from core. See `core.route-health`.
 ## Public certificate verification (2026-11-23)
 
 `/verify/certificate/:publicId` is a public checkout route (no payer session, no attempt, no link key). It calls `GET /api/v1/verify/certificate/:publicId`, renders a valid/expired/revoked certificate card with holder, track, badge, certificate ID, earned/expiry dates and content version, and shows a generic “could not be verified” state for unknown public IDs; a revoked or superseded issuance returns a distinct revoked state. It does not expose email, role or employment data. The route is outside the checkout attempt lifecycle and uses the public checkout layout; the link is generated by the admin Academy certificate page from the issuance `publicId` and `academyCertificateVerifyUrl`.
+
+## Second-pass slot error message (2026-11-25)
+
+`PAYMENT_LINK_SLOT_UNAVAILABLE` now maps to the bilingual **Payment in progress** message, matching the Guide's description of a second payer trying a reserved link.
 
 ---
 
@@ -17801,6 +17855,17 @@ The full core suite runs against PostgreSQL 18 + Redis (25,316 tests, 0 failures
 - `merchant-back/test/core-forwarding.test.ts` covers the new `/onboarding/join-request/withdraw` forwarding.
 - The Guide/Academy extractor drift tests must be re-run after the content regeneration; live DB/Playwright runs remain environment-dependent.
 
+## Second-pass accuracy remediation (2026-11-25)
+
+New or extended DB-free suites:
+
+- `core-back/test/onboarding-four-eyes.test.ts` — approval-time four-eyes (`HIGH` at decision time adds a reviewer; a stored requirement is never weakened; `NEVER` stays single-reviewer).
+- `core-back/test/create-admin-plan.test.ts` — Security Admin `credential:read`/`settings:*` and Finance `reconciliation:*`/`velocity:*` defaults.
+- `core-back/test/remediation-high.test.ts` — a batch-net statement line with no local attempt still posts its clearing sweep; USD accounts stay in USD.
+- `core-back/test/background-jobs.test.ts`, `core-back/test/refund-three-phase.test.ts` — fixtures now give the merchant ceiling headroom so the tests exercise the reserve/refund path rather than the ceiling guard.
+
+The final core run was 20,265 pass / 5,066 skip / 4 fail; the 4 failures are the known audit-chain/vault environment tests that need PostgreSQL and `KMS_MASTER_KEY`. Admin-back 835, merchant-back 157, checkout-back 275, deploy 685, backup-daemon 238, object-storage-daemon 16, fake-rails-back 113, root Vitest 534, admin-front 48, merchant-front 23, companion 27; all front builds pass.
+
 ---
 
 <a id="testingfixtures"></a>
@@ -19265,7 +19330,7 @@ Most factual counts are now fixed in the canonical parts. The remaining items be
 | ID | Feature | Status | Current evidence | Acceptance criteria |
 | :--- | :--- | :--- | :--- | :--- |
 | D-01 | Voucher Provider Management System | `missing` | No voucher code, schema, API or UI | See `future.voucher`; all phases and tests delivered as a separate service |
-| D-02 | Admin Guide v2 | `implemented` | 14 books/137 articles/154 terms/26 cards/32 situations/5 simulators/8 routes with generated content, context help and safeguards | See `admin-ui.guide-v2`; only the Arabic article set remains outstanding |
+| D-02 | Admin Guide v2 | `implemented` | 14 books/137 articles/154 terms/25 cards/32 situations/5 simulators/8 routes with generated content, context help and safeguards | See `admin-ui.guide-v2`; only the Arabic article set remains outstanding |
 | D-03 | Smart AI voucher importer half | `missing` | Gateway importer only in `core-back/engine/specImporter/**` | See `future.smart-ai-voucher`; voucher schema/validator/simulator/materializer/transcript/UI/tests |
 | D-04 | Merchant Google OIDC login | `deferred` | `core-back/api/internal/merchant.ts` `/auth/google` returns `501 GOOGLE_IDENTITY_NOT_CONFIGURED` | Configure issuer/client/audience, verify ID tokens, map identities, test success/failure |
 | D-05 | Keyset pagination | `partial` | `core-back/lib/listQuery.ts` supports cursor pagination (2026-11-04) but only merchant `/payments` uses it; the other lists still use `skip/take` | Add stable cursor keys, cursor encode/decode, index coverage, API compatibility and tests at high offsets |
@@ -19558,7 +19623,7 @@ The app mirrors the true content during build:
 4. `scripts/check-content.ts` re-runs the extractors and fails if the committed snapshot is
    stale, or if `admin-front` generated content has drifted.
 
-The current snapshot contains 14 guide books, 137 articles, 154 glossary terms, 26 safeguard
+The current snapshot contains 14 guide books, 137 articles, 154 glossary terms, 25 safeguard
 cards, 32 situations, 60 quick answers, 19 error codes, 140 edge cases; and 8 Academy tracks,
 11 modules, 51 lessons, 102 practice checks, 16 labs / 92 tasks, 11 drills and 7 learner pages.
 The exam bank has 223 questions with keys but is not in the bundle.

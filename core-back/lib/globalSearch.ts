@@ -1370,7 +1370,7 @@ export const credentialSetProvider = defineSearchProvider({
   type: "credential_set",
   aliases: ["credential_sets", "credentials", "credential"],
   order: 165,
-  canAccess: (actor) => hasAuthority(actor, "credential:read") || hasAuthority(actor, "gateway:read"),
+  canAccess: (actor) => hasAuthority(actor, "credential:read") || hasAuthority(actor, "credential:write") || hasAuthority(actor, "gateway:read") || hasAuthority(actor, "gateway:write"),
   fetchCandidates: async ({ prisma, parsed, take }) => {
     const query = parsed.term;
     const status = scopedStatusIn<CredentialStatus>(parsed, CredentialStatus);

@@ -288,8 +288,7 @@
         "b04-05"
       ],
       "cards": [
-        "sg-propose-adjustment",
-        "sg-reverse-adjustment"
+        "sg-propose-adjustment"
       ],
       "situations": [
         "s-negative-balance",

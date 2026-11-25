@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  applyFourEyesForDecision,
   computeFourEyesDecision,
   DEFAULT_FOUR_EYES_POLICY,
   DEFAULT_HIGH_RISK_CATEGORIES,
@@ -195,5 +196,37 @@ describe("the join request four-eyes policy (design §18, OD-2)", () => {
     );
     expect(decision.required).toBe(false);
     expect(decision.reasons).toEqual([]);
+  });
+});
+
+
+describe("four-eyes decision at approval time", () => {
+  test("raising the risk tier to HIGH at decision time forces a second reviewer", () => {
+    const decision = applyFourEyesForDecision(
+      { fourEyesRequired: false, fourEyesReasons: [] },
+      setting(),
+      "HIGH",
+    );
+    expect(decision.required).toBe(true);
+    expect(decision.reasons).toContain("RISK_TIER_HIGH");
+  });
+
+  test("a stored four-eyes decision is never weakened by a later LOW tier", () => {
+    const decision = applyFourEyesForDecision(
+      { fourEyesRequired: true, fourEyesReasons: ["SCREENING_NOT_CLEAR"] },
+      setting(),
+      "LOW",
+    );
+    expect(decision.required).toBe(true);
+    expect(decision.reasons).toContain("SCREENING_NOT_CLEAR");
+  });
+
+  test("the NEVER policy does not add a review for a HIGH tier", () => {
+    const decision = applyFourEyesForDecision(
+      { fourEyesRequired: false, fourEyesReasons: [] },
+      setting({ policy: "NEVER" }),
+      "HIGH",
+    );
+    expect(decision.required).toBe(false);
   });
 });

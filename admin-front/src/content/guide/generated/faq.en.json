@@ -129,7 +129,7 @@
     "id": "q-022",
     "article": "b04-03",
     "question": "How long does an approval request last?",
-    "answer": "Seven days for most subjects; join-request, AML-case and operator-case approvals last three days. After expiry the request is closed `EXPIRED` and cannot be approved; the maker must create a new request."
+    "answer": "Seven days for most subjects; join-request, AML-case, operator-case, adjustment, regulatory-report, reporting-rule and filing-adapter approvals last three days. After expiry the request is closed `EXPIRED` and cannot be approved; the maker must create a new request."
   },
   {
     "id": "q-023",
@@ -165,7 +165,7 @@
     "id": "q-028",
     "article": "b05-03",
     "question": "When does a second reviewer have to approve a join request?",
-    "answer": "When the platform setting requires it. The default risk-based policy requires it for high risk, an unclear screening result, a politically exposed owner, a high-risk category, high volume, a payout account mismatch or a previous rejection."
+    "answer": "When the platform setting requires it. The default risk-based policy requires it for high risk, an unclear screening result, a politically exposed owner, a high-risk category, high volume, a payout account mismatch, an owner at or above the ownership threshold (25% by default), an open duplicate or related-party flag, or a previous rejection."
   },
   {
     "id": "q-029",
@@ -225,7 +225,7 @@
     "id": "q-038",
     "article": "b08-06",
     "question": "What is MISSING_AT_GATEWAY?",
-    "answer": "A statement line has no matching local attempt. Check for a late payment, a duplicate or a partner error before crediting anything. The opposite result, `MISSING_LOCALLY`, means a local attempt is absent from the statement and is the more serious one for us."
+    "answer": "A statement line has no matching local attempt; it opens a P2 case with a 24-hour SLA. Check for a late payment, a duplicate or a partner error before crediting anything. The opposite result, `MISSING_LOCALLY`, means a local attempt is absent from the statement; it opens a P3 case with a 72-hour SLA and we may have credited money the partner did not settle."
   },
   {
     "id": "q-039",

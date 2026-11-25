@@ -26,13 +26,13 @@ export const routesAuthorities: Record<string, string[]> = {
     AdminUsers: ["security:read", "user:read", "user:write", "security:write", "users_admin.propose"],
     AdminUserDetail: ["security:read", "user:read", "user:write", "security:write", "users_admin.propose"],
     AuditLog: ["security:read"],
-    AmlCases: ["aml.read_confidential"],
-    AmlScreenings: ["aml.read_confidential"],
-    AmlRules: ["aml.read_confidential"],
-    AmlReports: ["aml.read_confidential"],
-    AmlReportingStudio: ["aml.read_confidential"],
-    Incidents: ["aml.read_confidential"],
-    FilingAdapters: ["aml.read_confidential"],
+    AmlCases: ["aml.read_confidential", "aml:read", "aml:write"],
+    AmlScreenings: ["aml.read_confidential", "aml:read", "aml:write"],
+    AmlRules: ["aml.read_confidential", "aml:read", "aml:write"],
+    AmlReports: ["aml.read_confidential", "aml:read", "aml:write"],
+    AmlReportingStudio: ["aml.read_confidential", "aml:read", "aml:write"],
+    Incidents: ["aml.read_confidential", "aml:read", "aml:write"],
+    FilingAdapters: ["aml.read_confidential", "aml:read", "aml:write"],
     OperatorCases: ["case:read", "operator:read"],
     OperatorCaseDetail: ["case:read", "operator:read"],
     GatewayInquirySchedules: ["case:read", "operator:read"],
@@ -62,10 +62,10 @@ export const routesAuthorities: Record<string, string[]> = {
     ReportsNeedsMigration: ["reports.studio", "reports.draft", "report_engine:author", "report:review", "report:approve", "security:read", "security:write"],
     ReportsChromeNeedsMigration: ["reports.studio", "report_engine:author", "report:approve", "security:read", "security:write"],
     ReportsMerchantReports: ["report:review", "report:approve", "security:read", "security:write"],
-    SandboxOverview: ["merchants.read", "support.read_merchant"],
-    SandboxMerchants: ["merchants.read", "support.read_merchant"],
-    SandboxMerchantDetail: ["merchants.read", "support.read_merchant"],
-    SandboxFakeRails: ["merchants.read", "support.read_merchant"],
+    SandboxOverview: ["merchants.read", "support.read_merchant", "gateways.edit", "security:read"],
+    SandboxMerchants: ["merchants.read", "support.read_merchant", "gateways.edit", "security:read"],
+    SandboxMerchantDetail: ["merchants.read", "support.read_merchant", "gateways.edit", "security:read"],
+    SandboxFakeRails: ["gateways.edit", "security:read"],
 };
 
 /** Authenticated routes that intentionally need login only (content has its own role checks). */
@@ -130,6 +130,8 @@ export const PUBLIC_FOR_AUTHENTICATED: readonly string[] = [
 
 /** Raw backend (colon) authority -> equivalent portal (dotted) keys. Mirrors the server projection. */
 export const AUTHORITY_ALIASES: Record<string, string[]> = {
+    "aml:read": ["aml.review"],
+    "aml:write": ["aml.review", "aml.propose"],
     "gateway:read": ["gateways.edit"],
     "gateway:write": ["gateways.edit"],
     "case:read": ["support.read_merchant"],
