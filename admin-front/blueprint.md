@@ -325,7 +325,7 @@ quarantine/AV queue; and the access audit trail. Authority-gated actions:
 
 ## Admin Route and Page Catalog
 
-> Status: `partial` · Last verified: 2026-11-23
+> Status: `partial` · Last verified: 2026-11-25
 
 ## 1. Purpose and scope
 
@@ -658,6 +658,13 @@ The Dashboard Route health card shows forced and conflict counts. See
 - **Guide** adds a reading-progress bar, copy-link actions, version-aware read counts and edge-case deep-link scrolling.
 
 - **Currency selector (2026-11-24).** Dashboard and merchant 360 monetary cards follow the selected reporting currency; the dashboard sends `currency` to `/stats/overview` and `/stats/export`, and merchant 360 uses the stats response currency instead of the first wallet.
+
+## Accuracy remediation: dashboard, adjustments and jobs (2026-11-25)
+
+- The Dashboard now renders the fifth metric tile **Webhook Inbox Lag** from `webhookInboxLagSeconds` (target under 30 s). The actual metric strip is Gross Volume, Success Rate, Open Action Queues, Unknown Backlog and Webhook Inbox Lag; the header pill is `Operational`.
+- The Adjustments page consumes `?attemptId=` and `?merchantId=` and pre-fills the create form, so **Create refund/adjustment** from the Transaction drawer no longer opens an empty page.
+- The Jobs & Outbox type filter includes `REFUND_INQUIRY`.
+- The Journal Entries unbalanced tile includes entries with zero lines, not only entries whose lines do not sum to zero.
 
 ## Tables Filters and Exports
 
@@ -1239,6 +1246,15 @@ regenerated.
 - **Aligned content.** `b05-01` now says a `PENDING` merchant uses the separate Sandbox envelope (no non-existent platform setting); `b06-10` says the wrong environment is rejected; `b07-05` says it is rejected with no priority-2 alert; `b12-06`, glossary terms `sandbox`/`fake-rails`, and quick answers `q-055`/`q-056` describe the Sandbox plane and Fake Rails accurately; Academy lesson `l-m5-5` and exam question `q-m1-009` use the corrected answer.
 - **Merchant shell.** The drawer badge follows `sandboxMode` (`SANDBOX` inside `/sandbox/*` and the mirror, `LIVE` elsewhere) so the shell no longer displays `LIVE` while the amber Sandbox banner is shown. This exposed a pre-existing route bug: portal routes are mounted under `/portal`, but `isSandboxPath()` matched only `/sandbox`, so `sandboxMode` never turned on and the mirror pages called Live API paths. `isSandboxPath()` now accepts both; `tests/e2e/merchant/shell.spec.ts` covers the badge and asserts that a mirror page requests only `/api/v1/merchant/sandbox/...`.
 - Counts and ids are unchanged (137 articles, 154 terms, 60 quick answers, 51 lessons, 224 exam-pool questions); the generated Guide/Academy and Companion snapshot were regenerated.
+
+## Full Guide/Academy accuracy audit (2026-11-25)
+
+Fourteen read-only domain scans covered all 137 Guide articles, 154 terms, 60 quick answers, 32 situations, 26 safeguard cards, the 31-screen context map, 51 Academy lessons, 102 lesson checks, 224 exam-pool questions and 16 labs. The deduplicated register is `design/07-guides-and-academy/accuracy-audit-2026-11-25.md`.
+
+- **Content corrections.** Counts, menu/screen lists, statuses, timings, action labels and workflow prose were corrected to the working tree: 119 models, 10 menu sections, 5 reporting screens, 31 context screens, 4 report types, 17 ledger scenarios, 14 deploy steps, 21 named networks, 7 runtime phases, 4 backup-drill checks, approval expiry, flat join SLA, 4/24/72/120-hour AML SLAs, emergency auto-lift, permanent inbound dedupe, 64 KiB unverified bodies, dashboard tiles, shard widths and error codes. The Guide no longer claims unsupported maker-checker, cash-out, AML-monitoring, canary, OIDC, webhook-replay, step-up-auth, password-change, retention or POS-token behavior; where a feature is intended but missing, the text says so.
+- **Academy corrections.** Wrong keys were fixed (`q-m0-002`, the 60/40 four-eyes example, masked-token visibility, approval expiry, check recording, report types, SLA hours, stored shard balances, cash-out/reserve behavior, breaker classes), counts were aligned to 51/102/224/16/92, and role examples now name the authority a task needs rather than a default role that lacks it. The Academy still carries open product-decision notes in `academy_content_questions.md`.
+- **Code changes made in the same pass.** See the 2026-11-25 rows in `TRACKER.md` and the affected core/edge/merchant parts. The highest-risk fixes are AML `TRUE_MATCH` case/suspension, neutral screening reasons, AML approval-context confidentiality, provisional-report gate, object-GC lock/retention, refund/chargeback ceilings, settlement-fee eligibility, OTP render fields, read-only inquiry, link/application/wallet enforcement, merchant profile protection and withdraw, default role authorities, dashboard Webhook Inbox Lag, adjustments deep link, Jobs `REFUND_INQUIRY` filter, empty-journal tile and backup alert fallback.
+- **Verification.** Guide/Academy extractors, Companion snapshot, content/clarity gates, typechecks, targeted DB-free suites, front builds and Playwright are run after regeneration; the DB-backed full core suite and live deployment remain environment-dependent.
 
 ## Contextual Help
 

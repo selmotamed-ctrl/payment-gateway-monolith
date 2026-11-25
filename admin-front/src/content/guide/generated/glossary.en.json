@@ -96,12 +96,13 @@
     "aliases": [
       "API key",
       "token",
-      "pg_live"
+      "pg_live",
+      "pg_test"
     ],
     "related": [
       "secret"
     ],
-    "short": "A secret string (starting `pg_live_`) that lets a merchant's software create links. Shown once.",
+    "short": "A secret string that lets a merchant's software create links. Live tokens start `pg_live_`; sandbox tokens start `pg_test_`. Shown once.",
     "ar": "رمز الوصول"
   },
   {
@@ -558,7 +559,8 @@
     "related": [
       "sandbox"
     ],
-    "short": "Our emulator of the payment companies. It answers every rail in the Sandbox plane; never in production."
+    "short": "Our emulator of the payment companies. It answers every rail in the Sandbox plane; never in production.",
+    "ar": "سكك الدفع الوهمية"
   },
   {
     "slug": "attempt",
@@ -979,7 +981,7 @@
     "related": [
       "secret"
     ],
-    "short": "Changing a secret on schedule or after a leak, with an overlap period.",
+    "short": "Changing a secret on schedule or after a leak. Overlap exists for merchant webhook signing secrets; a gateway credential set is replaced and re-verified instead.",
     "ar": "تدوير المفاتيح"
   },
   {
@@ -991,7 +993,8 @@
     "related": [
       "safeguard"
     ],
-    "short": "An attack that makes our server call addresses it should not. Blocked by the engine."
+    "short": "An attack that makes our server call addresses it should not. Blocked by the engine.",
+    "ar": "تزوير الطلبات من جهة الخادم"
   },
   {
     "slug": "safeguard",

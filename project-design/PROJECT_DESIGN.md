@@ -3186,7 +3186,7 @@ Dispute, adjustment and cash-out summaries return a `byCurrency` array in additi
 
 <a id="coreengine"></a>
 
-> **Part ID:** `core.engine` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.engine` · **Status:** `partial` · **Last verified:** 2026-11-25 · **Verified against:** `5a24f6f+working-tree`
 
 # Core Engine
 
@@ -3831,11 +3831,16 @@ OD-10 and `resolveEnvironment(merchantStatus)` are removed. Checkout and merchan
 
 - **Attempt wallet snapshot (2026-11-24).** Each attempt records the link wallet and its GL account; refunds/chargebacks use that snapshot. New links reject a wallet/currency mismatch.
 
+## Accuracy remediation: OTP rendering and read-only inquiry (2026-11-25)
+
+- The checkout merges the gateway-specific OTP fields (`max_attempts`, `otp_length`, `resend_cooldown_seconds`, `expires_at`) from the fallback action when the declarative flow renders only `actionType`. A seeded OTP flow no longer shows hardcoded 3/60 limits instead of the gateway setting.
+- `StepExecutor` refuses a `MOVES_MONEY` step when the execution phase is `VERIFY` with `VERIFY_MONEY_STEP_FORBIDDEN`; the spec validator rejects such flows with the same code. Inquiry remains a status check even for a stored pre-validator flow.
+
 ---
 
 <a id="coreledger"></a>
 
-> **Part ID:** `core.ledger` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `working-tree`
+> **Part ID:** `core.ledger` · **Status:** `partial` · **Last verified:** 2026-11-25 · **Verified against:** `working-tree`
 
 # Double-Entry Ledger
 
@@ -4267,11 +4272,19 @@ Every currency-scoped account resolution requires a currency. `LedgerPostContext
 
 `payment_attempts.wallet_id` and `wallet_gl_account_id` snapshot the link settlement wallet at creation and are backfilled from the link. Confirmation, refund and chargeback wallet selection use the snapshot when present, so a later wallet of the same currency cannot silently receive the booking. New links reject `LINK_WALLET_CURRENCY_MISMATCH`; historical links are not rewritten.
 
+## 18. Accuracy remediation: refunds, disputes and settlement (2026-11-25)
+
+- **Refund ceiling.** `claimRefundAdjustment` now checks the merchant's `negativeBalanceCeiling` before the gateway refund call. A refund that would take the wallet below the ceiling is refused with `409 REFUND_NEGATIVE_BALANCE_CEILING_EXCEEDED`; nothing is sent to the partner and no ledger entry is posted.
+- **Dispute intake.** `openDisputeWithDraftedAdjustment` sets the attempt to `DISPUTED` for settled statuses. The intake reserve is posted only when it stays within the ceiling; otherwise a P1 `HELD` operator case is opened, `escrowed` stays false and the reservation is not booked. The later outcome path still checks the ceiling.
+- **Settlement sweeps.** `postSettlementSweeps` now sweeps only attempts whose confirmation used `GATEWAY_CLEARING`: payer-surcharge/split attempts and attempts whose route cost model has `accrue_fee_at_confirm=true`. Statement-only, merchant-direct, internal and fee-at-source attempts are skipped, because they never created a clearing balance. This also stops statement rows with no local attempt from being swept.
+- **Correction adjustments.** `CORRECTION` with a `MERCHANT_WALLET` target posts a deliberate treasury-to-wallet credit keyed by the adjustment. The legacy `GATEWAY_FEE_ACCRUAL` target still posts the fee true-up. Any other target is refused with `CORRECTION_TARGET_UNSUPPORTED`.
+- **Reconciliation label semantics.** The stored enum names are legacy and counter-intuitive: `MISSING_AT_GATEWAY` is a statement line with no local attempt, and `MISSING_LOCALLY` is a local attempt absent from the statement. The code and tests keep those values; the Guide now documents the real meaning instead of reversing it.
+
 ---
 
 <a id="coregovernance"></a>
 
-> **Part ID:** `core.governance` · **Status:** `partial` · **Last verified:** 2026-11-24 · **Verified against:** `53afea5+working-tree`
+> **Part ID:** `core.governance` · **Status:** `partial` · **Last verified:** 2026-11-25 · **Verified against:** `53afea5+working-tree`
 
 # Governance and Compliance
 
@@ -4687,11 +4700,22 @@ The Reporting Studio now covers the full authoring and filing lane in addition t
 
 `commissionReceivableCeiling` and `negativeBalanceCeiling` are evaluated per posting currency; a scalar never mixes LYD/USD/EUR. The admission guard passes the link currency, `merchantOpenCashoutTotal` is wallet-currency scoped, the receivable SQL filters all three branches (attempt, adjustment, merchant-level netting), and the netting worker evaluates each currency bucket separately with per-currency aged cases and notices. The generic approval dispatcher now enforces domain checker roles; `approval:check` alone is insufficient.
 
+## 20. Accuracy remediation: AML and approval confidentiality (2026-11-25)
+
+- **Manual `TRUE_MATCH` disposition.** `POST /aml/matches/:id/disposition` now requires a written rationale, allows suppression only for a `FALSE_POSITIVE` with a future expiry, and on `TRUE_MATCH` opens a confidential AML case, blocks onboarding readiness, marks a beneficial owner `CONFIRMED_MATCH`, and suspends an active merchant with the closed `AML` reason code. The operation is idempotent per screening. The disposition response returns the `amlCaseId`.
+- **Screening outcome confidentiality.** Onboarding confirmed matches now store `decisionReasonCode: "POLICY"`. The merchant-facing join-request view maps legacy screening-related codes (`AML_CONFIRMED_MATCH`, `SCREENING_CONCERN`, sanctions/PEP/watchlist/adverse-media) to `POLICY` at read time. Periodic screening suspends with `AML`, keeping the detailed trigger in the AML case and audit row.
+- **Approval detail.** `GET /approvals/:id` now requires the confidential AML authority when the subject is `AML_CASE`, so Finance cannot read AML case metadata through `approval:read`. The helper is `approvalSubjectRequiresConfidentialAmlAccess`.
+- **Regulatory report gate.** `submitRegulatoryReport` rejects a missing reporting rule and requires either a `CONFIRMED` rule or at least one required output format with `CONFIRMED` schemas. A report with no rule and no outputs can no longer be filed.
+- **Backup policy checker.** `executeBackupPolicyApproval` enforces the `SECURITY_ADMIN`/`FINANCE` domain role in addition to `approval:check`; the seeded `SECURITY_ADMIN` now has `approval:read/check/write`.
+- **Cash-out AML stop.** `executeCashout` refuses with `409 CASHOUT_AML_HOLD` while a merchant AML case is `OPEN`, `IN_REVIEW`, `PENDING_CHECKER`, `FROZEN` or `ESCALATED_STR`.
+- **AML case reads.** `GET /aml/cases/:id` writes an `AML_CASE_VIEWED` audit row.
+- **Default roles.** `COMPLIANCE` now has merchant/KYB read-write, `OPERATOR` has merchant/KYB read and KYB write, and `MLRO` has merchant/KYB read, matching the documented onboarding workflows.
+
 ---
 
 <a id="coreworkers"></a>
 
-> **Part ID:** `core.workers` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `53afea5+working-tree`
+> **Part ID:** `core.workers` · **Status:** `partial` · **Last verified:** 2026-11-25 · **Verified against:** `53afea5+working-tree`
 
 # Background Workers and Outboxes
 
@@ -5180,6 +5204,11 @@ See `core.route-health`.
 ### 20.1 PSP-M currency grouping and historical audit (2026-11-24)
 
 PSP-M refunds, disputes opened/decided and cash-outs are grouped by currency and the XLSX sheets carry a Currency column. `bun run currency:mismatch-report` is read-only: it lists settlement/fee-variance/cash-out journal entries whose GL account currencies differ from the business object and never edits the append-only ledger. Corrections go through the approved adjustment workflow.
+
+## 21. Accuracy remediation: periodic screening and settlement (2026-11-25)
+
+- `PeriodicScreeningWorker` continues to open the confirmed-match AML case once and suspend an active merchant. The merchant-visible `suspensionReasonCode` is now `AML` (inside the closed code set and the exact-match redaction rule); the detailed `SCREENING_CONFIRMED_MATCH` trigger stays in the AML case and the `MERCHANT_SUSPENDED` audit row.
+- Settlement sweeps now run from `BackgroundJobHandlers` only for attempts that used `GATEWAY_CLEARING` (fee accrual or payer surcharge/split). See `core.ledger` section 18.
 
 ---
 
@@ -8152,7 +8181,7 @@ Report execution, saves, publishes, chrome set-default/reconcile-defaults and me
 
 <a id="coreobject-storage"></a>
 
-> **Part ID:** `core.object-storage` · **Status:** `implemented` · **Last verified:** 2026-11-24 · **Verified against:** `working-tree`
+> **Part ID:** `core.object-storage` · **Status:** `implemented` · **Last verified:** 2026-11-25 · **Verified against:** `working-tree`
 
 # Shared Object & Asset Storage Engine
 
@@ -8417,6 +8446,10 @@ Implemented end to end. Deviations recorded:
   owner for merchant bundles, and discard a content-addressed loser.
 - Added indexes for the object explorer and access-log filters, append-only
   access logs, immutable authorization/tenant columns and schema version 37.
+
+## Accuracy remediation: GC, locks and retention (2026-11-25)
+
+`runGcBatch` re-reads the candidate under a `SELECT ... FOR UPDATE` row lock, checks active locks, legal hold, retention and staging/GC eligibility again, and only then writes `gcClaimToken`. `bindInTx` also locks the object row before checking the claim, so a lock cannot be inserted after the GC re-check and before the blob moves. `placeLegalHold` locks the row and refuses `409 STORAGE_OBJECT_GC_IN_PROGRESS` when a claim is active. The blob still moves to `.trash` before the row becomes `PURGED`; the trash sweep keeps it for seven days, so the row status and the physical trash window are separate concepts. The Guide now documents both.
 
 ---
 
@@ -10121,7 +10154,7 @@ quarantine/AV queue; and the access audit trail. Authority-gated actions:
 
 <a id="admin-uiroutes"></a>
 
-> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-23 · **Verified against:** `53afea5+working-tree`
+> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-25 · **Verified against:** `53afea5+working-tree`
 
 # Admin Route and Page Catalog
 
@@ -10456,6 +10489,13 @@ The Dashboard Route health card shows forced and conflict counts. See
 - **Guide** adds a reading-progress bar, copy-link actions, version-aware read counts and edge-case deep-link scrolling.
 
 - **Currency selector (2026-11-24).** Dashboard and merchant 360 monetary cards follow the selected reporting currency; the dashboard sends `currency` to `/stats/overview` and `/stats/export`, and merchant 360 uses the stats response currency instead of the first wallet.
+
+## Accuracy remediation: dashboard, adjustments and jobs (2026-11-25)
+
+- The Dashboard now renders the fifth metric tile **Webhook Inbox Lag** from `webhookInboxLagSeconds` (target under 30 s). The actual metric strip is Gross Volume, Success Rate, Open Action Queues, Unknown Backlog and Webhook Inbox Lag; the header pill is `Operational`.
+- The Adjustments page consumes `?attemptId=` and `?merchantId=` and pre-fills the create form, so **Create refund/adjustment** from the Transaction drawer no longer opens an empty page.
+- The Jobs & Outbox type filter includes `REFUND_INQUIRY`.
+- The Journal Entries unbalanced tile includes entries with zero lines, not only entries whose lines do not sum to zero.
 
 ---
 
@@ -11045,6 +11085,15 @@ regenerated.
 - **Aligned content.** `b05-01` now says a `PENDING` merchant uses the separate Sandbox envelope (no non-existent platform setting); `b06-10` says the wrong environment is rejected; `b07-05` says it is rejected with no priority-2 alert; `b12-06`, glossary terms `sandbox`/`fake-rails`, and quick answers `q-055`/`q-056` describe the Sandbox plane and Fake Rails accurately; Academy lesson `l-m5-5` and exam question `q-m1-009` use the corrected answer.
 - **Merchant shell.** The drawer badge follows `sandboxMode` (`SANDBOX` inside `/sandbox/*` and the mirror, `LIVE` elsewhere) so the shell no longer displays `LIVE` while the amber Sandbox banner is shown. This exposed a pre-existing route bug: portal routes are mounted under `/portal`, but `isSandboxPath()` matched only `/sandbox`, so `sandboxMode` never turned on and the mirror pages called Live API paths. `isSandboxPath()` now accepts both; `tests/e2e/merchant/shell.spec.ts` covers the badge and asserts that a mirror page requests only `/api/v1/merchant/sandbox/...`.
 - Counts and ids are unchanged (137 articles, 154 terms, 60 quick answers, 51 lessons, 224 exam-pool questions); the generated Guide/Academy and Companion snapshot were regenerated.
+
+## Full Guide/Academy accuracy audit (2026-11-25)
+
+Fourteen read-only domain scans covered all 137 Guide articles, 154 terms, 60 quick answers, 32 situations, 26 safeguard cards, the 31-screen context map, 51 Academy lessons, 102 lesson checks, 224 exam-pool questions and 16 labs. The deduplicated register is `design/07-guides-and-academy/accuracy-audit-2026-11-25.md`.
+
+- **Content corrections.** Counts, menu/screen lists, statuses, timings, action labels and workflow prose were corrected to the working tree: 119 models, 10 menu sections, 5 reporting screens, 31 context screens, 4 report types, 17 ledger scenarios, 14 deploy steps, 21 named networks, 7 runtime phases, 4 backup-drill checks, approval expiry, flat join SLA, 4/24/72/120-hour AML SLAs, emergency auto-lift, permanent inbound dedupe, 64 KiB unverified bodies, dashboard tiles, shard widths and error codes. The Guide no longer claims unsupported maker-checker, cash-out, AML-monitoring, canary, OIDC, webhook-replay, step-up-auth, password-change, retention or POS-token behavior; where a feature is intended but missing, the text says so.
+- **Academy corrections.** Wrong keys were fixed (`q-m0-002`, the 60/40 four-eyes example, masked-token visibility, approval expiry, check recording, report types, SLA hours, stored shard balances, cash-out/reserve behavior, breaker classes), counts were aligned to 51/102/224/16/92, and role examples now name the authority a task needs rather than a default role that lacks it. The Academy still carries open product-decision notes in `academy_content_questions.md`.
+- **Code changes made in the same pass.** See the 2026-11-25 rows in `TRACKER.md` and the affected core/edge/merchant parts. The highest-risk fixes are AML `TRUE_MATCH` case/suspension, neutral screening reasons, AML approval-context confidentiality, provisional-report gate, object-GC lock/retention, refund/chargeback ceilings, settlement-fee eligibility, OTP render fields, read-only inquiry, link/application/wallet enforcement, merchant profile protection and withdraw, default role authorities, dashboard Webhook Inbox Lag, adjustments deep link, Jobs `REFUND_INQUIRY` filter, empty-journal tile and backup alert fallback.
+- **Verification.** Guide/Academy extractors, Companion snapshot, content/clarity gates, typechecks, targeted DB-free suites, front builds and Playwright are run after regeneration; the DB-backed full core suite and live deployment remain environment-dependent.
 
 ---
 
@@ -11995,6 +12044,12 @@ A separate "Sandbox Studio (Testing & Training)" section adds `/sandbox/overview
 A "Sandbox Live Mirror" section reuses the Live pages under `/sandbox/mirror/*` (cash-outs, disputes, POS, credentials, team, webhooks, tokens, statements, reports). The Axios interceptor rewrites Live API paths to `/sandbox/mirror/*` and the router aliases Live navigation into the mirror; Exit sandbox removes `?live=1` and returns to Live. Wallet detail shows the sharded ledger, balance controller, pending cash-outs and a real sandbox cash-out; payment detail shows charged/settled/fee/commission/net, refundable amount, refund, dispute simulation/resolution, checkout inspector secrets and journal lines.
 
 - **Dashboard currency (2026-11-24).** The overview accepts `?currency=` and renders volume, commission, net and wallet totals for the selected currency; `byCurrency` carries the per-currency breakdown. Wallet statements are filtered by the link wallet as well as currency.
+
+## Accuracy remediation: applications, links and onboarding (2026-11-25)
+
+- A Live application created by an already-`ACTIVE` merchant is created `ACTIVE`. Existing `PENDING` applications are activated when the join request is approved. Before this, every new Live application stayed `PENDING` with no activation route.
+- `POST /links` rejects `409 LINK_WALLET_MUST_MATCH_APPLICATION` when the requested wallet differs from the application's assigned wallet; the link always settles to the application wallet.
+- The onboarding profile `PUT` refuses sensitive legal/tax/registration edits after activation (`MERCHANT_PROFILE_REQUIRES_APPROVAL`) and while a join request is under review (`JOIN_REQUEST_UNDER_REVIEW`). A new merchant withdraw route returns the join request to `DRAFT`; the onboarding page exposes **Withdraw application** and the normal submit flow can run again.
 
 ---
 
@@ -16344,7 +16399,7 @@ The storage certificate upload step hands the object-storage cert directory and 
 
 <a id="deploybackup"></a>
 
-> **Part ID:** `deploy.backup` · **Status:** `partial` · **Last verified:** 2026-11-24 · **Verified against:** `1000189+working-tree`
+> **Part ID:** `deploy.backup` · **Status:** `partial` · **Last verified:** 2026-11-25 · **Verified against:** `1000189+working-tree`
 
 # Backup Daemon
 
@@ -16579,6 +16634,11 @@ under the backup master key). The restore drill samples up to
 keyring and compares the SHA-256; the report's `checks.objectStorage` carries the
 result; the drill tries every tier and the escrow for the row's KEK version. The daemon receives the object-storage URL/client certs/KEK keyring from
 the deploy engine.
+
+## Accuracy remediation: policy checker and alert fallback (2026-11-25)
+
+- `executeBackupPolicyApproval` enforces the `SECURITY_ADMIN`/`FINANCE` subject domain in addition to `approval:check`; a `SUPPORT`/`OPERATOR` checker cannot apply a policy. The seeded `SECURITY_ADMIN` now carries `approval:read/check/write`.
+- The core fallback policy used when the daemon is unreachable now reports `alertLagSeconds = 300`, matching the daemon/config default, instead of 60.
 
 ---
 
@@ -17199,7 +17259,7 @@ Security regression suites exist for core-back (`test/security-regressions/`), t
 
 <a id="testingsuites"></a>
 
-> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-24 · **Verified against:** `53afea5+working-tree`
+> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-25 · **Verified against:** `53afea5+working-tree`
 
 # Test Suite Catalog
 
@@ -17733,6 +17793,13 @@ The full core suite runs against PostgreSQL 18 + Redis (25,316 tests, 0 failures
 - `core-back/test/remediation-high.test.ts` now covers a USD settlement sweep, the USD account selection and `autoPost=false` suppressing the sweep.
 - `core-back/test/governance-execution.test.ts` covers per-currency commission-receivable filtering and domain checker roles.
 - `core-back/test/automation/commission-netting.test.ts` asserts per-currency aged cases.
+
+## Accuracy remediation tests (2026-11-25)
+
+- `core-back/test/approval-queue.test.ts` covers `approvalSubjectRequiresConfidentialAmlAccess` (AML_CASE only, aliases and null).
+- Existing targeted suites re-run for the changed paths: `governance-execution`, `approval-queue`, `onboarding-four-eyes`, `phase4-onboarding-aml-disputes-recon`, `reconciliation-follow-up`, `spec-validator`, `engine/step-executor`, `callback-inbound-handler`, `security-regressions/h8-webhook`, `refund-and-aml-guards`, `backup-admin`, `objectStorageOrphanSweepGuard`, `objectStorage`.
+- `merchant-back/test/core-forwarding.test.ts` covers the new `/onboarding/join-request/withdraw` forwarding.
+- The Guide/Academy extractor drift tests must be re-run after the content regeneration; live DB/Playwright runs remain environment-dependent.
 
 ---
 

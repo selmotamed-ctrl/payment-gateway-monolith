@@ -129,7 +129,7 @@
     "id": "q-022",
     "article": "b04-03",
     "question": "How long does an approval request last?",
-    "answer": "Seven days. After that it returns to draft and the maker must re-submit."
+    "answer": "Seven days for most subjects; join-request, AML-case and operator-case approvals last three days. After expiry the request is closed `EXPIRED` and cannot be approved; the maker must create a new request."
   },
   {
     "id": "q-023",
@@ -219,19 +219,19 @@
     "id": "q-037",
     "article": "b08-05",
     "question": "What does ledger drift mean?",
-    "answer": "The two sides of the ledger equation differ. It must always be zero. Any drift is a priority-1 incident and automatic payouts stop."
+    "answer": "The two sides of the ledger equation differ. It must always be zero. Any drift is a priority-1 incident. The current code opens a case but does not stop payouts by itself; pause cash-outs deliberately."
   },
   {
     "id": "q-038",
     "article": "b08-06",
     "question": "What is MISSING_AT_GATEWAY?",
-    "answer": "We say a payment succeeded but the partner's statement does not show it. This is the most serious reconciliation result."
+    "answer": "A statement line has no matching local attempt. Check for a late payment, a duplicate or a partner error before crediting anything. The opposite result, `MISSING_LOCALLY`, means a local attempt is absent from the statement and is the more serious one for us."
   },
   {
     "id": "q-039",
     "article": "b08-07",
     "question": "Who approves the subtraction of a cash-out?",
-    "answer": "A different Finance user from the one who processed it."
+    "answer": "There is no second Finance approval today: one Finance user with `cashout:review` processes it, the merchant requester is a different principal, and the decision is audited."
   },
   {
     "id": "q-040",
@@ -303,13 +303,13 @@
     "id": "q-051",
     "article": "b10-05",
     "question": "Why did payouts stop?",
-    "answer": "The ledger equation shows drift. Automatic payouts stop until the cause is understood and the drift is zero."
+    "answer": "The ledger equation shows drift. The current code opens a P1 case but does not stop payouts by itself; a person must pause cash-outs. Keep them paused until the cause is understood and the drift is zero."
   },
   {
     "id": "q-052",
     "article": "b10-07",
     "question": "I think my password leaked. What now?",
-    "answer": "Tell the Security Admin immediately and change your password from a clean device. Do not wait to be sure."
+    "answer": "Tell the Security Admin immediately; there is no self-service change-password screen yet, so ask for a reset from a clean device. Do not wait to be sure."
   },
   {
     "id": "q-053",

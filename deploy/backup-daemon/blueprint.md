@@ -6,7 +6,7 @@ Generated from: `deploy.backup`.
 
 ## Backup Daemon
 
-> Status: `partial` · Last verified: 2026-11-24
+> Status: `partial` · Last verified: 2026-11-25
 
 ## 1. Purpose and scope
 
@@ -239,3 +239,8 @@ under the backup master key). The restore drill samples up to
 keyring and compares the SHA-256; the report's `checks.objectStorage` carries the
 result; the drill tries every tier and the escrow for the row's KEK version. The daemon receives the object-storage URL/client certs/KEK keyring from
 the deploy engine.
+
+## Accuracy remediation: policy checker and alert fallback (2026-11-25)
+
+- `executeBackupPolicyApproval` enforces the `SECURITY_ADMIN`/`FINANCE` subject domain in addition to `approval:check`; a `SUPPORT`/`OPERATOR` checker cannot apply a policy. The seeded `SECURITY_ADMIN` now carries `approval:read/check/write`.
+- The core fallback policy used when the daemon is unreachable now reports `alertLagSeconds = 300`, matching the daemon/config default, instead of 60.

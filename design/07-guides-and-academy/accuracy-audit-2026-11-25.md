@@ -1,6 +1,6 @@
 # Guide and Academy accuracy audit — 2026-11-25
 
-Status: completed first pass (14 read-only scans), remediation in progress.
+Status: completed first pass (14 read-only scans); code and content remediation delivered on `guide-accuracy-remediation`. Remaining product decisions are listed below.
 
 ## Method
 

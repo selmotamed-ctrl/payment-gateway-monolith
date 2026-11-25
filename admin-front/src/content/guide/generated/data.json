@@ -616,7 +616,7 @@
       {
         "n": 3,
         "id": "commission-profile",
-        "fails": "No live commission profile covers this payment method at this amount."
+        "fails": "No effective commission profile covers this merchant and payment method."
       },
       {
         "n": 4,

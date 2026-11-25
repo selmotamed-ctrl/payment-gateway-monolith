@@ -583,21 +583,21 @@
     "options": [
       {
         "id": "o1",
-        "text": "No. It is shown once to the merchant.",
+        "text": "Only a masked form such as `****4f2a`; the secret itself is never shown.",
         "correct": true
       },
       {
         "id": "o2",
-        "text": "Yes, masked.",
+        "text": "The full token, on the Merchants screen.",
         "correct": false
       },
       {
         "id": "o3",
-        "text": "Yes, on the Merchants screen.",
+        "text": "No part of the token, not even the last four characters.",
         "correct": false
       }
     ],
-    "why": "We store only a fingerprint."
+    "why": "The full token is shown once to the merchant; staff can see only the masked last four characters."
   },
   {
     "id": "c-l-m2-3-1",
@@ -777,7 +777,7 @@
         "correct": false
       }
     ],
-    "why": "Stale requests are never applied."
+    "why": "Stale requests are never applied; the approve attempt is refused with 409."
   },
   {
     "id": "c-l-m3-3-1",
@@ -819,16 +819,16 @@
     "refs": [
       "b04-04"
     ],
-    "stem": "Nobody ratifies an emergency suspension in 24 hours. What happens?",
+    "stem": "Nobody ratifies an emergency suspension within its 24-hour deadline and the 48-hour grace. What happens?",
     "options": [
       {
         "id": "o1",
-        "text": "An alert fires and the suspension stays in force.",
+        "text": "The platform lifts the suspension automatically and marks the approval EXPIRED.",
         "correct": true
       },
       {
         "id": "o2",
-        "text": "It lifts automatically.",
+        "text": "The merchant stays suspended forever.",
         "correct": false
       },
       {
@@ -837,7 +837,7 @@
         "correct": false
       }
     ],
-    "why": "The system fails safe."
+    "why": "The suspension stays in force through the grace, then lifts; staff are told."
   },
   {
     "id": "c-l-m3-4-1",
@@ -1013,7 +1013,7 @@
       },
       {
         "id": "o3",
-        "text": "the deadline pause.",
+        "text": "the applicant's business name.",
         "correct": false
       }
     ],
@@ -1359,7 +1359,7 @@
     "refs": [
       "b07-09"
     ],
-    "stem": "Bulk Inquiry should be limited to",
+    "stem": "**Inquire selected** should be limited to",
     "options": [
       {
         "id": "o1",
@@ -1809,16 +1809,16 @@
     "refs": [
       "b08-07"
     ],
-    "stem": "Who approves the final subtraction of a cash-out?",
+    "stem": "Who approves and executes the wallet subtraction of a cash-out?",
     "options": [
       {
         "id": "o1",
-        "text": "A different Finance user from the one who processed it.",
+        "text": "The Finance user with `cashout:review` who processed it.",
         "correct": true
       },
       {
         "id": "o2",
-        "text": "The same user.",
+        "text": "A different Finance user.",
         "correct": false
       },
       {
@@ -1827,7 +1827,7 @@
         "correct": false
       }
     ],
-    "why": "Two people."
+    "why": "One Finance user handles the request; the wallet is reduced in the same step."
   },
   {
     "id": "c-l-m6-6-2",
@@ -1869,7 +1869,7 @@
     "refs": [
       "b08-09"
     ],
-    "stem": "Who approves a drafted chargeback?",
+    "stem": "Who approves the drafted chargeback outcome?",
     "options": [
       {
         "id": "o1",
@@ -1887,7 +1887,7 @@
         "correct": false
       }
     ],
-    "why": "The system drafts but never approves."
+    "why": "The intake reserve already posted; the outcome waits for a human Finance checker."
   },
   {
     "id": "c-l-m6-7-2",
@@ -1899,11 +1899,11 @@
     "refs": [
       "b08-13"
     ],
-    "stem": "A chargeback would breach the merchant's negative-balance ceiling. What happens?",
+    "stem": "A dispute's intake reserve would breach the merchant's negative-balance ceiling. What happens?",
     "options": [
       {
         "id": "o1",
-        "text": "It does not post and a P1 case opens.",
+        "text": "The reserve is not posted and a P1 case opens.",
         "correct": true
       },
       {
@@ -1917,7 +1917,7 @@
         "correct": false
       }
     ],
-    "why": "Finance chooses to collect, net or suspend."
+    "why": "The intake reserve respects the ceiling; Finance chooses to collect, net or suspend."
   },
   {
     "id": "c-l-m7-1-1",
@@ -2503,7 +2503,7 @@
     "options": [
       {
         "id": "o1",
-        "text": "Partner faults, not customer mistakes.",
+        "text": "Errors the gateway's error map marks `counts_toward_breaker`; customer mistakes and 429s are ignored.",
         "correct": true
       },
       {
@@ -2517,7 +2517,7 @@
         "correct": false
       }
     ],
-    "why": "Customer mistakes never count."
+    "why": "Each error map decides per error; wrong codes and 429 are always excluded."
   },
   {
     "id": "c-l-m8-6-1",
@@ -2649,25 +2649,25 @@
     "refs": [
       "b10-05"
     ],
-    "stem": "Ledger drift stops",
+    "stem": "Ledger drift is treated as",
     "options": [
       {
         "id": "o1",
-        "text": "automatic payouts.",
+        "text": "a P1 incident; no cash-out by hand until it is understood and zero.",
         "correct": true
       },
       {
         "id": "o2",
-        "text": "logins.",
+        "text": "normal if the amount is small.",
         "correct": false
       },
       {
         "id": "o3",
-        "text": "sandbox.",
+        "text": "a reason to retry payments.",
         "correct": false
       }
     ],
-    "why": "Resume only when the drift is zero."
+    "why": "The invariant worker opens a P1 case; RB-04 applies."
   },
   {
     "id": "c-l-m9-2-2",
@@ -2697,7 +2697,7 @@
         "correct": false
       }
     ],
-    "why": "Replace the secret with two-person approval and run the credential check."
+    "why": "Replace the secret with `credential:write` and run the credential check."
   },
   {
     "id": "c-l-m9-3-1",
@@ -2979,11 +2979,11 @@
     "refs": [
       "b12-10"
     ],
-    "stem": "Which three checks must pass in the scratch cluster for a restore drill to pass?",
+    "stem": "Which checks must pass in the scratch cluster for a restore drill to pass?",
     "options": [
       {
         "id": "o1",
-        "text": "Double-entry zero drift, Sharded balance parity and Audit hash chain.",
+        "text": "Double-entry zero drift, Sharded balance parity and Audit hash chain, plus the object-storage check when the vault is configured.",
         "correct": true
       },
       {
@@ -2997,7 +2997,7 @@
         "correct": false
       }
     ],
-    "why": "The drill runs exactly these three invariant checks, signs the report and destroys the scratch cluster."
+    "why": "The drill runs the database invariant checks and, when configured, the object-storage parity/decryption check; then it destroys the scratch cluster."
   },
   {
     "id": "c-l-m10-5-1",

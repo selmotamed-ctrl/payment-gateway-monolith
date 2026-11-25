@@ -196,7 +196,7 @@
       "b08-05",
       "b10-05"
     ],
-    "body": "### What to do\nTreat as P1. Payouts stop automatically. Follow [[a:b10-05|RB-04 Reconciliation or ledger drift]]. Never edit numbers."
+    "body": "### What to do\nTreat as P1. There is no automatic payout stop today; a person must pause cash-outs deliberately. Follow [[a:b10-05|RB-04 Reconciliation or ledger drift]]. Never edit numbers."
   },
   {
     "id": "s-cashout-request",
@@ -212,7 +212,7 @@
       "b08-07",
       "b08-13"
     ],
-    "body": "### What to do\nCheck the snapshot of bank details, merchant state, balance and holds. Process with a checklist; a different Finance user approves the subtraction."
+    "body": "### What to do\nCheck the snapshot of bank details, merchant state, balance and holds. Process with a checklist; the merchant requester is a different principal and the decision is audited. There is no second Finance approval today."
   },
   {
     "id": "s-chargeback-arrives",
@@ -230,7 +230,7 @@
       "b08-09",
       "b08-08"
     ],
-    "body": "### What to do\nCheck the evidence deadline. The system drafts the adjustment; a human Finance checker must approve before any money moves."
+    "body": "### What to do\nCheck the evidence deadline. The system drafts the adjustment and may post the intake reserve; a human Finance checker must approve the final outcome."
   },
   {
     "id": "s-negative-balance",
@@ -344,7 +344,7 @@
       "b10-06",
       "b06-09"
     ],
-    "body": "### What to do\nFollow [[a:b10-06|RB-05 Credentials or tokens expired or failing]]: replace the secret through two-person approval and run the credential check."
+    "body": "### What to do\nFollow [[a:b10-06|RB-05 Credentials or tokens expired or failing]]: replace the set's entries, run the live **Verify** action, and remember that a gateway credential set has no overlap window and no two-person approval today."
   },
   {
     "id": "s-approval-refused",

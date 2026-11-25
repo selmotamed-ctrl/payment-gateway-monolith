@@ -213,7 +213,7 @@ export const loadArticles: (lang:"en"|"ar") => Promise<Article[]>; // dynamic im
 | Reading paths | 8 | `@@path` lines (`ALL` plus the 7 staff roles) |
 | Quick answers (FAQ) | 58 | `@@faq` blocks |
 | Data blocks | 3 | `ledger-events` (16 events), `visible-rails` (7 vectors), `attempt-transitions` |
-| Context map screens | 26 | `screens` array of `context-map` |
+| Context map screens | 31 | `screens` array of `context-map` |
 | Error codes (from b13-01) | 19 | first-column backticked tokens |
 | Edge cases | 140 | parsed from the repository's v4 design file |
 
@@ -284,6 +284,8 @@ A **card** is a short checklist for a risky action. Body of every card has exact
 
 If the existing code uses a different mechanism (`AwaitedConfirmationDialog`), call `confirm()` first and keep the existing dialog afterwards. Never remove an existing confirmation.
 
+**Current wiring (2026-11-25):** 20 of the listed action points call `useSafeguard`. `sg-reverse-adjustment` and `sg-release-reservation` have no matching action on the current screens. `sg-trigger-backup`, `sg-run-restore-drill`, `sg-update-backup-policy` and `sg-place-legal-hold` are card content only; their buttons do not open the dialog yet. Do not describe a checklist as present unless the action is in the wired list.
+
 ## II-8. Internationalisation
 
 * UI chrome strings (buttons, headings of guide pages) go through the existing locale system with English and Arabic entries; add both. Keep Arabic UI strings short and conventional.
@@ -319,7 +321,7 @@ The Guide itself has no backend. Read-tracking reuses the Academy progress recor
 * [ ] **G-1 Reader.** Router entries, pages `index/book/article/glossary/cards/playbook/edge-cases`, `MarkdownView` (callouts, widget placeholders, diagrams, TOC), glossary auto-link + popover, `UiStatusBanner`, reading paths, `StuckPanel`. *Verify:* build + `guide-reader.spec.ts`.
 * [ ] **G-2 Search.** `GuideSearch`, palette, global shortcut. *Verify:* `guide-search.test.ts`, `guide-palette.spec.ts`.
 * [ ] **G-3 Simulators.** Five widgets + engines + `tools` page. *Verify:* `guide-widgets.test.ts`.
-* [ ] **G-4 Context help + safeguards.** `ContextHelpButton/Drawer`, `PageHeader` integration, `useSafeguard` + dialog + the 22 integrations in §II-7. *Verify:* `guide-context.spec.ts`, `guide-safeguard.spec.ts`, the route-coverage unit test.
+* [ ] **G-4 Context help + safeguards.** `ContextHelpButton/Drawer`, `PageHeader` integration, `useSafeguard` + dialog + the 20 wired integrations in §II-7. *Verify:* `guide-context.spec.ts`, `guide-safeguard.spec.ts`, the route-coverage unit test.
 * [ ] **G-5 Progress.** After Academy phase A-1: `ReadToggle` persists to the progress record (`guideRead`), "Continue reading", per-book progress rings, graceful offline fallback to `localStorage` key `pg.guide.read`. *Verify:* `guide-reader.spec.ts` read-persistence step.
 * [ ] **G-6 Cleanup & audit.** Delete old `content.ts`; run the verification procedure of Part 0 rule 5 over all screens; fill `guide_content_fixes.md` / `guide_content_questions.md`; full test run; update `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §17 with a short note "Guide v1.0 replaced by design/07-guides-and-academy/guide_system_design_and_content.md".
 
@@ -432,7 +434,7 @@ If today is your first day, read Book 0 and Book 1 in order. They take about two
 5. **Books.** Read in order when you are learning.
 
 ### Safety checklists before risky buttons
-When you press a risky button (approving a refund, releasing money, going live with a gateway) a checklist appears first. Tick each box honestly. The ticks are not recorded anywhere; they exist to slow you down for ten seconds at the moment mistakes happen.
+When you press most risky buttons (approving a refund, releasing money, going live with a gateway) a checklist appears first. Twenty of the listed action points are wired to the dialog; the adjustment-reverse and reservation-release cards describe actions the current screens do not offer, and the legal-hold and backup cards are content-only until their buttons are wired. If a risky button opens no checklist, still read the relevant article and write the reason yourself. Tick each box honestly. The ticks are stored in the approval/audit record for many actions (and in the report execution audit where applicable), so they are evidence of what you checked; they are not a substitute for judgment.
 
 ### Marking progress
 Each article has a **Mark as read** switch. Your progress feeds the Employee Academy. Articles you read are remembered; if an article changes in a major way you will be asked to read it again.
@@ -638,7 +640,7 @@ A **signature** proves a message really came from someone who knows a shared sec
 A **certificate** is a digital ID card issued by an authority we trust. In ordinary web browsing only the *server* shows its ID. In **mutual TLS (mTLS)** *both* sides show an ID. Our internal services use mTLS so that only our own services can talk to the core, even inside our own network.
 
 ### Key rotation
-Changing a secret on a schedule, or immediately after a leak, is **rotation**. The system supports an overlap where old and new secrets both work briefly so that nothing breaks.
+Changing a secret on a schedule, or immediately after a leak, is **rotation**. An overlap where old and new secrets both work briefly is implemented for **merchant webhook signing secrets**. A gateway credential set is different: its **Rotate secrets** action replaces every entry, leaves the set `UNTESTED` and needs a fresh **Verify**; there is no overlap window.
 @@end
 
 @@article id=b01-08 book=1 order=8 title="Sandbox versus Live: test money and real money" roles=ALL minutes=2 ui=AVAILABLE related=b06-10,b12-06
@@ -801,10 +803,7 @@ Someone asks to pay. No money moves yet.
 
 1. **The merchant creates a payment link** with an amount and a currency, in the Merchant Portal or through the API. The platform stores it with a unique secret key.
    * *Recorded:* the payment link. **The amount lives here and nowhere else.**
-2. **The customer opens the link** on the checkout website. The core decides **which payment methods to show**. We call these methods *rails*, and [[a:b02-06|The four layers]] explains them. A method appears only if all three of these are true:
-   * the merchant allows it;
-   * a fee is agreed for it;
-   * a healthy *route* can carry this amount. A route is a working connection to a partner. The rule is in [[a:b06-12|The visible-rails formula]].
+2. **The customer opens the link** on the checkout website. The core decides **which payment methods to show**. We call these methods *rails*, and [[a:b02-06|The four layers]] explains them. A method appears only when all of the visible-rails conditions are true — the merchant allows it, the link allows it, an effective commission profile covers it, a single route is active/healthy/in scope/outside maintenance, its credentials are verified, the amount and daily cap fit, the currency matches and the rail is not blocked. The full nine-line rule is in [[a:b06-12|The visible-rails formula]].
 3. **The customer picks a method and fills in a short form.** For Sadad, she types her mobile number. The checkout sends the core only three things: the **link key**, the **method** and **what she typed**. **It never sends an amount.** The core reads the amount from the link, so nobody can change the price by editing the page or the web address.
 
 ### Part 2: Safety checks and the start (steps 4 to 6)
@@ -846,13 +845,13 @@ The customer finishes, the partner answers, and we check the answer before we be
    A message from the customer's browser, such as "I paid" or a return link, is only a **hint**. It makes the core ask the partner. It is never proof. See [[a:b06-07|Confirmation channels and how much each one is trusted]].
 10. **The core writes it into the books.** In **one** database transaction, the attempt becomes `SUCCEEDED` **and** the **journal entry** is written. The journal entry is the accounting record in our books, which we call the *ledger*. It credits the shop's wallet, records our commission and keeps everything balanced. Both happen together or neither happens.
     * *Recorded:* the new state and the journal entry. The shop's balance is calculated from the ledger, so it now includes this payment. See [[a:b08-04|How each kind of payment is posted]].
-11. **Everyone is told.** Layla's page changes to "Paid". The shop's POS screen updates if it has one. The merchant is notified through the **outbox**, a safe queue that makes sure each message is sent once.
+11. **Everyone is told.** Layla's page changes to "Paid". The shop's POS screen updates if it has one. The merchant is notified through the **outbox**, a safe queue with at-least-once delivery; consumers are idempotent, so a repeated event cannot double-credit.
 
 ### Part 4: After the customer has paid (steps 12 and 13)
 The customer is finished. The money still has to travel, and our books must agree with the partner's.
 
 12. **Later, the partner pays us.** A partner usually pays in one batch some days after the customers paid. "T+N" means the payment day plus N days. The partner also sends a **statement**, its own list of what it settled. We **reconcile**: we compare the statement with our records line by line, and any difference becomes a case for Finance. See [[a:b08-06|Reconciliation]]. Some partners pay the merchant directly instead, as [[a:b08-10|Settlement]] explains.
-13. **The merchant cashes out.** The shop's wallet is only a number on our books: what we owe the shop. To get that money into its real bank account, the shop requests a **cash-out**. Finance processes it under two-person control. See [[a:b08-07|Cash-outs]].
+13. **The merchant cashes out.** The shop's wallet is only a number on our books: what we owe the shop. To get that money into its real bank account, the shop requests a **cash-out**. One Finance user with `cashout:review` processes it; the merchant requester is a different principal, and the decision is audited. See [[a:b08-07|Cash-outs]].
 
 :::tip If you remember only three things
 1. **The server decides, not the browser.** The amount comes from the link, and a success is believed only after the server's own five checks.
@@ -871,12 +870,12 @@ Every merchant on the platform has a story. It starts when a business owner regi
 We follow **Noon Mart**, the online shop from the payment story. You can read the full rules of each state in [[a:b05-01|What a merchant is]], and the onboarding steps in detail in [[a:b05-02|The onboarding journey]].
 
 ### Chapter 1: Noon Mart joins
-1. **Registration.** The owner opens the public landing page and registers with a phone number, an e-mail address or a Google account. The owner must verify that phone, e-mail or account. You do not see this step in the Back Office. It happens on the merchant side.
+1. **Registration.** The owner opens the public landing page and registers with a phone number or an e-mail address and a password. Google sign-in is not available yet: the route answers `501 GOOGLE_IDENTITY_NOT_CONFIGURED` unless an OIDC provider is configured. There is no phone-only "verify identity" step; that route is retired (`410 IDENTITY_VERIFICATION_RETIRED`). After sign-in the owner completes onboarding inside the authenticated merchant session. You do not see this step in the Back Office. It happens on the merchant side.
 2. **Business profile and KYB.** KYB means **Know Your Business**: we check that the business is real and we know who owns it. The owner enters the business details, uploads documents and declares the owners. You see this work on the **Join Requests** and **KYB Review** screens.
 3. **Submission.** The owner submits. The platform creates a **join request**, which is the formal record of the application. A review clock starts. This clock is called the **SLA**, the deadline we promise for the review. An automatic screening also runs.
 
 ### Chapter 2: Staff decide
-4. **Review.** A reviewer checks the documents, the owners, the screening and the risk. If something is missing, the reviewer may ask Noon Mart for more information. While the shop answers, the clock pauses. You work on this on the **Join Requests** screen.
+4. **Review.** A reviewer checks the documents, the owners, the screening and the risk. If something is missing, the reviewer may ask Noon Mart for more information. The review deadline is a flat **5 calendar days**; asking for information does **not** pause it. You work on this on the **Join Requests** screen.
 5. **Decision.** The reviewer approves or rejects. Some cases need a second person to agree. For example, a Compliance colleague may be that second person. You see this on **Join Requests** and on **Approvals**.
 
 ### Chapter 3: Noon Mart trades
@@ -893,10 +892,10 @@ Read the table from top to bottom. It follows the chapters above. The last colum
 
 | Stage | What happens | Where you see it |
 | :--- | :--- | :--- |
-| Landing & registration | A person registers with phone, e-mail or Google and verifies it. | (merchant side) |
+| Landing & registration | A person registers with phone or e-mail and password. Google sign-in is not implemented. | (merchant side) |
 | Business profile & KYB | They enter business details, upload documents, declare owners. | **Join Requests**, **KYB Review** |
-| Submission | A *join request* is submitted; a review clock (SLA) starts; an automatic screening runs. | **Join Requests** |
-| Review | A reviewer checks documents, owners, screening and risk. May ask for more information (the clock pauses). | **Join Requests** |
+| Submission | A *join request* is submitted; a flat 5-calendar-day review deadline starts; an automatic screening runs. | **Join Requests** |
+| Review | A reviewer checks documents, owners, screening and risk. May ask for more information; the deadline does not pause. | **Join Requests** |
 | Decision | Approve or reject; some cases need a second person. | **Join Requests**, **Approvals** |
 | Active merchant | Wallet(s), applications, links, POS, API tokens. | **Merchants** |
 | Daily life | Payments, disputes, cash-outs, statements. | many screens |
@@ -913,19 +912,19 @@ Think of a bank building. Customers use the front counter. Staff use a door with
 ### The interfaces: six doors
 Each door is built for one kind of user and has its own way to prove who you are. Here are the six doors, with Noon Mart as our example:
 * Layla opens **Checkout** to pay. She does not sign in. The link key in her link is her key.
-* Noon Mart's owner uses the **Merchant Portal** to run the shop. The owner signs in with a phone number, an e-mail address or a Google account, and then with **MFA**. MFA (multi-factor authentication) means a second proof after the password, such as a code.
-* Huda, Ali and Omar use the **Back Office**, the site you are reading now. They sign in with a username, a password and MFA.
+* Noon Mart's owner uses the **Merchant Portal** to run the shop. The owner signs in with an e-mail address or phone number **and a password**, then with **MFA**. MFA (multi-factor authentication) means a second proof after the password, such as a code. Google sign-in is not available; it requires a configured OIDC provider.
+* Huda, Ali and Omar use the **Back Office**, the site you are reading now. They sign in with an e-mail address or phone number, a password and MFA.
 * Noon Mart's own software uses the **Merchant API** to create links automatically. It sends a token that starts with `pg_live_`. The merchant may also set an **IP allow-list**, a list of network addresses that are allowed to use the token.
-* A display in the shop shows live payments on a **POS screen**. Each screen has its own token and a 15-minute idle limit.
+* A display in the shop shows live payments on a **POS screen**. The screen runs under the signed-in merchant session and has a 15-minute idle limit; the per-screen token is issued but not yet enforced on the stream.
 * Payment companies send us messages through **inbound callbacks**. A callback is a message that a payment company sends to us. We accept it only after we check it.
 
 The table puts the same facts in one place. Read each row from left to right: who uses the door, how they prove who they are, and what the door is for.
 
 | Interface | Users | How they sign in | Purpose |
 | :--- | :--- | :--- | :--- |
-| Merchant Portal | merchants, staff, cashiers | phone/e-mail/Google + MFA | run the business |
+| Merchant Portal | merchants, staff, cashiers | e-mail/phone + password + MFA | run the business |
 | Checkout | anonymous payers | none; the link key is the key | pay |
-| Back Office (this) | staff | username/password + MFA | operate and govern |
+| Back Office (this) | staff | e-mail/phone + password + MFA | operate and govern |
 | Merchant API | merchants' software | `pg_live_` token, optional IP allow-list | automate links |
 | POS screens | in-store displays | per-screen token, 15-minute idle limit | live payment display |
 | Inbound callbacks | payment companies | signatures, IP allow-lists, secret path tokens | deliver verified events |
@@ -933,10 +932,10 @@ The table puts the same facts in one place. Read each row from left to right: wh
 ### Confidentiality zones: what you must not look at or say
 A confidentiality zone is a kind of data with a strict rule about who may see it. You must not look at, copy or talk about this data unless the rule lets you.
 
-* **AML-CONFIDENTIAL:** screenings, matches, cases and reports. AML means anti-money-laundering. Only `COMPLIANCE`, `MLRO` and, for audit, `SECURITY_ADMIN` may see this data. `SUPPORT` can see *that* a merchant is suspended, but never *why*. You can read about the roles in [[a:b03-02|Your account: roles and authorities]].
-* **Gateway cost and platform margin:** merchants never see them.
+* **AML-CONFIDENTIAL:** screenings, matches, cases, the AML context on an approval and reports. AML means anti-money-laundering. Only `COMPLIANCE`, `MLRO`, or an account granted the explicit `aml:read` / `aml:write` authority, may see this data. `SECURITY_ADMIN` is **not** automatically allowed to see AML content; its security authority and its AML authority are separate. `SUPPORT` can see *that* a merchant is suspended, but never *why*. You can read about the roles in [[a:b03-02|Your account: roles and authorities]].
+* **Gateway cost and platform margin:** merchants see a payment's gateway fee in their payment lists, but not the platform's margin or the internal cost model. Do not describe the gateway fee as secret from the merchant.
 * **Secrets:** nobody can read a stored secret. You can only replace it.
-* **Personal data:** national IDs, phone numbers and documents are encrypted. Lists show them masked, and every read is logged.
+* **Personal data:** national ID numbers and document contents are encrypted; document views and AML case detail reads are audited. Phone numbers are not encrypted or masked the same way, and ordinary merchant detail/list reads are not audited. Treat all of it as confidential anyway.
 
 For example, a `SUPPORT` colleague opens Noon Mart's record and sees "suspended". The colleague can see the fact, but the reason stays hidden.
 
@@ -965,7 +964,7 @@ Think of a restaurant that can be paid through several terminals. The analogy ha
 | Layer | The restaurant analogy | In the platform | Screen |
 | :--- | :--- | :--- | :--- |
 | **Gateway** | one payment terminal and its manual | one technical door to one partner: web addresses, how we log in, the steps, how to read its answers | **Gateways** |
-| **Credential Set** | whose merchant account and key card is in that terminal | the secret identifiers for one gateway in one environment, owned by the platform or by a merchant, with a *settlement target* (where the money lands) | (inside Gateway Wizard step 2) |
+| **Credential Set** | whose merchant account and key card is in that terminal | the secret identifiers for one gateway in one environment, owned by the platform or by a merchant, with a *settlement target* (where the money lands) | **Credential Sets** |
 | **Rail** | the sign on the door: "Cards", "Mobile wallet" | what the customer sees and picks: name in Arabic and English, logo, the form they fill, limits | **Rails** |
 | **Route** | the rule "for cards use Terminal A first, Terminal B if A is broken" | the link between a rail and a gateway through a credential set, with priority, cost, limits, health and scope | **Routes** |
 
@@ -982,7 +981,7 @@ Nothing else is touched. Links already created keep working.
 The settlement target answers one question: after Layla pays, who receives the money from the partner? There are three answers.
 * `PLATFORM_CLEARING`: the partner pays **us**. We credit the merchant's wallet.
 * `MERCHANT_DIRECT`: the partner pays **the merchant** directly. We only record our commission as owed to us.
-* `PROVIDER_HELD`: the partner holds the funds for now.
+* `PROVIDER_HELD`: the partner holds the funds until settlement. The current ledger still books a gateway-clearing receivable; the label does not create a separate ledger mode.
 @@end
 
 @@article id=b02-07 book=2 order=7 title="Where the information is kept: a plain tour of the database" roles=ALL minutes=3 ui=AVAILABLE related=b02-02
@@ -990,7 +989,7 @@ The settlement target answers one question: after Layla pays, who receives the m
 The database is a set of record groups: business and money, gateway setup, what customers see, the engine’s recipes, what happened, people and compliance, and background work. You never need the table names to do your job.
 :::
 
-Think of the database as a large filing room. Each **table** is one drawer that holds one kind of record, such as merchants or payment attempts. The database has **76 tables**. You never need their names to do your job. But knowing what kinds of things are stored makes sense of the screens.
+Think of the database as a large filing room. Each **table** is one drawer that holds one kind of record, such as merchants or payment attempts. The database has **119 tables** (models). You never need their names to do your job. But knowing what kinds of things are stored makes sense of the screens.
 
 ### What one payment touches
 When Layla pays Noon Mart 25.500 LYD, several drawers are used:
@@ -1006,13 +1005,13 @@ Read the table one group per row. The "Size" column is the number of tables in t
 
 | Group | Size | What it stores (in plain words) |
 | :--- | :--- | :--- |
-| **A. Business & money** | 20 | merchants, users, sign-in code checks (MFA), applications, wallets, tokens and their IP allow-lists, payment links, POS terminals and POS screens, the ledger accounts, journal entries, commission and velocity rules, AML cases, adjustments, cash-outs, approval requests |
+| **A. Business & money** | 21 | merchants, users, sign-in code checks (MFA), merchant webhook endpoints and deliveries, applications, wallets, tokens and their IP allow-lists, payment links, POS terminals and POS screens, the ledger accounts, journal entries and lines, commission and velocity rules, AML cases, adjustments, cash-outs, approval requests |
 | **B. Gateway setup** | 7 | gateways, versions, test-evidence for versions, environments and addresses, how to log in to partners, amount settings, credential sets |
 | **C. What customers see** | 4 | logos, rails, form fields, routes |
 | **D. The engine's recipes** | 13 | signing recipes, flows and steps, parameters, outputs, status and error mappings, confirmation channels, polling, widgets, redirects, statement parsers, manual-transfer instructions |
-| **E. What happened** | 11 | attempts and attempt groups, step logs, incoming webhooks, operator cases, inquiry schedules, reconciliation, health samples, change logs, audit log |
-| **F. People, compliance, disputes, settings** | 14 | identities, join requests, KYB documents, KYB re-check requests, beneficial owners, screenings and matches, AML rules, reporting rules and reports, disputes, notification templates and notifications, platform settings |
-| **G. Background work & operations** | 7 | background jobs, outbox queues (safe queues for messages), backup records and restore drills, daily summary numbers for merchants and routes |
+| **E. What happened** | 16 | attempts and attempt groups, step logs, incoming webhooks, operator cases and their events and links, inquiry schedules, reconciliation runs and items, route-health samples and events, change logs, the audit log and its anchor |
+| **F. People, compliance, disputes, reporting, settings and stored files** | 46 | identities, join requests, KYB documents and re-check requests, beneficial owners, screenings and matches, AML rules and evidence, reporting rules, schemas, bindings, reports and outputs, incidents and their timeline/responders/actions/links/communications, filing adapters and submissions, disputes and attachments, notification templates and notifications, platform settings, session revocations, Academy certificates, the report registry (staff and merchant reports, chrome, assets, execution audits, rate/status records), the storage control plane, the sandbox sync records and the execution-plane marker |
+| **G. Background work & operations** | 12 | background jobs, deadline stages, worker cursors, ledger shards and their checkpoints and repairs, outbox queues (safe queues for messages), backup records and restore drills, daily summary numbers for merchants and routes |
 
 ### Three properties that matter to everyone
 1. **Money is stored with 4 decimal places** and never as a floating-point number. A floating-point number is a kind of number that computers round a little, so it is not safe for money.
@@ -1056,7 +1055,9 @@ Your **role** is your job family. The seven staff roles are:
 A role is only a label. What you can actually do is decided by your **authorities** — a list of specific permissions on your account. **An account with no authorities can do nothing**, whatever its role. The authority list is closed: nobody can grant an authority they do not hold, and nobody can change their own account; both go through the approval flow.
 
 ### Maker and checker switches
-Two switches on your account decide whether you may *propose* sensitive changes (**maker**) and/or *decide* them (**checker**). Roles come with typical settings, but **your account's switches are what count**. You can never be both for the same request.
+Two switches on your account decide whether the screens *offer* the maker and checker buttons. They are display flags. The server's real decision comes from your authorities; in particular, approving anything requires `approval:check`, and the server always refuses a checker who is the maker of the same request.
+
+The default seeded flags are: `GATEWAY_ADMIN` and `OPERATOR` are maker-only; `SECURITY_ADMIN` is both; `FINANCE`, `COMPLIANCE` and `MLRO` are checker-only; `SUPPORT` is neither. These are defaults, not a rule: your account's switches are what count. You can never be both maker and checker for the same request, whatever the flags say.
 
 :::note How to find out what you can do
 Your menu only shows screens you may open. Buttons you cannot use are hidden or refused. If you need something you cannot see, ask your manager; the Security Admin changes permissions under two-person control.
@@ -1068,7 +1069,7 @@ Your menu only shows screens you may open. Buttons you cannot use are hidden or 
 
 @@article id=b03-03 book=3 order=3 title="The menu, screen by screen" roles=ALL minutes=5 ui=AVAILABLE related=b03-05,b03-02,b03-07,b13-02
 :::summary Big picture in 20 seconds
-The menu on the left groups every Back Office screen into eight sections: Overview, Reporting, Onboarding, Governance, Operations, Finance, Gateways and Learning. You only see the screens your authorities allow, so your menu is shorter than this article. Use the tables below to find out what a screen is for, who normally uses it, and which article explains it in full.
+The menu on the left groups every Back Office screen into ten sections: Overview, Reporting, Onboarding, Governance, Operations, Finance, Gateways, Sandbox & Fake Rails, Sandbox Live Mirror and Learning. You only see the screens your authorities allow, so your menu is shorter than this article. Use the tables below to find out what a screen is for, who normally uses it, and which article explains it in full.
 :::
 
 ### How the menu works
@@ -1119,6 +1120,9 @@ This section is about control: who decides, who is on the team and what is recor
 | **AML Screenings** | decide matches against sanctions and watch lists | COMPLIANCE, MLRO | [[a:b09-03]] |
 | **AML Rules** | the rules that raise alerts | COMPLIANCE, MLRO | [[a:b09-04]] |
 | **AML Reports** | regulatory reports | COMPLIANCE, MLRO | [[a:b09-07]] |
+| **Reporting Studio** | author and validate the XML/XLSX formats used for regulatory returns | COMPLIANCE, MLRO | [[a:b09-07]] |
+| **Incidents** | declare, work and record regulatory incidents | COMPLIANCE, MLRO | [[a:b09-07]] |
+| **Filing Adapters** | the approved external channels that can send a report to an authority | COMPLIANCE, MLRO | [[a:b09-07]] |
 
 ### Operations
 This section is about the day-to-day running of payments and of the platform itself.
@@ -1158,6 +1162,22 @@ This section is about the connections to payment partners.
 | **Credential Sets** | the vault of login details we hold for each partner | GATEWAY_ADMIN | [[a:b03-12]] |
 | **Rails** | the payment methods a customer can pick | GATEWAY_ADMIN | [[a:b06-11]] |
 | **Routes** | which gateway serves which rail, in what order | GATEWAY_ADMIN | [[a:b06-11]] |
+
+### Sandbox & Fake Rails
+This section is about the separate practice plane. Nothing here moves real money.
+
+| Screen | What it is for | Typically used by | Read more |
+| :--- | :--- | :--- | :--- |
+| **Sandbox Overview** | the sandbox plane's health, its merchants and the Fake Rails controls | SECURITY_ADMIN, GATEWAY_ADMIN | [[a:b06-10]], [[a:b12-06]] |
+| **Sandbox Merchants** | create and inspect a sandbox merchant, its wallet, applications, links and payments | OPERATOR, COMPLIANCE | [[a:b12-06]] |
+| **Fake Rails Accounts & Clearing** | the emulator's accounts, holds, clearing pools, chaos scenarios and simulated statements | GATEWAY_ADMIN | [[a:b12-06]] |
+
+### Sandbox Live Mirror
+This section repeats the ordinary operational screens against the sandbox core, in read-only form. It is how you compare a sandbox result with the same screen you use in Live.
+
+| Screen | What it is for | Typically used by | Read more |
+| :--- | :--- | :--- | :--- |
+| **Sandbox Merchants, Wallets, Applications, Transactions, Disputes, Cash-Outs, Adjustments, Reconciliation, Gateways & Routes, Audit Logs, Jobs & Outbox and Reports** | a read-only mirror of each Live screen, backed by the sandbox database | OPERATOR, COMPLIANCE, FINANCE, SECURITY_ADMIN | [[a:b06-10]], [[a:b12-06]] |
 
 ### Learning
 | Screen | What it is for | Typically used by | Read more |
@@ -1201,16 +1221,17 @@ Exports contain personal and financial data. Save them only where company policy
 @@article id=b03-05 book=3 order=5 title="The Dashboard: every tile explained" roles=ALL minutes=2 ui=AVAILABLE related=b07-03,b10-02
 | Tile | Meaning | What to do if it looks bad |
 | :--- | :--- | :--- |
-| **Active Merchants** | merchants currently allowed to take payments | none; context |
-| **Pending** | applications or approvals waiting | work the queue; see Join Requests / Approvals |
-| **Unknown Backlog** and **Oldest** | number of payments in `UNKNOWN` and the age of the oldest | rising numbers or old items: Book 7, article on `UNKNOWN`; runbook RB-03 |
+| **Gross Volume** | successful value in the selected period, in the selected currency, with the number of successful attempts | none; context |
+| **Success Rate** | successes divided by counted attempts (successes + `FAILED` + `UNKNOWN`); pending and deliberate outcomes are excluded | a falling rate: look for one failing rail or gateway |
+| **Open Action Queues** | the total of pending approvals, open operator cases, join requests and AML cases, with each source named under it; all-time, not period-filtered | work the queue; open the screen named under the number |
+| **Unknown Backlog** | payments in `UNKNOWN` and the age of the oldest; all-time, not period-filtered | rising numbers or old items: Book 7, article on `UNKNOWN`; runbook RB-03 |
 | **Route health** | healthy, degraded and open routes, plus forced overrides and conflicts | a forced route is not the same as a healthy one; open Routes → Health; `OPEN_BREAKER`: runbook RB-01 |
 | **Join Request SLA** | onboarding reviews at risk of being late | assign and review |
 | **AML SLA** | compliance cases near or past their deadline | compliance team; escalate to MLRO |
 | **Webhook Inbox Lag** | delay between receiving a partner's message and processing it | if high: tell Engineering; RB-02 if signatures fail |
 | **Attempts By State** | how many payments are in each state | a growing `VERIFYING` or `UNKNOWN` bar is a warning |
 | **Approval Queue Ageing** | how long approvals have been waiting | checkers: clear old items or reassign |
-| **Live** badge | the screen is auto-refreshing | none |
+| **Operational** pill | the platform status label; the page refreshes when you press **Refresh**, it does not poll automatically | none |
 
 :::note
 The dashboard is a smoke alarm, not a diagnosis. When a tile worries you, open the screen it points to and read the individual items.
@@ -1383,7 +1404,7 @@ Columns: **Reference**, **Status**, **Amount**, **Merchant**, **Rail**, **Provid
 * A **Case** badge next to the status means an operator case is open on this attempt.
 * **Ledger entry** opens the journal entry ([[a:b03-13|Journal Entries]]).
 * Filters: **Status**, **Rail**, **Gateway**, **Merchant**, **Application**, **Currency**, **Amount** (a range) and **Created** (a date range). The status list shows all fourteen states from [[a:b07-02|The fourteen payment states]].
-* The newest attempts come first. There is no Excel export on this screen.
+* The newest attempts come first. There is no row-level Excel export of payment attempts, but the page has a **summary export** (the totals for the filtered set, not one row per payment).
 
 Each row has **Inspect**, and a menu with **Schedule inquiry** and **Open merchant**.
 
@@ -1470,8 +1491,8 @@ The screen says "Verify it before it is trusted". An `UNTESTED` set does not mak
 Type secrets only into this form. Never paste them into chat, a ticket or an e-mail, and never take a screenshot of the form while it is filled. If you think a secret leaked, follow [[a:b10-07|A secret may have leaked]].
 :::
 
-:::note The two-person rule
-[[a:b06-09|Credentials and Credential Sets]] says credential changes need two people. On this screen the buttons act immediately and are audited. Until that is settled, treat every action here as serious and check the gateway, the environment and the owner twice before you confirm.
+:::note Credential changes are direct today
+Unlike merchant payout-bank edits, credential-set create, rotate, verify and revoke are applied immediately and audited; there is no maker-checker approval in the current code. Treat every action here as serious and check the gateway, the environment and the owner twice before you confirm.
 :::
 @@end
 
@@ -1501,7 +1522,7 @@ Columns: **Entry ID**, **Reference type**, **Reference**, **Memo**, **Lines**, *
 * **Reference type** says what caused the entry: `PAYMENT_ATTEMPT`, `ADJUSTMENT`, `AML_RELEASE`, `AML_VOID`, `SETTLEMENT_SWEEP`, `FEE_VARIANCE`, `COMMISSION_NETTING` or `DISPUTE_OUTCOME`. The postings are explained in [[a:b08-04|How each kind of payment is posted]].
 * **Balance** says **Balanced** or **Unbalanced**. An entry with no lines at all counts as **Unbalanced**, because it is broken.
 * Filters: **Reference type**, **GL account ID** and **Posted** (a date range).
-* The newest entries come first. There is no Excel export.
+* The newest entries come first. There is no row-level Excel export of individual journal entries, but the page has a **summary export** of the filtered totals.
 * `?glAccountId=<id>` opens the screen already filtered to one account. **Ledger Audit & Invariant** links here that way. `?open=<id>` opens one entry.
 
 ### The entry drawer
@@ -1525,7 +1546,7 @@ A busy account receives many postings at the same moment, and each shard can onl
 
 Each shard numbers its postings 1, 2, 3, … without skipping any number. A **checkpoint** records "this shard's balance was X after posting number N". Before the platform moves a checkpoint forward it **proves** two things: that every posting between the old and the new number really exists, and that the old checkpoint plus those postings equals the shard's balance. If the proof fails, the checkpoint stays where it was, a priority-1 case opens and the shard shows **GAP** or **PARITY** in its status.
 
-When an account becomes very busy, a background process can give it **more shards**. This changes only where new postings go. Old postings and old balances stay where they are, so nothing is moved and nothing can be lost. Wallets start with one shard; the main platform accounts start with sixteen.
+When an account becomes very busy, a background process can give it **more shards**. This changes only where new postings go. Old postings and old balances stay where they are, so nothing is moved and nothing can be lost. Merchant wallets start with **one** shard. The three hot system accounts (`TREASURY`, `GATEWAY_CLEARING`, `PLATFORM_INCOME`) start at **128** shards, and the other system accounts at **16**.
 
 ### The actions
 Accounts with finance write access (`finance:write`) see two actions in the GL account drawer. Both are applied **immediately**, need a **Reason** of at least 10 characters, and are audited.
@@ -1572,7 +1593,7 @@ Open one directly with `?tab=outbox`, `?tab=audit`, `?tab=jobs` or `?tab=notific
 
 **Audit outbox** (monitor only). Audit records waiting to be copied to the audit store and added to its tamper-evident chain. Columns: **Record**, **Action**, **Entity type**, **Entity ID**, **Actor role**, **Status**, **Lease until**, **Created** and **Shipped at**. Status is **Shipped** or **Queued**. Before-and-after data and the actor's e-mail are never shown. See [[a:b04-07|Audit trails]].
 
-**Background jobs.** Columns: **Job**, **Type**, **Reference**, **State**, **Attempts**, **Available at**, **Last error** and **Actions**. The types are `RECONCILIATION_RUN` and `ADJUSTMENT_EXECUTION`. The states are `QUEUED`, `RUNNING`, `SUCCEEDED` and `FAILED`. **FAILED means the job used all its attempts and will not run again by itself.**
+**Background jobs.** Columns: **Job**, **Type**, **Reference**, **State**, **Attempts**, **Available at**, **Last error** and **Actions**. The types are `RECONCILIATION_RUN`, `ADJUSTMENT_EXECUTION` and `REFUND_INQUIRY` (the follow-up that asks a partner about a refund stuck in `EXECUTING`). The states are `QUEUED`, `RUNNING`, `SUCCEEDED` and `FAILED`. **FAILED means the job used all its attempts and will not run again by itself.**
 
 **Notifications.** The table is titled **Failed notifications** and shows only failed ones until you change **Status** to see all. Columns: **Notification**, **Template**, **Channel**, **Language**, **Recipient** (masked), **Status**, **Attempts**, **Next attempt** and **Actions**. Channels are `SMS`, `EMAIL` and `IN_APP`. Statuses are `QUEUED`, `SENT`, `DELIVERED`, `FAILED` and `SUPPRESSED`.
 
@@ -1596,14 +1617,14 @@ A job that failed may fail again for the same reason. Read the **Last error** fi
 
 @@article id=b03-15 book=3 order=15 title="Reports: the catalog, the studio and shared headers and footers" roles=SECURITY_ADMIN,FINANCE,COMPLIANCE,OPERATOR minutes=4 ui=AVAILABLE related=b03-13,b03-14,b12-08
 :::summary Big picture in 20 seconds
-The Reporting section has four screens. **Report Catalog** runs a published report and prints or exports it. **Report Studio** verifies a report definition written by an AI, previews a draft and publishes it. **Headers & Footers** stores the reusable page chrome. **Merchant Reports** lets staff review merchant-authored reports, their execution history and suspend a merchant's Studio. A report is declarative: it never contains raw SQL, and every query runs read-only.
+The Reporting section has five screens. **Report Catalog** runs, prints or exports a published report. **Report Studio** verifies a report definition written by an AI, previews a draft and publishes it. **Headers & Footers** stores the reusable page chrome. **Needs Migration** lists reports and chrome built for an older engine version. **Merchant Reports** lets staff review merchant-authored reports, their execution history and suspend a merchant's Studio. A report is declarative: it never contains raw SQL, and every query runs read-only.
 :::
 
 ### Why reports are separate from dashboards
 A dashboard shows a live summary. A report is a document: it has a title, a period, a language, a page header and footer, and a verification hash. You can print it as a vector PDF or export its data. The report engine executes only the declarative query definition that was verified and published. It cannot write to the database.
 
 ### Report Catalog
-Open **Reporting → Catalog**. Only reports your role can run are listed. Choose a report, fill its inputs in the side panel, choose the output language and any header/footer, then click **Generate Report**. The preview shows the exact paginated pages; **Print** opens the browser's vector PDF dialog and **Export Excel** downloads one sheet per dataset. If the report has a merchant input, the merchant is chosen there; a merchant report generated for a merchant is limited to that merchant's data.
+Open **Reporting → Report Catalog**. The catalog is not filtered by run authority: a report you are not allowed to execute is listed, and the execution request is refused later with a clear error. Choose a report, fill its inputs in the side panel, choose the output language and any header/footer, then click **Generate Report**. The preview shows the exact paginated pages; **Print** opens the browser's vector PDF dialog and **Export Excel** downloads one sheet per dataset. If the report has a merchant input, the merchant is chosen there; a merchant report generated for a merchant is limited to that merchant's data.
 
 ### Report Studio
 Open **Reporting → Studio**. First download the AI transcript. It contains the live schema, the allowed query vocabulary and the bilingual rules. Give it to the external AI, then paste the JSON it returns and verify it. The scorecard shows five layers: schema and translations, query safety and partition pruning, authority inference, asset and HTML safety, and a read-only dry run. If a layer fails, copy the repair prompt back to the AI. When everything passes, generate a draft preview, then save it as verified or publish it. A conflict between domains is shown as a warning; a Security Admin can attach an authority override with a written justification.
@@ -1613,6 +1634,9 @@ Open **Reporting → Headers & Footers**. A header or footer is its own reusable
 
 ### Merchant Reports
 Open **Reporting → Merchant Reports** to review the reports merchants authored in their own Studio. Each row names the merchant and report, and **Executions** shows that merchant's run history. With `security:write`, **Suspend Studio** immediately blocks that merchant's runner and Studio until **Resume Studio** is used. The platform-wide switch and whether merchants may attach asset bundles are the `merchant_reports.policy` setting in **Platform Settings**.
+
+### Regulatory reporting screens
+The **Governance** section also holds three screens that are not part of the Report Catalog: **Reporting Studio** (the XML/XLSX schemas, bindings and templates used by regulatory returns), **Incidents** (declare, work and close a regulatory incident, including the INCIDENT return) and **Filing Adapters** (the approved external channels and their submissions). They sit under Compliance and MLRO authorities and are described in [[a:b09-07|Regulatory reporting]].
 
 ### Safety rules
 * A report spec never contains raw SQL; the engine compiles the declarative query.
@@ -1647,7 +1671,7 @@ Read the diagnostic code and its **How to fix** line. Do not edit the JSON by gu
 | "Forbidden" or `403` | The core refused: role, authority, or two-person rule. | Do not retry. Ask the Security Admin. |
 | "Session expired" / sent to login | Short session or signed out elsewhere. | Sign in again. Re-check what you were doing; nothing is saved automatically. |
 | "The request is out of date" | Someone changed the item after the request was made (`base_version` mismatch). | The maker must create a new request from the current values. |
-| An approval expired | Requests last seven days. | The maker re-submits if still needed. |
+| An approval expired | Most requests last seven days; join-request, AML-case and operator-case requests last three days. | The maker re-submits if still needed. |
 | "Cannot approve your own request" | Two-person rule. | Ask a different checker. |
 
 :::warning
@@ -1718,11 +1742,11 @@ Find the entity in the first column. The second column lists the fields you may 
 
 | Entity | Descriptive (direct, logged) | Sensitive (approval needed) |
 | :--- | :--- | :--- |
-| Merchant | trade name, display name, logo, support contact; contact phone/e-mail (after verifying the new value) | legal name, tax ID, registration no., business category, **payout bank details**, risk tier, KYB status override, commission-receivable ceiling, negative-balance ceiling, status |
-| Application | name, description; expected volume (a big increase opens a review case) | **assigned wallet, rail whitelist, redirect-domain allow-list**, resuming after a platform pause |
+| Merchant | trade name, display name, logo, support e-mail/phone | legal name, tax ID, registration no., business category, **contact phone/e-mail**, **payout bank details**, risk tier, KYB status override, commission-receivable ceiling, negative-balance ceiling, status |
+| Application | name, description; expected volume (a big increase needs manual review; no automatic case opens today) | **assigned wallet, rail whitelist, redirect-domain allow-list**; resuming after a platform pause applies directly today, although a second person is intended |
 | Wallet | — | status (currency can never change) |
 | Staff user | name, language, notification preferences | role, authorities, maker/checker flags, application scope |
-| Access token | create (needs fresh sign-in), revoke (immediate) | disabling the IP allow-list |
+| Access token | create (no step-up today), revoke (immediate) | disabling the IP allow-list (applied immediately today) |
 | POS | names, locations | — |
 
 ### What a pending sensitive change does
@@ -1733,13 +1757,13 @@ A pending sensitive change leaves the **current value in force** until it is app
 
 @@article id=b04-03 book=4 order=3 title="The life of an approval request" roles=ALL minutes=2 ui=AVAILABLE related=b04-06,b03-07
 :::summary Big picture in 20 seconds
-An approval request is drafted by a maker with an exact before-and-after diff and a reason. A different checker then approves or rejects it. Approving executes the change in the same step, so an approved request never hangs.
+An approval request is drafted by a maker with an exact before-and-after diff and a reason. A different checker then approves or rejects it. Most approvals execute in the same transaction. An ADJUSTMENT approval can instead queue an execution job and return `202 QUEUED`; check the job and the adjustment state, because a queued execution can fail after the approval.
 :::
 
 An approval request is a formal question: "May we make this change?" It travels through a few states, and each state tells you who must act next.
 
 ### The path of a request
-The diagram shows the states. Read it from left to right. A request starts as a draft and goes to review. It is then executed, or rejected. After a rejection the maker may re-draft it.
+The diagram shows the states. Read it from left to right. A request is created as `PENDING_REVIEW` (some flows first create a `DRAFT`), then approved/executed or rejected. A rejected request can be re-drafted as a new request. Expiry is final `EXPIRED`: it cannot be approved and does not return to draft.
 
 ```diagram
 DRAFT ──submit──► PENDING_REVIEW ──checker approves──► APPROVED ──executes atomically──► EXECUTED
@@ -1749,16 +1773,16 @@ DRAFT ──submit──► PENDING_REVIEW ──checker approves──► APPRO
 
 ### What each person does
 * **Maker** creates a request. It holds a *diff* and a reason. A diff shows exactly what would change, from the old value to the new value.
-* **Checker** sees the diff, the reason and the field class. Approving **executes the change in the same step**, so an approved request never "hangs".
+* **Checker** sees the diff, the reason and the field class. Most approvals execute in the same transaction; an ADJUSTMENT approval may queue a `202` execution job. Check the job and the target record, because a queued execution can still fail.
 * **Rejecting** requires a written reason. The maker sees it.
-* **Withdrawing:** the maker may withdraw before a checker acts.
+* **Withdrawing:** the maker may withdraw before a checker acts only on flows that implement it (for example merchant pending changes and join requests). There is no generic **Withdraw** action on every approval today.
 
 ### When a request stops being valid
-* **Stale requests:** the item may change after the request was drafted. Then its `base_version` no longer matches. The request is invalidated and returns to draft. This stops an old request from silently overwriting a newer change.
-* **Expiry:** pending requests expire after 7 days and return to draft.
+* **Stale requests:** the item may change after the request was drafted. Then its `base_version` no longer matches. The request is refused and the stale change is not applied. It does not return to draft automatically; make a new request against the current version. Some subjects (for example USER and APPLICATION today) do not carry a base version at all, so a reviewer must compare the current row manually.
+* **Expiry:** pending requests expire and are closed as `EXPIRED`. Most approvals last 7 days; join-request, AML-case and operator-case approvals last 3 days. The expiry housekeeping worker performs the close, and an expired request cannot be approved afterwards.
 
 ### A worked example
-Ali drafts a request to change Noon Mart's payout bank details. The diff shows the old account and the new account. His reason says that the owner asked by phone. The request is now `PENDING_REVIEW`. Huda from Finance opens it, compares the old and new values and approves. The new bank details take effect in the same step. If Huda had rejected it, she would have written a reason, and Ali would see it.
+Ali drafts a request to change Noon Mart's payout bank details. The diff shows the old account and the new account. His reason says that the owner asked by phone. The request is now `PENDING_REVIEW`. Huda from Compliance (or the MLRO) opens it, compares the old and new values and approves. The new bank details take effect in the same step. If Huda had rejected it, she would have written a reason, and Ali would see it.
 
 ### What you see on the Approvals screen
 On the **Approvals** screen you see the requests that are waiting for a checker. Each row shows the **Maker**, the subject and the **Details**. The buttons are **Approve** and **Reject**, and a **Decision Reason** field goes with them.
@@ -1784,17 +1808,17 @@ Read the table by columns. The left column lists actions that make the platform 
 
 | Reduces risk (may be immediate, then ratified) | Increases risk or moves money (approval first) |
 | :--- | :--- |
-| suspending a merchant | reinstating a merchant |
-| tightening an AML or velocity rule | loosening a rule |
+| suspending a merchant (emergency) | reinstating a merchant |
 | pausing a route | releasing held money |
 | | paying a cash-out; refunds; adjustments |
+| | tightening **or** loosening an AML rule (no immediate AML-tightening path today); a velocity rule is applied directly and audited, not through this approval flow |
 
 To **ratify** means to review an action that already happened and confirm it. The first column is "act now, ratify later". The second column is "approve first, act later".
 
 ### Emergency suspension
 An authorised user may suspend a merchant at once. The system then creates a request in **emergency ratification** mode. An `MLRO` or a *different* `COMPLIANCE` user must review it within **24 hours**.
 
-If nobody ratifies in time, alerts fire and the suspension **stays in force**. The system fails safe, never open. It is never reversed automatically.
+If nobody ratifies by the deadline, alerts fire and the suspension stays in force for a **48-hour grace window**. If it is still not ratified after that grace, the platform lifts the emergency suspension automatically and returns the merchant to its previous state. This is deliberately different from "fail closed forever": the record of the unratified emergency action stays open for review. The current code implements this split policy; the intended rule is that an unratified emergency action must not silently become permanent.
 
 ### An example
 Omar sees strong signs of fraud at Noon Mart and suspends it at once. Noon Mart stops being paid. The system asks the `MLRO` or another `COMPLIANCE` user to review the suspension within 24 hours. Reinstating Noon Mart later is the opposite direction. That needs approval first.
@@ -1828,19 +1852,21 @@ Role names such as `FINANCE` and `MLRO` are explained in [[a:b03-02|Your account
 | Action | Typical maker | Required checker | Effect |
 | :--- | :--- | :--- | :--- |
 | Adjustment: refund, chargeback, manual credit/debit, correction | FINANCE, OPERATOR, or the system (for chargeback drafts) | FINANCE (a different person) | journal entry posted |
-| Cash-out marked complete → subtracted | FINANCE | FINANCE (different person) | wallet reduced |
-| Commission profile create/change | FINANCE | FINANCE or SECURITY_ADMIN | new version effective from a date |
+| Cash-out processed by Finance | FINANCE with `cashout:review` | no second Finance actor today; the merchant requester is a different principal, and the decision is audited | wallet reduced in the same transaction |
+| Commission profile create/change | FINANCE | no maker-checker today; applied directly with a checklist and audit. Intended: FINANCE or SECURITY_ADMIN | new version effective from a date |
 | Sensitive merchant fields | OPERATOR, COMPLIANCE, MERCHANT_ADMIN (request) | COMPLIANCE or FINANCE, by field | field updated, logged |
 | Sensitive application fields | MERCHANT_ADMIN or OPERATOR | OPERATOR (different) or COMPLIANCE for risk | applies to new payments |
-| Velocity / AML rule change | COMPLIANCE, FINANCE | SECURITY_ADMIN/FINANCE for velocity; MLRO for AML | new rule version |
+| Velocity / AML rule change | COMPLIANCE, FINANCE | AML: MLRO approval. Velocity: no maker-checker today (direct + audit). Intended: SECURITY_ADMIN/FINANCE | new rule version |
 | AML case resolution (release/void/freeze) | COMPLIANCE | MLRO | ledger entry posted |
 | Regulatory report submission | COMPLIANCE | MLRO | report frozen, marked submitted |
 | Join request decision | OPERATOR or COMPLIANCE | per the four-eyes policy (see Merchants) | merchant activated or rejected |
-| Merchant suspension | OPERATOR, COMPLIANCE | emergency: immediate, ratified within 24 h by MLRO or another COMPLIANCE | merchant suspended |
+| Merchant suspension | OPERATOR, COMPLIANCE | standard: approval first; emergency: immediate, then an MLRO or another COMPLIANCE ratifies within 24 h (+48 h grace before auto-lift) | merchant suspended |
 | Merchant reinstatement | OPERATOR, COMPLIANCE | COMPLIANCE or MLRO (different), never emergency | merchant active |
-| Gateway version going LIVE; credentials, payout-bank edits | GATEWAY_ADMIN | SECURITY_ADMIN | version promoted, security alert |
+| Gateway version going LIVE | GATEWAY_ADMIN | SECURITY_ADMIN | version promoted |
+| Credential set create/rotate/revoke | GATEWAY_ADMIN | no approval today; applied immediately and audited | set stored/revoked |
+| Payout-bank edit | OPERATOR, COMPLIANCE, MERCHANT_ADMIN (request) | COMPLIANCE or MLRO (different); financial ceilings use FINANCE | field updated, hash recomputed |
 | Staff account / role / authority change | SECURITY_ADMIN | a different SECURITY_ADMIN | permissions re-read on the next request; a disabled account is refused |
-| Compliance platform settings | COMPLIANCE, FINANCE | MLRO or SECURITY_ADMIN | new setting version |
+| Compliance platform settings | COMPLIANCE, FINANCE | no maker-checker today (direct + audit). Intended: MLRO or SECURITY_ADMIN | new setting version |
 
 :::note
 Your real ability to act as maker or checker depends on the switches on your own account, not only on this typical table. See [[a:b03-02|Your account: roles, authorities and the switches]].
@@ -1935,9 +1961,9 @@ The second table shows what each state allows. A **cash-out** is a request to mo
 | `REJECTED` | Blocked. | None. | None. | None. |
 | `CLOSED` | Blocked. | Must be zero. | One final payout, then blocked. | Revoked. |
 
-For a `SUSPENDED` merchant, payments that were already confirmed are posted according to compliance policy. Payments that are still pending finish on the configuration they started with.
+For a `SUSPENDED` merchant, payments that were already confirmed are posted according to compliance policy. A payment still waiting for the customer is not allowed to finish: the confirm path re-checks the merchant, application and wallet status, so a suspension or freeze stops the charge from being sent. A standard suspension needs a second person's approval before it applies; only an emergency suspension by an authorised person is immediate, and it must be ratified within 24 hours (then a 48-hour grace) or it is lifted automatically.
 
-Every suspension carries one reason code. The codes are `AML` (anti-money-laundering), `FRAUD`, `KYB_EXPIRED`, `COMMISSION_CEILING`, `MERCHANT_REQUEST` and `OTHER`.
+Every suspension carries one reason code. They are `AML` (anti-money-laundering), `FRAUD`, `KYB_EXPIRED`, `COMMISSION_CEILING`, `MERCHANT_REQUEST` and `OTHER`.
 
 :::note Words that look similar
 **`PENDING`** is a merchant state. **`PENDING_REVIEW`** and **`PENDING_CHECKER`** are approval states. They are different things on different screens. See [[a:b13-02|Every status in one place]].
@@ -1975,10 +2001,10 @@ The table shows the stages in order. The last column shows what the system write
 | # | Stage | What happens | What the system records |
 | :-- | :--- | :--- | :--- |
 | 1 | Landing | The public page explains the product and has a **Start Now** button. Existing merchants sign in from the same page. | nothing |
-| 2 | Register or sign in | The applicant registers with a phone number, an e-mail address or a Google account and must verify it. | a user and an identity |
+| 2 | Register or sign in | The applicant registers with a phone number or an e-mail address and a password, then signs in. Google sign-in is not implemented. | a user |
 | 3 | Business profile and KYB | The applicant enters business details, uploads documents and declares owners. | merchant (`PENDING`), documents, owners |
-| 4 | Submission | The applicant submits. A **join request** is created, a review deadline (SLA) starts and an automatic screening is queued. | join request, screening |
-| 5 | Review | A reviewer checks identity, documents and screening against a checklist. The reviewer may ask for more information, which pauses the clock. | join request status |
+| 4 | Submission | The applicant submits. A **join request** is created, a **5-calendar-day** review deadline (SLA) starts and an automatic screening is queued. | join request, screening |
+| 5 | Review | A reviewer checks identity, documents and screening against a checklist. The reviewer may ask for more information; the deadline does **not** pause. | join request status |
 | 6 | Decision | Approve or reject. Some decisions need a second person. | join request, approval request |
 | 7 | Notification | The applicant is told by SMS and/or e-mail in their language. | notification |
 | 8 | First sign-in and setup | An approved merchant creates wallets, applications and payment links. Live traffic starts only when the merchant is `ACTIVE`. | merchant (`ACTIVE`) |
@@ -1994,12 +2020,12 @@ A join request is always in one state. The table says what each state means for 
 | `DRAFT` | The applicant is still filling it in. |
 | `SUBMITTED` | Sent in; waiting for a reviewer. |
 | `IN_REVIEW` | A reviewer is working on it. |
-| `INFO_REQUESTED` | The reviewer asked the applicant for something. **The clock is paused.** |
+| `INFO_REQUESTED` | The reviewer asked the applicant for something. The deadline keeps running; it is not paused. |
 | `PENDING_CHECKER` | A reviewer decided, and a second person must confirm (four-eyes). |
 | `APPROVED` | Done; the merchant is activated. |
 | `REJECTED` | Done; the applicant is told, in neutral words. |
 | `WITHDRAWN` | The applicant cancelled it. |
-| `EXPIRED` | Nothing happened for 30 days. |
+| `EXPIRED` | A `DRAFT` was left untouched for 30 days. The 30-day rule applies to `DRAFT` only; a submitted or in-review request is governed by its `sla_due_at` deadline instead. |
 
 The diagram shows the moves between states. Read it from left to right. From `IN_REVIEW`, the reviewer can take one of four ways out.
 
@@ -2010,19 +2036,19 @@ DRAFT → SUBMITTED → IN_REVIEW ─┬─ approve (no second person) ───
                        │       ├─ reject ───────────────────────────────────────────► REJECTED
               applicant│       └─ request information ─► INFO_REQUESTED ─► (applicant answers) ─► IN_REVIEW
               answers  │
-        withdraw at any open stage ─► WITHDRAWN        30 days of inactivity ─► EXPIRED
+        withdraw at any open stage ─► WITHDRAWN        a DRAFT untouched for 30 days ─► EXPIRED
 ```
 
 ### An example path
-This is an example, not a real case. Noon Mart submits, and the request becomes `SUBMITTED`. A reviewer opens it and the state becomes `IN_REVIEW`. The reviewer sees that the bank letter is not signed and asks for a signed one. The state becomes `INFO_REQUESTED` and the clock stops. Noon Mart uploads the signed letter, the state goes back to `IN_REVIEW`, and the clock starts again with a recomputed deadline. The reviewer approves. If the system says a second person is needed, the state becomes `PENDING_CHECKER` first. After the second person confirms, it becomes `APPROVED`.
+This is an example, not a real case. Noon Mart submits, and the request becomes `SUBMITTED`. A reviewer opens it and the state becomes `IN_REVIEW`. The reviewer sees that the bank letter is not signed and asks for a signed one. The state becomes `INFO_REQUESTED`, but the five-calendar-day deadline keeps running. Noon Mart uploads the signed letter, the state goes back to `IN_REVIEW`, and the reviewer approves. If the system says a second person is needed, the state becomes `PENDING_CHECKER` first. After the second person confirms, it becomes `APPROVED`.
 
 ### Rules worth memorising
 1. Only one open join request per merchant.
-2. `INFO_REQUESTED` pauses the deadline. The deadline is recomputed when the applicant answers.
-3. The default review deadline is **2 business days** for `LOW` or `STANDARD` proposed risk and **5 business days** for `HIGH`.
+2. `INFO_REQUESTED` does **not** pause the deadline. The deadline is a flat five calendar days from submission and is not recomputed when the applicant answers.
+3. The review deadline is **5 calendar days** for every proposed risk tier; the older 2/5-business-day split is not implemented.
 4. The applicant sees only the status and the information we asked for. **Reviewer notes and screening results are never shown to the applicant.**
 5. A rejection carries a reason code from a fixed list. Examples are `INCOMPLETE_DOCUMENTS`, `UNVERIFIABLE_BUSINESS`, `PROHIBITED_ACTIVITY` and `POLICY`. Any code that could reveal a screening outcome is shown to the applicant as the neutral code `POLICY`.
-6. A rejected applicant may apply again only after fixing the cause. A new request is linked to the old one, and duplicate checks apply. See [[a:b05-10|Re-application, duplicate detection and periodic KYB refresh]].
+6. A rejected applicant may apply again only after fixing the cause. The current code does **not** set a link from the new request to the old one, so the reviewer must find the earlier record by hand; duplicate checks still apply. See [[a:b05-10|Re-application, duplicate detection and periodic KYB refresh]].
 7. When approval needs a second person, approving and the second person's approval happen as one action. So an approved request never "hangs" half-done.
 @@end
 
@@ -2042,7 +2068,7 @@ Work down the table in order. The last column tells you what a good result looks
 
 | # | Check | How to do it | What "good" looks like |
 | :-- | :--- | :--- | :--- |
-| 1 | Applicant identity verified | Open the applicant's contact details; confirm the phone or e-mail was verified at registration. | Identity shows as verified. |
+| 1 | Applicant identity established | Open the applicant's contact details and the signed-in account; confirm the identity was established through the authenticated onboarding flow. The old phone-only "verify identity" entrypoint is retired and must not be used. | The account and contact details are consistent; no phone-only verification claim is relied on. |
 | 2 | Business exists and is registered | Open the documents; compare names and numbers on the commercial registry certificate and tax certificate with the profile the applicant typed. | Legal name, registration number and tax ID agree everywhere. |
 | 3 | Beneficial owners identified | Compare the declared owners with the articles of association. Anyone holding 25% or more (the default threshold) must be listed, and so must anyone who controls the business. | Every owner and controller is present and each has an identity document. |
 | 4 | Screening result reviewed | Read the overall screening result. | `CLEAR`, or a possible match that Compliance has already decided. See [[a:b05-05]]. |
@@ -2056,7 +2082,7 @@ A **beneficial owner** is a real person behind the business. **Screening** is th
 This is an example. Ali, an operator, opens the join request from Noon Mart. The registry certificate, tax certificate and profile all show the same legal name (check 2). The screening result is `CLEAR` (check 4). But the bank letter shows an account holder with a different name (check 6). Ali cannot approve alone: a mismatch forces a second person to approve. If Ali approves, the request moves to `PENDING_CHECKER`. Ali can also ask Noon Mart for a corrected letter. If he asks, he writes only "the bank letter does not match the legal name". He does not mention screening.
 
 ### Your four possible actions
-1. **Request information.** Write exactly what is missing (for example "the bank letter is not signed"). Do not mention screening. The deadline pauses until the applicant answers.
+1. **Request information.** Write exactly what is missing (for example "the bank letter is not signed"). Do not mention screening. The five-calendar-day deadline keeps running until the applicant answers or it expires.
 2. **Reject.** Choose the reason code and write an internal note. See [[a:b04-06|Writing a reason that survives an audit]]. Open the checklist [[c:sg-reject-join-request|Reject a join request]] first.
 3. **Approve.** Open the checklist [[c:sg-approve-join-request|Approve a join request]] first. If the system says a second person is needed, the request moves to `PENDING_CHECKER`.
 4. **Hand over.** If you cannot finish, leave a note and release the assignment so someone else can.
@@ -2135,7 +2161,7 @@ Each document has one status. The table says what each status tells you.
 
 ### Beneficial owners
 A **beneficial owner** is a real person behind the business. The system records two kinds of person:
-* anyone holding **25% or more** of ownership or voting rights (the default threshold, set by the platform setting `aml.owner_threshold_percent`), and
+* anyone holding **25% or more** of ownership or voting rights (the default threshold, set by the platform setting `join_request.four_eyes_policy.ownerThresholdPercent`, alias OD-2), and
 * anyone who **controls** the business (director, managing partner, authorised signatory).
 
 If nobody reaches the threshold, the most senior manager is recorded as the controller and the reason is written down.
@@ -2152,7 +2178,7 @@ Each owner has a screening status. Screening is the comparison of a name with sa
 Names are stored in Arabic and, where available, Latin letters. National ID numbers are encrypted and shown masked. For the screening process, see [[a:b05-05|what a reviewer may and may not do]].
 
 ### Changes after approval
-Adding or changing an owner after approval is a **sensitive** change. It needs two people and triggers a new screening. History is kept. Old owners are not deleted; they get an end date.
+Adding or changing an owner after approval is intended to be a **sensitive** change: it should need two people and it triggers a new screening. The current code does **not** yet wrap post-approval owner edits in maker-checker, so treat an owner edit as a gap and require a second reviewer manually. History is kept. Old owners are not deleted; they get an end date.
 
 ### What you must never do
 * Never accept a document you cannot read, or that looks edited.
@@ -2199,7 +2225,7 @@ Each application pays into exactly one wallet, and the rules around it exist so 
 :::
 
 ### The idea: each place that takes payments has one wallet
-Imagine Noon Mart has a website and a mobile app. Each is a place where customers pay. We call each one an **application**. Each application has one wallet, which is Noon Mart's balance on our books. Several applications can share the same wallet. The wallet is a number we calculate, not a box of cash. The rules below make sure every payment has one clear place to land.
+Imagine Noon Mart has a website and a mobile app. Each is a place where customers pay. We call each one an **application**. Each application has one wallet, which is Noon Mart's balance on our books. Several applications can share the same wallet. The wallet is a shard projection of the journal, not a box of cash. The rules below make sure every payment has one clear place to land.
 
 ### The relationships
 The diagram shows what hangs under a merchant. Read it from the top down.
@@ -2217,7 +2243,7 @@ Merchant ─┬─ Users (owners, staff, cashiers)
 ### The rules, with the reason for each
 1. **Exactly one wallet per application.** If an application could pay into "any" wallet, nobody could say where a given payment's money should land. The rule is built into the database, so no screen or program can break it. Many applications may share one wallet. The wallet of a payment link is copied from its application when the link is created and can never change afterwards.
 2. **The rail whitelist.** A rail is a payment method the customer can pick. An application may list which rails it allows. *No list* means "all rails", but the other conditions of the visible-rails formula still apply. See [[a:b06-12|The visible-rails formula]]. *An empty list is refused*, because it would silently turn off payments. A payment link may **narrow** the application's list but never widen it.
-3. **The redirect-domain allow-list.** After paying, a customer can be sent back to the merchant's website. Only domains on this list are allowed. Without it, an attacker could create a link that sends paying customers to a fake page.
+3. **The redirect-domain allow-list.** After paying, a customer can be sent back to the merchant's website. The list is stored and shown to the checkout, but the current server does **not** enforce it when building the redirect. Treat it as a configured intention, not a live control, until the redirect path validates it.
 4. **Descriptive versus sensitive.** Some edits are direct and some need two people. The rules are in the list below.
 5. **Approved changes affect new payments only.** A payment already started keeps the settings it began with.
 
@@ -2225,13 +2251,13 @@ For rule 4, this is what is direct and what needs two people:
 * Changing the application's name or description is direct.
 * Changing the **assigned wallet**, the **rail whitelist** or the **redirect-domain allow-list** needs two people.
 * Pausing an application is direct.
-* Resuming after the *platform* paused it needs two people.
-* A large increase in expected volume opens a review case automatically.
+* Resuming after the *platform* paused it is intended to need two people; the current route applies a resume directly and audits it, so treat it as a gap.
+* A large increase in expected volume does **not** currently open a review case automatically; the reviewer must notice it.
 
 For example, Noon Mart's application allows Sadad and Edfali. A payment link made from it may allow only Sadad. It may not add MobiCash, because a link can never widen the application's list.
 
 ### Wallets
-A **wallet** is the merchant's balance on our books. It belongs to one merchant and one currency (`LYD`). The currency can never be changed. Only the wallet's **status** can be changed, and that needs two people. The balance is **calculated** from ledger lines every time it is displayed. It is not a stored number that someone could edit. Each wallet has its own page with its statement; see [[a:b03-09|The Wallets screen and the wallet page]].
+A **wallet** is the merchant's balance on our books. It belongs to one merchant and one currency (`LYD`). The currency can never be changed. Only the wallet's **status** can be changed: **freezing is immediate**, while **unfreezing needs an approval by a second person**. The balance is a **stored per-shard projection** of the immutable journal lines; the journal is the truth, a scheduled check compares the two, and shard repair rebuilds the projection if it drifts. Each wallet has its own page with its statement; see [[a:b03-09|The Wallets screen and the wallet page]].
 @@end
 
 @@article id=b05-07 book=5 order=7 title="Payment links, POS terminals and API tokens" roles=ALL minutes=3 ui=AVAILABLE related=b05-06,b07-06,b07-11
@@ -2272,8 +2298,8 @@ A screen that is idle for **15 minutes** is disconnected. The payment itself con
 A merchant's own software can create links through the Merchant API. It proves who it is with a **token**. These are the rules for tokens:
 * The token starts with `pg_live_`.
 * It is **shown once**, when created, and never again. We store only a fingerprint.
-* Creating a token requires the merchant user to sign in again.
-* A token may be limited to listed IP address ranges. **Adding** addresses is direct; **turning the limit off** needs two people.
+* Creating a token requires the `token:manage` authority. There is no fresh sign-in or step-up challenge in the current code; protect the token like a password.
+* A token may be limited to listed IP address ranges. Adding addresses and turning the limit off are both direct changes in the current code; treat them as sensitive and review the audit row.
 * Revoking is immediate.
 
 :::warning If a merchant says "my token leaked"
@@ -2307,9 +2333,7 @@ The bank account must be in the merchant's legal name (or a documented related p
 :::
 
 ### Suspending a merchant: **Suspend Merchant**
-Suppose an authorised person such as Omar sees a serious reason to stop Noon Mart. He cannot wait for a second person, because delay is the hazard. So one authorised person can suspend a merchant, and it takes effect immediately.
-
-Then a second person must **ratify** the suspension within 24 hours. To ratify is to review a decision that was already made and confirm it. See [[a:b04-04|Emergency actions, ratification and the asymmetry principle]].
+There are two paths. A **standard suspension** is an approval request: one person proposes it and a different `COMPLIANCE` or `MLRO` checker approves it before it takes effect. An **emergency suspension** is the exception: one authorised person can apply it at once, because delay is the hazard, and a second person must **ratify** it within 24 hours (with a 48-hour grace before an unratified emergency suspension is lifted automatically). To ratify is to review a decision that was already made and confirm it. See [[a:b04-04|Emergency actions, ratification and the asymmetry principle]].
 
 Choose the reason code honestly and write the reason. See [[a:b04-06|Writing a reason that survives an audit]]. Open the checklist [[c:sg-suspend-merchant|Suspend a merchant]] first.
 
@@ -2318,7 +2342,10 @@ What suspension does:
 * Cash-out is blocked.
 * API tokens and POS screens return a neutral message.
 * The balance is kept.
+* Payments that were already confirmed follow the governance rules; they are not all cancelled. A payment that is still waiting for the customer is refused at confirm because the merchant/application/wallet status is re-checked.
 * A merchant notification is sent in generic wording. **If the cause is AML (anti-money-laundering), the merchant's message contains no reason at all.**
+
+The six merchant-facing reason codes are `AML`, `FRAUD`, `KYB_EXPIRED`, `COMMISSION_CEILING`, `MERCHANT_REQUEST` and `OTHER`. `AML_CONFIRMED_MATCH` is an internal screening/integration error code, not a merchant suspension reason; never quote it to a merchant.
 
 ### Reinstating a merchant: **Reinstate Merchant**
 Reinstatement *increases* risk, so it always needs prior approval by a different `COMPLIANCE` or `MLRO` user. It is never an emergency action. Open the checklist [[c:sg-reinstate-merchant|Reinstate a merchant]] first.
@@ -2389,11 +2416,11 @@ Links to related parties are kept after a rejection, so a rejected applicant can
 ### Periodic KYB refresh
 KYB (Know Your Business) is the checking of a business. After approval we repeat it from time to time. The rules are:
 * A document with an expiry date triggers notices 30 days and 7 days before it expires, then becomes `EXPIRED`.
-* A merchant with a required document expired for more than 30 days is moved to `SUSPENDED` (`KYB_EXPIRED`), unless two people extend it.
+* A merchant with a required document expired for more than 30 days is moved to `SUSPENDED` (`KYB_EXPIRED`). There is no two-person extension of the KYB document deadline in the current code; the merchant must upload a valid document or a reviewer must decide the exception manually.
 * Re-verification happens every year for `HIGH`, every two years for `STANDARD` and every three years for `LOW` (configurable).
-* A change of owner, legal name, payout account, business category, or a large jump in volume opens a manual review case and a new screening.
+* A change of owner, legal name, payout account or business category triggers a new screening. A large jump in volume does **not** currently open a manual review case by itself; the reviewer must notice it.
 
-Here is an example of the document rule. Noon Mart's registry certificate has an expiry date. Thirty days before that date, Noon Mart gets its first notice. Seven days before, it gets the second notice. After the date has passed, the document becomes `EXPIRED`. If it is still expired more than 30 days later, Noon Mart is moved to `SUSPENDED` with the reason `KYB_EXPIRED`, unless two people extend it.
+Here is an example of the document rule. Noon Mart's registry certificate has an expiry date. Thirty days before that date, Noon Mart gets its first notice. Seven days before, it gets the second notice. After the date has passed, the document becomes `EXPIRED`. If it is still expired more than 30 days later, Noon Mart is moved to `SUSPENDED` with the reason `KYB_EXPIRED`; the current code has no two-person extension, so a reviewer who wants to allow time must record the decision outside the automated rule.
 
 ### Why it matters
 Businesses change. A check done three years ago says nothing about who owns the business today.
@@ -2432,10 +2459,10 @@ The kind says who is on the other side of the connection. Use this table to look
 These two labels tell you how much care a gateway needs.
 * **Verification state**: `VERIFIED` means its behaviour was confirmed from official documents or a public software kit. `UNVERIFIED` means it was built from a vendor page or partial information, so extra caution applies.
 * **Risk class**: `NORMAL` or `HIGH_RISK`. A gateway is `HIGH_RISK` when it offers **neither** a signed webhook **nor** a way to ask for a payment's status. In plain words: we would have no safe way to learn what really happened.
-* Going live with a `HIGH_RISK` gateway needs a signed executive risk acceptance, mandatory statement reconciliation and extra operator approval above a threshold.
+* Going live with a `HIGH_RISK` gateway needs a signed executive risk acceptance and extra operator approval above a threshold. The statement-reconciliation and lower-threshold controls described in the historical design are not implemented by the current engine; treat them as policy requirements for the reviewer, not automatic controls.
 
 ### The life of a gateway: its status
-A gateway moves through these statuses in order: `DRAFT` → `SANDBOX_VERIFIED` → `PENDING_APPROVAL` → `LIVE`. Later it may be `SUSPENDED` or `RETIRED`.
+A gateway is intended to move through `DRAFT` → `SANDBOX_VERIFIED` → `PENDING_APPROVAL` → `LIVE`, and later `SUSPENDED` or `RETIRED`. Not every one of those transitions is written by the current screens: the ordinary create, submit-for-approval and promotion paths are implemented, while some of the other labels are reserved for approval, suspension or rollback and may not appear in a given deployment. Read the badge on the record, not an assumed sequence.
 
 ### Why a gateway is never edited in place
 Imagine we edit the live settings while Layla is in the middle of paying. Her payment could break halfway. So we never do that.
@@ -2495,24 +2522,26 @@ For each mode, the table lists what the customer does, how we learn the result, 
 | `HYBRID` | Chooses among several of the above. | Depends on the chosen sub-mode. | Each sub-mode has its own traps. |
 
 ### Which channels each mode may use
-Every mode supports a different set of ways to confirm. The save-time checks of the wizard **reject** combinations that make no sense, for example a `MANUAL` rail with a webhook. Weak confirmation methods are always forced to also ask the payment company. See [[a:b06-07|confirmation channels and how much each one is trusted]].
+Every mode supports a different set of ways to confirm. The wizard's save-time checks validate the shape and allowed values, but they do **not** enforce the full collection-mode/channel matrix; a `MANUAL` rail with a webhook can still be saved today. Treat that combination as a review error. Weak confirmation methods are always forced to also ask the payment company. See [[a:b06-07|confirmation channels and how much each one is trusted]].
 
 ### Time limits by mode (platform ceilings)
 Each mode has a ceiling: the longest time a payment session may last. Read the table as "this mode may last at most this long".
 
 | Mode | Ceiling |
 | :--- | :--- |
-| `OTP_PULL` | 20 minutes |
-| `REDIRECT` | 30 minutes |
-| `QR_DISPLAY`, `PUSH_APPROVAL` | 15 minutes |
-| `MANUAL` | as configured |
+| `OTP_PULL` | 20 minutes (1200 s) |
+| `REDIRECT` | 30 minutes (1800 s) |
+| `EMBEDDED` | 30 minutes (1800 s) |
+| `PAY_CODE`, `DEEP_LINK`, `QR_DISPLAY`, `PUSH_APPROVAL` | 15 minutes (900 s) |
+| `HYBRID` | 20 minutes (1200 s) |
+| `MANUAL` | 24 hours (86400 s) |
 
 A gateway with a shorter session can only **tighten** the limit. The effective limit is always the smaller of the two. For example, an `OTP_PULL` gateway with a 10-minute session has an effective limit of 10 minutes, because 10 is smaller than 20.
 @@end
 
-@@article id=b06-03 book=6 order=3 title="The engine: ten phases, steps, side effects and the retry boundary" roles=GATEWAY_ADMIN,SECURITY_ADMIN minutes=6 ui=AVAILABLE related=b06-04,b06-06,b06-17
+@@article id=b06-03 book=6 order=3 title="The engine: seven phases, steps, side effects and the retry boundary" roles=GATEWAY_ADMIN,SECURITY_ADMIN minutes=6 ui=AVAILABLE related=b06-04,b06-06,b06-17
 :::summary Big picture in 20 seconds
-A gateway is a stored recipe, not new code: ten phases and a series of small steps tell the engine how to talk to a partner. The money step is never retried automatically after a timeout.
+A gateway is a stored recipe, not new code: seven runtime phases and a series of small steps tell the engine how to talk to a partner. The money step is never retried automatically after a timeout.
 :::
 
 ### The idea: a recipe, not a program
@@ -2529,21 +2558,20 @@ Here is a simplified recipe for a gateway like direct Sadad, where the customer 
 
 Now the important moment. Suppose the answer to step 2 never comes back. We do not know whether Sadad took the money. The engine does **not** repeat step 2. It marks the attempt `UNKNOWN`, and then step 3 (or a statement, or an operator) finds out the truth. The rest of this article explains the pieces behind this story.
 
-### The ten phases
-Every recipe may use these ten phases. Read the table as "when does the engine use this phase".
+### The seven runtime phases
+The engine executes seven phases at runtime. `CAPTURE` and `SETTLEMENT_FETCH` exist only as database/specification values, and there is no executor for them. Read the table as "when does the engine use this phase".
 
 | Phase | Purpose |
 | :--- | :--- |
-| `CREDENTIAL_CHECK` | Prove our credentials work (a harmless test call). Also used to test whether a failed route has recovered. |
 | `PRE_INITIATE` | Optional checks before starting (is the subscriber eligible? lock a quote?). Read-only. |
 | `INITIATE` | Start the payment (for example ask the payment company to send an SMS code). |
 | `SUBMIT` | The **money step**: complete the payment with the code or evidence. Also called confirm. |
 | `VERIFY` | Ask the payment company what the real status is. Read-only. Also called inquire. |
-| `CANCEL` | Cancel a payment that has not completed. |
+| `CANCEL` | Cancel a payment that has not completed. It is in the runtime union, but no current engine method or caller executes it. |
 | `REFUND` | Return money after an approved refund. |
 | `VOID` | Cancel before settlement. |
-| `CAPTURE` | Complete a previously authorised card payment. |
-| `SETTLEMENT_FETCH` | Fetch the settlement statement. |
+
+A separate **credential-check** path runs a harmless call to prove credentials work; it is not one of the seven payment phases.
 
 ### The six step types
 Each step in a phase has one type. The type says what kind of action the step is.
@@ -2572,7 +2600,7 @@ A step that **moves money** must **never** be retried automatically after a time
 
 So the attempt becomes `UNKNOWN`. It is then resolved by asking; see [[a:b07-03|what to do when a payment is UNKNOWN]].
 
-The save-time validator **refuses** a recipe where a money step is not `NEVER`-retry. The only exception is a gateway that supports an idempotency key, when that has been proven.
+The save-time wizard validator checks the recipe's shape and allowed values. It does **not** currently enforce the money-step no-retry rule; that rule is enforced by the Smart AI import validator, by the gate checks and by the engine at run time. Treat a `NEVER` label on a money step as mandatory even if the wizard accepts the draft.
 
 ### Where each value in a request comes from
 Each field of a request has a **source**. The source can be:
@@ -2596,7 +2624,7 @@ The engine extracts values from the partner's answer and stores them in one of t
 A **required** value that is missing after a money step makes the attempt `UNKNOWN`, never `FAILED`. We do not call a payment failed when we cannot read the answer.
 
 ### Time limits and size limits
-Each outbound call has a time limit. It is 10 seconds for authentication and status questions, and 15 seconds for start, confirm and refund. Answers are read as plain text first. They are capped at 2 MB and nested no deeper than 64 levels. XML external entities are disabled.
+Every outbound call has one time limit: **15 seconds**. Answers are read as plain text first. They are capped at 2 MB and nested no deeper than 64 levels. XML external entities are disabled.
 @@end
 
 @@article id=b06-04 book=6 order=4 title="Amounts: scales, decimals, rounding and the 1000-times danger" roles=ALL minutes=2 ui=AVAILABLE related=b01-01,b06-05,b08-03
@@ -2631,9 +2659,7 @@ A two-decimal gateway cannot write three decimals, so we must round. Say the amo
 Rounding changes the amount a little. When the gateway's wire amount differs from our exact amount because of rounding, the difference is handled by the route's *mismatch policy*. It is not ignored.
 
 ### How it is tested
-Before a gateway can go live, a **contract test** must pass. It uses fixed examples with known answers:
-* `10.50 LYD → "10500"` for a dirham-integer gateway,
-* `76.255 → "76.26"` for a two-decimal gateway with `NEAREST` rounding.
+Before a gateway can go live, a **contract test** must pass. It uses three fixed amounts — `100.0000`, `10.5000` and `0.0100` — and proves each one converts exactly and reversibly through the gateway's scale, precision, rounding and format. A two-decimal gateway with `NEAREST` would write the teaching example `76.255` as `76.26`, but the gate itself uses the three canonical amounts.
 
 This test is one of the 12 go-live gates; see [[a:b06-16|the twelve go-live gates in plain words]].
 
@@ -2659,25 +2685,27 @@ A **rail** is what the customer picks, such as "Sadad". When Layla picks the Sad
 Here is what happens to one field.
 1. The Sadad rail has a field for the mobile number, with type `phone`.
 2. Layla types her number using Arabic digits: `٠٩١٢٣٤٥٦٧٨`.
-3. A **normaliser** cleans the input. This one, `arabic_digits_to_ascii`, turns it into `0912345678`.
+3. A normaliser is designed to clean the input (this one, `arabic_digits_to_ascii`, would turn it into `0912345678`), but the current checkout does not run it server-side; the typed value is validated as it is.
 4. The rules are checked on the cleaned value: the pattern, the length and whether the field is required.
 5. The server runs this check. The customer's browser may also check, but the server never trusts the browser.
 
-Without the normaliser, a valid number typed with Arabic digits could fail the pattern check, and Layla would be told her number is wrong.
+This is the intended behaviour of the normaliser. In the current Live checkout the normaliser is stored but not executed, so a valid number typed with Arabic digits can fail the pattern check and Layla would be told her number is wrong. Treat this as a known gap, not a rule you can rely on.
 
 ### What each field defines
 Use this list to see everything a field can set.
 * A key (its internal name).
-* A type: `phone`, `number`, `string`, `otp`, `birth_year`, `card_number`, `pan`, `from_list`.
+* A type: `phone`, `number`, `string`, `otp`, `birth_year`, `card_number`, `pan`, `wallet_id`, `from_list`.
 * Labels and placeholders in Arabic and English.
 * Rules: a pattern (regex), minimum and maximum length or value, whether it is required, its order on screen.
 * A **normaliser**, which cleans the input before checking it.
 * A **sensitivity** level.
 
 ### Normalisers
-Customers type in many ways. A normaliser converts them to one form.
+Customers type in many ways. A normaliser is meant to convert them to one form.
 * `arabic_digits_to_ascii`: turns `٠٩١٢٣٤٥٦٧٨` into `0912345678`.
 * `phone_normalize`: converts a phone number to one style. The style depends on what the gateway needs. This table shows the three styles for the same number.
+
+Current state: the normaliser is stored on the rail field, but the running checkout does **not** execute it server-side. The server validates the value as typed against the pattern. The example below is the intended behaviour, and the Smart AI import/validation tooling can check it; do not assume a customer's Arabic digits will be converted in Live today.
 
 | Style | The same number is written |
 | :--- | :--- |
@@ -2748,12 +2776,12 @@ When a payment company calls us, the signature is not the only check. We also ch
 * the secret path in the web address,
 * the sender's IP address against an allow-list,
 * a timestamp within 5 minutes,
-* that we have not seen this exact message before (duplicates are ignored for 7 days).
+* that we have not seen this exact message before. The inbox stores a permanent unique `(channel, dedupeKey)` pair; it is not a seven-day window.
 
 Signatures are compared in constant time. This means attackers cannot learn the answer by measuring how long the comparison takes.
 
 ### Rotation without downtime
-Rotation means replacing a secret with a new one. A credential set may hold two secret versions at the same time. During rotation both work, so no payments fail while the payment company switches.
+Rotation means replacing a secret with a new one. Secret overlap is implemented for **merchant webhook signing secrets**, where the old and new secret can both verify briefly. A gateway **credential set** does not keep an overlap: **Rotate secrets** replaces every entry and leaves the set `UNTESTED` until it is verified again.
 
 ### Try it
 The lab below shows the exact text that is hashed. It uses example data only.
@@ -2761,7 +2789,7 @@ The lab below shows the exact text that is hashed. It uses example data only.
 {{widget:crypto-lab}}
 
 :::warning Secrets
-Never type a real production secret into any tool, chat or this guide. Real secrets are entered only in the credential fields of the Gateway Wizard, and are write-only.
+Never type a real production secret into any tool, chat or this guide. Real secrets are entered only in the credential fields of the Gateway Wizard or the **Credential Sets** screen, and are write-only.
 :::
 @@end
 
@@ -2846,7 +2874,7 @@ An **error map** takes a partner's error code and gives it several labels. One l
 An error map gives:
 * a **canonical error** (our name for it),
 * a **classification**: `RETRYABLE_OTP` (customer mistyped a code; they may try again), `TERMINAL_DECLINE` (final), `LIMIT_EXCEEDED` (customer or merchant limit), `GATEWAY_FAULT` (the partner is broken), `AMBIGUOUS` (we cannot tell),
-* whether it counts toward the OTP lockout,
+* whether it counts toward the OTP lockout (stored, but the current OTP engine increments attempts for every `RETRYABLE_OTP`; treat this flag as not enforced),
 * whether it counts toward the **circuit breaker**,
 * a message for the customer in Arabic and English,
 * a hint for operators.
@@ -2875,7 +2903,7 @@ Each set also says where the partner sends the money. Imagine Layla pays Noon Ma
 | :--- | :--- |
 | `PLATFORM_CLEARING` | The partner pays **us**; we credit the merchant's wallet. |
 | `MERCHANT_DIRECT` | The partner pays **the merchant**; we record only our commission as owed to us. |
-| `PROVIDER_HELD` | The partner holds the funds for the moment. |
+| `PROVIDER_HELD` | The partner holds the funds until it settles. The current ledger still books this as a gateway-clearing receivable, exactly like `PLATFORM_CLEARING`; the label describes who is holding the cash, not a separate posting rule. |
 
 ### Status
 A set has one of these statuses:
@@ -2889,12 +2917,12 @@ Secrets are the most dangerous data in the system, so six rules protect them.
 1. **Write-only.** You can replace a secret; nobody can read it back, not even an administrator.
 2. **Encrypted at rest** with a key that exists only on the core server.
 3. **Host-pinned.** A secret works only for the hosts listed for that gateway. If someone changed a step's web address to an outside host, the secret would not be supplied.
-4. **Credential changes need two people** (`GATEWAY_ADMIN` proposes, `SECURITY_ADMIN` approves).
+4. **Credential changes are direct.** The current screens apply create, rotate, verify and revoke immediately and audit them; there is no maker-checker approval for a credential set. Treat every credential action as serious and check the gateway, environment and owner twice.
 5. **Two merchants cannot register the same gateway account.**
 6. **Sandbox and live never share** secrets, secret paths or webhook secrets.
 
 ### The live credential check
-The **CREDENTIAL_CHECK** button on the wizard's second step makes one harmless call to prove the credentials work. A passed check moves the set to `VERIFIED`. A set that is not `VERIFIED` makes its route invisible to customers; see [[a:b06-12|the visible-rails formula]].
+The **CREDENTIAL_CHECK** button on the wizard's second step runs a harmless **dry-run** against the built configuration. It proves the draft is internally consistent, but it is not the live verification. The real check is the **Verify** action on the **Credential Sets** screen; a passed live check moves the set to `VERIFIED`. A set that is not `VERIFIED` makes its route invisible to customers; see [[a:b06-12|the visible-rails formula]].
 @@end
 
 @@article id=b06-10 book=6 order=10 title="Sandbox, live, rollback and what changes for new versus running payments" roles=GATEWAY_ADMIN,SECURITY_ADMIN,OPERATOR minutes=3 ui=AVAILABLE related=b01-08,b06-01,b12-06
@@ -2932,7 +2960,7 @@ The 12 gates are in [[a:b06-16|The twelve go-live gates, in plain words]].
 Every promotion names a **rollback version**: the version to return to if the new one misbehaves. Rolling back creates a new promotion in the opposite direction. Payments already running are not disturbed; they finish on the version they started with.
 
 ### Canary
-A **canary plan** is a small first step. Before sending all traffic to a new version, the plan limits it to a percentage of traffic or to a list of merchants. A canary plan is a required gate.
+A **canary plan** is a small first step: sending a limited share of traffic to a new version before all of it. In the current engine this gate is a boolean setting: the platform records whether a canary plan has been configured, but there is no percentage or merchant-list canary rollout for gateway versions. The separate **route-health** canary (a stable 5% sample of links sent to a `DEGRADED` route) is implemented and is not a gateway-version rollout.
 
 ### A worked example
 This example uses invented version numbers.
@@ -2953,7 +2981,7 @@ Read the table from the left: the first column is what you changed, the second s
 | :--- | :--- |
 | New live version | New payments only |
 | New route priority, pause or resume | New payments only |
-| Secret rotation | New calls; both versions work during the overlap |
+| Secret rotation | The credential set is replaced and its entries become `UNTESTED` until verified. A separate overlap window exists only for **merchant webhook signing secrets**, not for gateway credential sets |
 | Pausing a route | Customers stop seeing it at once; running payments finish |
 | Credential set `REVOKED` or route `DRAINING` | New payments only; running payments finish on their pinned settings |
 @@end
@@ -2982,7 +3010,7 @@ A **route** connects one rail to one gateway through a credential policy. One ra
 | Setting | Meaning |
 | :--- | :--- |
 | Credential policy | `PLATFORM` (our account), `MERCHANT_REQUIRED` (the merchant's own account), or `MERCHANT_OR_PLATFORM` |
-| Priority and routing strategy | `STRICT_PRIORITY`, `EFFECTIVE_COST` (cheapest expected cost) or `WEIGHTED` (share of traffic) |
+| Priority and routing strategy | `STRICT_PRIORITY`, `EFFECTIVE_COST` (cheapest expected cost) or `WEIGHTED` (order by the weight field, highest first) |
 | Cost model | Flat fee, percentage, minimum, maximum, and whether the fee is accrued at confirmation |
 | Mismatch policy | Tolerance for amount differences and what to do about underpayment or overpayment |
 | Limits | Minimum amount, maximum amount, daily cap |
@@ -2998,7 +3026,7 @@ Only routes that are allowed to carry the payment take part. A route is out if i
 
 * `STRICT_PRIORITY`: the route with the higher priority number comes first.
 * `EFFECTIVE_COST`: the route with the lowest expected fee for this amount comes first. If two routes cost the same, the higher priority number wins.
-* `WEIGHTED`: the weight on each route is used, as the table above says (share of traffic).
+* `WEIGHTED`: the route with the higher weight comes first. It is a deterministic ordering, not a traffic split.
 
 ### A worked example
 All numbers here are invented for the example. Imagine a wallet rail at Noon Mart that has two routes.
@@ -3034,12 +3062,12 @@ When a partner is failing, the **circuit breaker opens** automatically:
 
 A `DEGRADED` route is a middle state. It is not used for normal traffic, but a small, stable **canary** share of links (5% by default) may still try it. That is how the platform gets real evidence before returning the route to everyone. The canary is stable for a link and route, so the same customer does not flip between paths. An optional amount cap keeps large payments away from a degraded route.
 
-Only partner faults count; customer mistakes do not. A probe is read-only: it tests the partner and records the result, but it never changes a credential set's verdict. A route that needs a merchant's own login has no platform probe, so its recovery needs a person.
+Which errors count is decided per error by the gateway's error map (`counts_toward_breaker`); customer mistakes and HTTP 429 never count. A probe is read-only: it tests the partner and records the result, but it never changes a credential set's verdict. A route that needs a merchant's own login has no platform probe, so its recovery needs a person.
 
 The procedure for staff is [[a:b10-02|RB-01 Gateway outage and the circuit breaker]]. The **Routes** screen opens a health drawer for each route. It shows the effective state (what routing uses), the computed state (what the automation measured) and any admin override. A Gateway Admin can run a probe. Forcing `HEALTHY` needs a second officer and an expiry; forcing `DEGRADED` or `OPEN_BREAKER` is immediate but always recorded with a reason. An override never hides the computed state.
 
 ### Routes change money behaviour
-Editing a route can change fees, limits and who sees a payment method. Route edits are guarded by a checklist, so open [[c:sg-edit-route|the checklist for creating or changing a route]] first. Credential and payout-bank edits need `SECURITY_ADMIN` approval; a route edit uses the safeguard checklist and a reason.
+Editing a route can change fees, limits and who sees a payment method. Route edits are guarded by a checklist, so open [[c:sg-edit-route|the checklist for creating or changing a route]] first. Credential-set and payout-bank edits are **not** maker-checker today: they apply directly and are audited. Payout-bank changes do go through the merchant approval flow. Treat every credential action as serious and check the gateway, environment and owner twice.
 @@end
 
 @@article id=b06-12 book=6 order=12 title="The visible-rails formula: why a customer does or does not see a payment method" roles=ALL minutes=4 ui=AVAILABLE related=b02-06,b05-06,b07-12
@@ -3056,7 +3084,7 @@ A rail is shown only if **every one** of these conditions is true. Read the tabl
 | :--- | :--- | :--- |
 | 1 | The application allows the rail | The merchant's application whitelist includes it (or has no whitelist). |
 | 2 | The link allows the rail | The link's own list includes it (or has none). |
-| 3 | A live commission profile covers it | We have an agreed fee for this merchant/application and rail at this amount. |
+| 3 | An effective commission profile covers it | We have an agreed fee for this merchant/application and rail. The visibility check uses the profile's effective dates; it does not filter by amount. The fee calculation then applies the profile's tiers to this amount. |
 | 4 | At least one route is `ACTIVE` | The route is switched on. A `PAUSED` or `DRAINING` route does not count. |
 | 5 | That route is `HEALTHY`, or it is `DEGRADED` and this link is in its canary cohort | A healthy route is used normally. A degraded route is hidden from most customers but may be tried by a small, stable share of links. An open breaker is never used. |
 | 6 | The amount is inside the route's limits | Minimum, maximum, and the daily cap is not exceeded. |
@@ -3080,7 +3108,7 @@ Noon Mart sends Layla a link for 25.500 LYD. The Sadad rail has one route. Its l
 **Case 4: no single route passes.** Imagine a different rail that has two routes. Route 1 is `ACTIVE` but its circuit breaker is open, so it fails condition 5. Route 2 is `HEALTHY` but `PAUSED`, so it fails condition 4. Each condition is true for some route, but no one route passes all of them. That rail is hidden.
 
 ### Using this to diagnose
-A merchant says "my customers cannot see Sadad". Walk down the table. The first failing line is the answer. Most often it is line 5 (breaker open), line 6 (amount above the maximum), line 3 (no commission profile for the amount) or line 1 (the application's list).
+A merchant says "my customers cannot see Sadad". Walk down the table. The first failing line is the answer. Most often it is line 5 (breaker open), line 6 (amount above the maximum), line 3 (no effective commission profile for the merchant/rail) or line 1 (the application's list).
 
 The widget below lets you try it yourself. Change the amount, the currency, the time, the lists or a route's health, and watch which line fails.
 
@@ -3108,7 +3136,7 @@ Read each row as one step. The last column is a trap to avoid at that step.
 | Step | Name | What you do | The trap to avoid |
 | :--- | :--- | :--- | :--- |
 | 1 | Identity & Basics | Code, name, operator, country, aliases, kind, verification state, risk class. | Choosing `NORMAL` for a gateway that has neither signed webhooks nor a status question. |
-| 2 | Environments & Auth | Sandbox and live addresses, allowed hosts, allowed sender IPs, the authentication method, and the credential set. Run **CREDENTIAL_CHECK**. | Putting a live address in the sandbox section, or the reverse. |
+| 2 | Environments & Auth | Sandbox and live addresses, allowed hosts, allowed sender IPs, the authentication method, and the credential set. **CREDENTIAL_CHECK** in the wizard runs a dry-run; the real live verification is **Verify** on the Credential Sets screen. | Putting a live address in the sandbox section, or the reverse. |
 | 3 | Customer Catalog | Build the rail and its form fields in Arabic and English, with patterns and normalisers. | A phone pattern that rejects valid numbers. |
 | 4 | Crypto Profiles | Build signing and checking recipes; test them with the partner's own sample. | Testing with your own made-up sample instead of the partner's. |
 | 5 | Flow Builder | Build the steps of each phase with parameters, transforms, side effects and retry rules. | Forgetting `NEVER` retry on the money step. |
@@ -3120,12 +3148,12 @@ A few of these rows have a short explanation behind them:
 
 * **Step 1 trap.** A gateway with neither a signed webhook nor a status question is `HIGH_RISK`, not `NORMAL`.
 * **Step 3 patterns and normalisers.** A pattern says what a valid phone number looks like. A normaliser tidies what the customer typed into one standard form.
-* **Step 5.** The step types and the retry rules are explained in [[a:b06-03|The engine: ten phases, steps, side effects and the retry boundary]].
+* **Step 5.** The step types and the retry rules are explained in [[a:b06-03|The engine: phases, steps, side effects and the retry boundary]].
 
 ### Step 8: simulator and approval
 Submitting step 8 is a guarded action: open [[c:sg-submit-gateway-version|Submit a gateway version for approval]] first. After submission a `SECURITY_ADMIN` reviews it.
 
-The simulator runs **15 automatic scenarios**. They are:
+The simulator runs **15 automatic scenarios** against the built-in mock gateway. It does not replay the gateway version's own flows. They are:
 
 1. happy path
 2. wrong code then success
@@ -3144,11 +3172,7 @@ The simulator runs **15 automatic scenarios**. They are:
 15. a webhook sent to the wrong environment
 
 :::note Save-time safety checks
-The wizard refuses to save any of these:
-* a money step with automatic retry,
-* an answer-based value on the first step,
-* weak channels without verification,
-* web addresses to hosts that are not allowed.
+The wizard checks the shape and allowed values as you save. The strict money-safety rules (money steps never retry, no answer-based value on the first step, weak channels must verify) are enforced by the Smart AI import validator and by the go-live gates; the ordinary save does not currently block every one of them, so the reviewer must read the flow.
 :::
 @@end
 
@@ -3201,12 +3225,12 @@ The test examples in the file (the test vectors) catch many mistakes. But an AI 
 
 @@article id=b06-15 book=6 order=15 title="Direct, aggregator and first-party: the gateway landscape and evidence levels" roles=GATEWAY_ADMIN,OPERATOR,SUPPORT minutes=5 ui=AVAILABLE related=b01-03,b06-01,b06-16
 :::summary Big picture in 20 seconds
-The design covers twenty integrations in three families: direct, aggregator and first-party. Each has an evidence level that says how well we know its real behaviour, and weak evidence needs extra proof before going live.
+The design covers twenty-one integrations in three families: direct, aggregator and first-party. Each has an evidence level that says how well we know its real behaviour, and weak evidence needs extra proof before going live.
 :::
 
 To take Layla's 25.500 LYD, the platform can talk to the wallet company itself. That is a **direct** integration. Or it can talk to a company that offers many wallets through one door. That is an **aggregator**. Or it can talk to our own wallet system. That is **first-party**.
 
-The platform's design covers twenty integrations. The table below is a map, not a promise that each is live today: what is live depends on what your administrators have configured and approved. Use it to understand the *shape* of each.
+The design covers twenty-one integrations in three families. The table below is a map, not a promise that each is live today: what is live depends on what your administrators have configured and approved. Use it to understand the *shape* of each.
 
 ### The three families
 * **Direct.** We connect to the payment company itself. Examples: Moamalat, Sadad.
@@ -3288,15 +3312,15 @@ Each row is one gate. "What it proves" says what the gate shows. "What a failure
 | :-- | :--- | :--- | :--- |
 | 1 | Two-person approval | A different person from the maker approved. | You tried to approve your own work. |
 | 2 | 15-scenario sandbox suite is green | The behaviours listed in [[a:b06-13]] work. | A status rule or retry setting is wrong. |
-| 3 | Amount pipeline contract test is green | `10.50 → "10500"` (dirhams) and `76.255 → "76.26"` (two decimals, nearest). | Wrong scale, precision or rounding. |
+| 3 | Amount pipeline contract test is green | The Canonical amounts `100.0000`, `10.5000` and `0.0100` convert exactly and reversibly through the configured scale, precision, rounding and format. | Wrong scale, precision or rounding. |
 | 4 | Reference format contract test is green | Our reference uses the allowed characters, length and is unique. | Partner rejects or truncates our reference. |
-| 5 | Signature contract test is green | Our signatures match captured real partner samples. | Key encoding, field order or case. |
+| 5 | Signature contract test is green | The crypto profile is complete and internally consistent (algorithm, key encoding, canonicalisation, template, references). The test does not sign a captured real partner sample today; confirm that separately. | Key encoding, field order or case. |
 | 6 | Channel strength is enforced | Every weak channel asks the partner. | A hint channel is trusted alone. |
 | 7 | A rollback version is named | We know where to go back to. | |
-| 8 | Route limits, commission profile and statement parser are previewed | Money rules are visible before they apply. | |
+| 8 | Route limits, commission profile and statement parser are previewed | Money rules are visible before they apply. The gate requires a minimum amount on every route; an empty maximum means **unlimited** and is accepted. | A route was saved without a minimum; set it before go-live. |
 | 9 | Evidence level is `VERIFIED` (or a signed `HIGH_RISK` acceptance; or, for first-party rails, a green suite against the operator's staging) | We know how the partner really behaves. | Built from vendor pages only. |
 | 10 | PCI scope review passed for any rail with a card-number field | Card data handling is compliant. | |
-| 11 | Canary traffic plan configured | New versions start small. | |
+| 11 | Canary traffic plan configured | A boolean plan is recorded. The current gateway-version promotion does not enforce a percentage or merchant-list canary; the separate route-health canary is the only share-based rollout. | Treating the yes/no flag as a real traffic split. |
 | 12 | Route alerts and runbooks are wired | If it fails, someone is told and knows what to do. | |
 
 ### Gate words in plain language
@@ -3306,15 +3330,16 @@ Each row is one gate. "What it proves" says what the gate shows. "What a failure
 * A **weak channel** is a way of learning the result that is only a hint, such as the customer's browser coming back. The platform must still ask the partner.
 * **Evidence level** says how well we know the partner. [[a:b06-15|The gateway landscape and evidence levels]] lists the four levels.
 * **PCI** is the payment-card security standard. The review applies to any rail where the customer types a card number.
-* A **canary plan** limits a new version to a small share of traffic or a few merchants. See [[a:b06-10|Sandbox, live, rollback and what changes for new versus running payments]].
+* A **canary plan** records that a small first step is planned. The current implementation stores this as a yes/no go-live setting; it does not enforce a percentage or merchant list. The route-health canary on degraded routes is separate. See [[a:b06-10|Sandbox, live, rollback and what changes for new versus running payments]].
 
 ### A worked example: gate 3 with real numbers
-These two examples come from the gate itself. A partner takes dirhams as whole numbers, so 10.50 LYD becomes `"10500"`.
+The gate uses three canonical amounts: `100.0000`, `10.5000` and `0.0100`. For each one, the amount must survive the configured scale, precision, rounding and format and be reversible.
 
-* If the scale were wrong and the platform sent `"10.50"`, the partner would read 10.50 dirhams. That is 1000 times too small.
-* A second partner takes two decimals and rounds to the nearest. So 76.255 LYD becomes `"76.26"`. A version that cut the digits instead would send `"76.25"`, and the contract test would turn red.
+* A partner takes dirhams as whole numbers: 10.5000 LYD becomes `"10500"`.
+* A two-decimal partner with nearest rounding writes 10.5000 as `"10.50"`.
+* A three-decimal partner writes 0.0100 as `"0.010"`.
 
-Following the same rule, Layla's 25.500 LYD payment at Noon Mart would be sent as `"25500"` to the first partner.
+If the pipeline cannot represent one of the three exactly (for example `0.0100` with precision 2 and rounding `NONE`), the gate turns red before any real payment is attempted. Layla's 25.500 LYD payment at Noon Mart would be sent as `"25500"` to the first partner.
 
 :::note Who checks what
 Gate 1 is enforced by the database, the approval service and the API; you cannot bypass it. Gates 2 to 5 are run by the platform; you read the results. The rest are confirmed by the approver. Never approve a version for which you did not read the gate results.
@@ -3328,7 +3353,7 @@ The gateway engine has fourteen built-in safeguards. They protect money and secr
 
 Think of the safety rules in a bank branch: a time lock on the safe, a camera, a limit on cash at the counter. The staff do not run them each day, but they explain why some things are not allowed. The engine has the same kind of rules.
 
-The engine is the part of the core that follows each gateway's recipe and talks to the partners. [[a:b06-03|The engine: ten phases, steps, side effects and the retry boundary]] describes it. These fourteen safeguards protect it even if someone makes a configuration mistake or an outside party misbehaves.
+The engine is the part of the core that follows each gateway's recipe and talks to the partners. [[a:b06-03|The engine: phases, steps, side effects and the retry boundary]] describes it. These fourteen safeguards protect it even if someone makes a configuration mistake or an outside party misbehaves.
 
 ### How to read the table
 Each row is one safeguard. The column "Safeguard" is the technical name. "What it prevents" is the problem it stops. "In plain words" says the same thing in everyday language.
@@ -3426,7 +3451,7 @@ Each outbound call to the partner is recorded with the request (secrets removed)
 
 @@article id=b07-02 book=7 order=2 title="The fourteen payment states, one by one" roles=ALL minutes=4 ui=AVAILABLE related=b07-03,b07-06,b13-02
 :::summary Big picture in 20 seconds
-Every payment attempt is in one of 14 states. Eleven describe progress, and the last three describe what happened after success; only SUCCEEDED writes money to the ledger.
+Every payment attempt is in one of 14 states. Eleven describe progress, and the last three describe what happened after success. The first success is what posts the payment to the ledger; refunds, disputes and the AML escrow post their own entries later, so "only `SUCCEEDED` writes money" is not literally true.
 :::
 
 A parcel has a tracking status: "packed", "on the way", "delivered". A payment attempt has a status too, and it is called its **state**. The state tells you where the payment is now, whether the link slot is held, consumed by a success or free again, and whether money has been written to our books. Those books are the **ledger**.
@@ -3444,10 +3469,10 @@ Read each row from left to right. "Link slot" tells you whether the slot on the 
 | `AUTHORIZING` | The money step is in flight right now. | Reserved | Not yet | Nothing. If it stays here, it will become `UNKNOWN` by itself. |
 | `VERIFYING` | We believe something happened but must confirm with the partner. | Reserved | Not yet | Nothing, unless it stays long (dashboard bar growing). |
 | `UNKNOWN` | **We do not know** whether money moved. | **Still reserved** | No | Follow [[a:b07-03]]. |
-| `SUCCEEDED` | Verified success. | Used (counted as confirmed) | **Yes**, in the same transaction | Nothing. |
+| `SUCCEEDED` | Verified success. Normally the slot is used and the merchant is credited. A `SUCCEEDED` with substatus `SUSPENSE_SETTLEMENT` is the exception: the link was already paid, so the money goes to `SUSPENSE` and the merchant is not credited. | Used (counted as confirmed), except a `SUSPENSE_SETTLEMENT` which does not consume the slot | **Yes** for a normal success; the `SUSPENSE_SETTLEMENT` posts to `SUSPENSE` rather than the merchant wallet | For a `SUSPENSE_SETTLEMENT`, Finance reviews the drafted refund. |
 | `FAILED` | A clear, final failure. | Released | No | Nothing. If a customer insists they paid, see [[a:b07-12]]. |
-| `EXPIRED` | The time limit passed with no confirmation (after a last check with the partner). | Released | No | Nothing. A late success can still arrive: [[a:b07-08]]. |
-| `CANCELLED` | Cancelled by the customer or by the system. | Released | No | Nothing. |
+| `EXPIRED` | The time limit passed with no confirmation (after a last check with the partner). | Released | No | Nothing. A late success can still arrive for `EXPIRED` or `FAILED`; never for `CANCELLED`: [[a:b07-08]]. |
+| `CANCELLED` | Cancelled by the customer or by the system. | Released | No | Final. A later partner success is not applied to a cancelled attempt. |
 | `BLOCKED` | A guard stopped it (velocity limit, watch-list, AML rule, merchant not allowed). The customer sees only "cannot process this payment". | Released | No | Never explain the real reason to the customer. |
 | `PARTIALLY_REFUNDED` | Part of a successful payment was returned. | Used | Yes, refund posted | See Book 8. |
 | `REFUNDED` | The whole payment was returned. | Used | Yes, refund posted | See Book 8. |
@@ -3526,10 +3551,10 @@ Follow the steps in order. For each step you see what you will find, what it mea
    * What you see: written proof from the partner.
    * What it means: you can now decide, but it is a two-person decision.
    * What you do: open the checklist [[c:sg-resolve-unknown|Resolve an UNKNOWN payment by hand]] first. Then choose **Mark succeeded** or **Mark failed** and write a reason. [[a:b04-06|Writing a reason that survives an audit]] shows how.
-6. **If you have evidence that the customer was not charged and the link must be freed,** use **Release reservation**.
+6. **If you have evidence that the customer was not charged and the link must be freed,** use **Resolve as failed and release reservation**.
    * What you see: proof that no charge happened.
    * What it means: the slot can be given back so the link can be paid again.
-   * What you do: use **Release reservation** with its checklist: [[c:sg-release-reservation|Release a link reservation]].
+   * What you do: use the **Mark failed** resolution (which releases the reservation) with its checklist: [[c:sg-resolve-unknown|Resolve an UNKNOWN payment by hand]]. The old standalone "Release reservation" action no longer exists.
 
 ### What you tell people
 These are the words to use. The first row is for the customer and the second is for the merchant.
@@ -3563,7 +3588,9 @@ Think of Operator Cases as your task list. The system adds a task every time it 
 An **operator case** is a task created by the system when something needs a human. Each case has a **type**, a priority, a deadline, an owner and a **subject** (the payment, reconciliation item, report, backup target, route or other record it is about). The list shows the type and a human title; the case page shows the subject and the source link.
 
 ### The case types
-The case type tells you why the case exists. Payment and reconciliation cases use the kinds below; platform, backup, route, credential, KYB, ledger, audit and regulatory cases have their own types and context. Always read the **Case context** and follow its **Open source** link before acting.
+An operator case carries a **caseType** from a catalogue of 66 type-aware values. Payment, reconciliation, route, statement, report, backup, ledger, credential, KYB, audit, cash-out, dispute, emergency, commission, AML and platform conditions each have their own type, title, actions and resolution codes. The case page shows the type, the subject and a **Case context** panel; always read the context and follow its **Open source** link before acting.
+
+The seven payment-oriented kinds below still appear as a compatibility view. Use them only when the case really is about a payment attempt; a backup or report case uses its own type and must not be resolved with a payment outcome.
 
 | Kind | Created when | Typical action |
 | :--- | :--- | :--- |
@@ -3572,8 +3599,10 @@ The case type tells you why the case exists. Payment and reconciliation cases us
 | `CONFLICT` | Two trusted sources disagree (for example a webhook says paid, an inquiry says failed). Priority 1. | Do not resolve alone; escalate. |
 | `MISMATCH` | The partner's amount or currency differs from ours. | See [[a:b07-08]]. |
 | `LATE_SUCCESS` | A confirmation arrived after the payment had expired or failed. | See [[a:b07-08]]. |
-| `MANUAL_REVIEW` | Something needs a person's judgement (for example a big volume jump). | Review as instructed in the case. |
+| `MANUAL_REVIEW` | Something needs a person's judgement. | Review as instructed in the type's context. |
 | `UNMATCHED_STATEMENT` | A statement line matches none of our payments. | Reconciliation: [[a:b08-06]]. |
+
+The type catalogue and its per-type actions are maintained in `core-back/lib/operatorCases`. The screen does not offer a general **Create case** button: cases are opened by the system or by a business route. There is also no separate case-note endpoint; use the resolution notes or the comment action offered by the case type.
 
 AML means anti-money-laundering. The MLRO is the money-laundering reporting officer.
 
@@ -3596,7 +3625,7 @@ A case moves in this order: `OPEN` → `IN_PROGRESS` → `PENDING_CHECKER` → `
 2. **Write what you did** in the resolution notes as you go.
    * What you see: the notes field on the case.
    * What it means: the next person can only see what you wrote.
-   * What you do: add a note after each action.
+   * What you do: record the decision and reason on acknowledge/resolve. There is no free-form note on every case action today, so put the full trail in the resolution note.
 3. **Check the case type first.**
    * What you see: a title such as "Backup failed" or "Regulatory report overdue" and an **Open source** button.
    * What it means: the case is an alert about that subject, not necessarily a payment attempt.
@@ -3623,30 +3652,31 @@ For example, a partner sends a webhook saying that Layla's 25.500 LYD payment to
 1. The call arrives at a **secret address** that belongs to one gateway and one environment.
 2. The raw message is **stored first**, exactly as received, before anything else happens. Nothing is ever deleted from this inbox.
 3. The platform answers the partner quickly with the reply the partner expects (in a few milliseconds), so the partner does not keep retrying.
-4. A background worker then checks the signature, the sender's IP address and the timestamp, works out which payment it belongs to, and decides what it means. The signature is a code calculated from the message and a secret. It proves the message came from the partner.
-5. Duplicates are ignored safely (the same message is recognised for seven days).
+4. Verification is **synchronous** on receipt: the platform checks the signature, the sender's IP address and the timestamp, works out which payment it belongs to, and decides what it means. The signature is a code calculated from the message and a secret. It proves the message came from the partner. A body over **64 KiB** that has not been verified is not retained.
+5. Duplicates are ignored safely: the inbox stores a permanent unique `(channel, dedupeKey)` pair. It is not a seven-day window.
+6. A message for an **unknown channel** is rejected and not stored. A message for a known channel is stored even when it matches no attempt; only a transient processing failure is retried.
 
 ### What you may see
 Read the first column as what you see, the second as what it means, and the third as what you do.
 
 | What you see | What it means | What you do |
 | :--- | :--- | :--- |
-| Message arrives before the payment record is saved | The worker retries finding the payment for about 60 seconds. | Nothing unless an alert fires. |
-| Message about a reference we do not know | Stored with no payment attached; nothing changes. | A spike may mean an attack or a partner mix-up; tell the Security Admin. |
-| Duplicate message | Absorbed; answer is OK again. | Nothing. |
+| Message about an attempt that is not saved yet | Stored and matched later; only a transient failure is retried | Nothing unless an alert fires. |
+| Message about a reference we do not know | Stored with no payment attached; nothing changes. It is not retried for 60 seconds. | A spike may mean an attack or a partner mix-up; tell the Security Admin. |
+| Duplicate message | Absorbed by the permanent unique key; answer is OK again. | Nothing. |
 | Out-of-order messages | `SUCCEEDED` is never downgraded. | Nothing. |
 | Message from the sandbox arrives at the live address | Rejected; nothing changes. | If it repeats, tell the Gateway Admin to correct the partner's sandbox settings. |
-| A spike of signature failures | The partner may have changed how it signs. | Runbook [[a:b10-03]]. |
+| A rise in signature failures | The partner may have changed how it signs. | Runbook [[a:b10-03]]. |
 | A valid signature from an unlisted IP address | The partner may have changed servers. | Runbook [[a:b10-03]]. |
 | Weak channel (hint only) | The platform asks the partner before believing. | Nothing. |
 
 A **weak channel** is a source that gives only a hint, for example a message that can be faked. The platform never believes it until it has asked the partner.
 
 ### Replay
-Because the raw bytes are kept, once a corrected signing recipe is approved the platform can **replay** the stored messages without asking the partner to send them again.
+There is no webhook replay button. The inbox keeps the raw bytes, so Engineering can re-drive stored events if a corrected recipe is approved, but that is an engineering action, not a screen action.
 
 ### The dashboard tile
-**Webhook Inbox Lag** is the time between receiving and processing. The target is under 30 seconds for most messages. A high value means the workers are behind; tell Engineering.
+**Webhook Inbox Lag** is the time between receiving and processing. The target is under 30 seconds for most messages. A high value means the workers are behind; tell Engineering. The **Jobs & Outbox** screen gives the per-item detail.
 @@end
 
 @@article id=b07-06 book=7 order=6 title="Slot reservation, single-use links, expiry and the grace window" roles=OPERATOR,SUPPORT,FINANCE minutes=4 ui=AVAILABLE related=b05-07,b07-03,b07-08
@@ -3665,10 +3695,10 @@ When an attempt starts, it reserves one **slot** on the link, in one indivisible
 The slot is **released** only when the attempt reaches `FAILED`, `EXPIRED`, `CANCELLED` or `BLOCKED`. It is **kept through `UNKNOWN`**, because the first payment might have succeeded.
 
 ### Expiry
-Each attempt has a time limit. The attempt expires at the **smaller** of two times: the partner's session time, and the platform's ceiling for that mode. See [[a:b06-02|The nine collection modes in depth]] for the ceilings. When time is up, the platform first asks the partner one last time (if the partner supports it). Only then does it move the attempt to `EXPIRED`.
+Each attempt has a time limit. The attempt expires at the **smaller** of two times: the partner's session time, and the platform's ceiling for that mode. See [[a:b06-02|The nine collection modes in depth]] for the ceilings. When time is up, the platform first asks the partner one last time (if the partner supports it). It then moves the attempt to `EXPIRED`. The exception is a **point-of-no-return** step: if the money step was already sent and the result is still unclear, expiry does not make it `EXPIRED`; it becomes `UNKNOWN`, because marking it expired would invite a second payment.
 
 ### The grace window
-After expiry, the platform keeps listening for late confirmations for a **grace period**. The default is 24 hours, and it is unlimited for partners that cannot be asked. Suppose a verified success arrives in the grace window. There are two cases, as in [[a:b07-08|Late success, conflicts and amount mismatches]].
+The platform stores a late-confirmation grace period (default 24 hours) and keeps listening for late confirmations during it. The current expiry path does not enforce the stored window as a hard boundary: a verified late success can still be processed after it. Suppose a verified success arrives late. There are two cases, as in [[a:b07-08|Late success, conflicts and amount mismatches]].
 * **The slot is still free.** The attempt becomes `SUCCEEDED`, the money is posted, and a priority-2 alert is raised.
 * **The link was already paid by another attempt.** The money goes to the `SUSPENSE` account and a refund is drafted.
 
@@ -3707,7 +3737,7 @@ In an `OTP_PULL` rail the customer first asks the partner to send a code (the **
 
 ### Rules
 1. **Three tries.** A wrong code that the partner marks as retryable returns the customer to the code screen without sending a new SMS. After the third wrong code the payment becomes `FAILED`. The number is a setting per gateway; the default is 3.
-2. **Resend cooldown.** A new SMS cannot be requested again before the gateway's cooldown ends, and the number of resends is capped. This stops customers (or attackers) draining SMS credit.
+2. **Resend cooldown.** A new SMS cannot be requested again before the gateway's cooldown ends. There is **no cap** on the number of resends after that cooldown; the platform does not currently stop a repeated resend sequence.
 3. **Wrong codes never trip the circuit breaker.** The circuit breaker is a safety switch that stops using a payment route when it keeps failing. Wrong codes are customer mistakes, so they never count as route failures. See [[a:b06-08|Status rules and error maps]].
 4. **A timeout during confirm is never a wrong code.** It becomes `UNKNOWN`, and the same code is never submitted again.
 5. **Time limit.** The code screen has a countdown. The effective time limit is the smaller of the partner's code lifetime and the platform's 20-minute ceiling.
@@ -3717,14 +3747,14 @@ In an `OTP_PULL` rail the customer first asks the partner to send a code (the **
 | :--- | :--- | :--- |
 | Customer typed a wrong code once or twice | The partner marked it retryable. The customer is back on the code screen with no new SMS. | Tell the customer to type the code again, carefully. |
 | Payment is `FAILED` after wrong codes | The customer used up the allowed tries (3 by default). | Nothing. `FAILED` is final for this attempt, and the slot is released. |
-| Customer cannot get a new SMS | The cooldown has not ended, or the resend cap was reached. | Ask the customer to wait for the countdown and use the resend button once. If it still fails, the payment company's own support handles SMS delivery. |
+| Customer cannot get a new SMS | The cooldown has not ended. There is no resend cap in the current code. | Ask the customer to wait for the countdown and use the resend button once. If it still fails, the payment company's own support handles SMS delivery. |
 | Payment is `UNKNOWN` after the customer typed a code | The confirm step timed out. It is not a wrong code. | Follow [[a:b07-03]]. Never ask for the same code again. |
 
 ### What you tell a customer who says "the code never came"
 Do not ask them to tap resend repeatedly. Ask them to wait for the countdown, check the phone number they typed, and use the page's resend button once. If it still fails, the payment company's own support handles SMS delivery.
 
 ### Abuse protection
-The platform limits how fast one customer, device or network address can try. A daily SMS budget alarm also exists to detect SMS pumping. SMS pumping is an attack that triggers thousands of SMS messages.
+The platform limits how fast one customer, device or network address can try. There is **no daily SMS budget alarm** in the current code, so SMS pumping is caught only by the per-customer/per-address limits and by a person noticing the volume.
 @@end
 
 @@article id=b07-08 book=7 order=8 title="Late success, conflicts and amount mismatches" roles=OPERATOR,FINANCE minutes=3 ui=AVAILABLE related=b07-04,b07-06,b08-08
@@ -3735,7 +3765,7 @@ Sometimes the partner's answer comes too late, disagrees with another answer, or
 Most payments are simple: we ask, the partner answers, we post the money. Three things can go wrong with that picture. The answer can come late, two trusted answers can disagree, or the amount can be different from what we asked. Most of them open an operator case, and this article shows what to do for each.
 
 ### Late success
-A confirmation arrives **after** the payment was marked `EXPIRED` or `FAILED`. Cause: the customer approved late, or the partner was slow. For example, Layla types her Sadad code for 25.500 LYD after the time limit. What happens next depends on the link.
+A confirmation arrives **after** the payment was marked `EXPIRED` or `FAILED`. Cause: the customer approved late, or the partner was slow. A `CANCELLED` attempt is final and is not a late-success candidate. For example, Layla types her Sadad code for 25.500 LYD after the time limit. What happens next depends on the link.
 * If the slot is free: the attempt becomes `SUCCEEDED` and the entry is posted. A priority-2 alert is raised.
 * If the link is already satisfied: the money is parked in `SUSPENSE` and a refund adjustment is drafted for a person to approve. `SUSPENSE` is the account for money that arrived but does not clearly belong to anyone yet.
 * Operators confirm the case notes and let Finance process the refund through the normal two-person route. Never refund from a phone call.
@@ -3746,7 +3776,7 @@ Example: a verified webhook says "paid" but our status question says "failed". B
 ### Amount mismatches
 The partner confirms success but the amount or currency is not what we asked. The route's **mismatch policy** decides what happens.
 * Within the tolerance: accepted.
-* Beyond the tolerance: the money is held in `SUSPENSE` and a `MISMATCH` case opens.
+* Beyond the tolerance: the attempt becomes `UNKNOWN`. The confirmation path does **not** open a `MISMATCH` case and does **not** park the money in `SUSPENSE` at this stage; `MISMATCH` cases come from statement reconciliation. Open an operator case yourself if the difference needs a review. A later verified settlement may still route an excess to `SUSPENSE` and draft a refund.
 
 ### Which case, and what you do
 Find your situation in the first column. The case kinds are explained in [[a:b07-04|The Operator Cases screen]].
@@ -3902,7 +3932,7 @@ This is the most common call you will receive. Follow the steps in order. The ta
 2. **Ask for the payment reference.** It is shown on the checkout page, and the page has a copy button. Do not ask for passwords or codes.
 3. **Look it up** and check the **environment** and **status**. Use the table in the next section.
 4. **Do not ask them to pay again.**
-5. **Create or update an operator case** if the customer claims deduction and the status is not `SUCCEEDED`, noting the reference and the time.
+5. **Open or update the existing operator case** if the customer claims a deduction and the status is not `SUCCEEDED`, noting the reference and the time. The screen has no free-standing "create case" action; use the case the payment already has or the route that opened it, and add the information to its resolution notes.
 6. **Never say "your payment is confirmed" from a screenshot, an SMS or a call.** Only a status you read in the platform counts.
 7. **Tell them what happens next** and when you will reply. Then actually reply.
 
@@ -3911,10 +3941,11 @@ For example, Layla calls us and says Sadad took 25.500 LYD but Noon Mart shows n
 
 | Status you see | What it means | What you say / do |
 | :--- | :--- | :--- |
-| `SUCCEEDED` | We have verified the payment. | "We confirm your payment. The merchant has been credited." |
+| `SUCCEEDED` | We have verified the payment. Unless the substatus is `SUSPENSE_SETTLEMENT`, the merchant has been credited. | "We confirm your payment. The merchant has been credited." If the substatus is `SUSPENSE_SETTLEMENT`, say: "We received your payment, but the link was already paid; our Finance team is arranging the refund." |
 | `AWAITING_CUSTOMER` or `VERIFYING` | The payment is still in progress. | "It is in progress. Please do not pay again. Wait for the page to update." |
 | `UNKNOWN` | We are not sure. | "We are confirming with your payment provider. Please do not pay again. We will update you." Then follow [[a:b07-03]]. |
-| `FAILED`, `EXPIRED`, `CANCELLED` | We did not receive confirmation. | "We have no confirmed payment. If your provider shows a deduction, keep your receipt and your reference; a late confirmation may still arrive and, if it does, we will credit the merchant or return the money." Open a case if money was deducted. |
+| `FAILED`, `EXPIRED` | We did not receive confirmation. | "We have no confirmed payment. If your provider shows a deduction, keep your receipt and your reference; a late confirmation may still arrive and, if it does, we will credit the merchant or return the money." Open a case if money was deducted. |
+| `CANCELLED` | The payment was cancelled and is final. A later partner success is not applied. | "This payment was cancelled. If your provider shows a deduction, keep your receipt and your reference and we will investigate; we will not apply a late success to the cancelled payment automatically." Open a case if money was deducted. |
 | `BLOCKED` | A guard stopped it. | "We cannot process this payment." Nothing more. Do not explain. |
 | Not found | Wrong reference or wrong environment. | Ask the customer to check the reference. |
 
@@ -4090,7 +4121,7 @@ Example: 3% of 25.5550 LYD is 0.76665. Rounding half up to four places gives 0.7
 Commission on money held by compliance is **not** counted as income until the hold is released.
 
 :::note Where to change it
-Commission profiles and velocity rules are managed on the **Pricing & Limits** screen. Changes are versioned and go through the approval flow. See [[a:b04-05|who approves what]].
+Commission profiles and velocity rules are managed on the **Pricing & Limits** screen. Changes are versioned and audited. The current code applies a new commission profile or velocity rule directly (with a checklist); it does **not** create a maker-checker approval. The intended control is a second person before a money rule changes. See [[a:b04-05|who approves what]].
 :::
 @@end
 
@@ -4105,7 +4136,7 @@ When a payment succeeds, the ledger must record where the money is now. The answ
 When an attempt becomes `SUCCEEDED`, one journal entry is written in the **same database transaction**. An attempt is one try to pay. Which entry is written depends on how the money travels.
 
 ### How to read the tables
-Each example below is a small table with a **Debit** column on the left and a **Credit** column on the right. The debit total equals the credit total. We write "Entry 1", "Entry 2" and so on to match the numbers in [[a:b08-12|the full list of fifteen entries]].
+Each example below is a small table with a **Debit** column on the left and a **Credit** column on the right. The debit total equals the credit total. We write "Entry 1", "Entry 2" and so on to match the numbers in [[a:b08-12|the full list of seventeen entries]].
 
 All examples use one sale: Layla pays Noon Mart a 100.0000 LYD link, and our commission is 3% (3.0000). Under most tables, a check line adds up both sides.
 
@@ -4210,7 +4241,7 @@ A scheduled job recomputes the equation continuously and reports the **drift**, 
 
 ### If drift is not zero
 1. This is a **priority-1 incident**. Tell your manager and Finance immediately.
-2. **Automatic payouts stop** until the cause is understood.
+2. The platform opens an operator case but does **not** stop payouts automatically. The intended control is that normal payouts pause until the cause is understood; the current code only alerts, so a person must pause cash-outs deliberately.
 3. Follow [[a:b10-05|RB-04 Reconciliation or ledger drift]].
 4. **Never edit numbers** or try to "make it balance". Corrections are new approved adjustments.
 
@@ -4253,8 +4284,8 @@ Every statement line gets one result. Read the table to see what each result mea
 | :--- | :--- | :--- |
 | `MATCHED` | Our payment and the statement line agree. | none |
 | `AMOUNT_MISMATCH` | Same payment, different amount. | Check fee or rounding; propose an adjustment or fee true-up. |
-| `MISSING_AT_GATEWAY` | We say succeeded; the partner shows nothing. | **Serious**: we may have credited money we did not receive. Escalate. |
-| `MISSING_LOCALLY` | The partner shows a payment we do not have. | May be a late success or an `UNKNOWN` we can now resolve. |
+| `MISSING_AT_GATEWAY` | A statement line exists but no local attempt matches it. | Check whether it is a late payment, a duplicate or a partner error before crediting anything. |
+| `MISSING_LOCALLY` | A local attempt is absent from the statement. | **Serious**: we may have credited money the partner did not settle. Escalate. |
 | `DUPLICATE` | The same line twice. | Ignore the duplicate after checking. |
 
 Problem lines can open operator cases of kind `UNMATCHED_STATEMENT` or `MISMATCH`.
@@ -4269,7 +4300,7 @@ Settling means the partner has paid us. Two entries can follow. Both start from 
 The partner's statement may be in Libya time. Our system stores UTC. Convert deliberately when you compare dates. The source's time zone setting does this for you.
 
 ### Targets and danger signs
-The target is that 99% of statements are loaded within 4 hours of becoming available. If drift appears, automatic payouts stop and runbook [[a:b10-05|RB-04 Reconciliation or ledger drift]] applies.
+The target is that 99% of statements are loaded within 4 hours of becoming available. If drift appears, the platform opens a P1 case; the current code does **not** stop payouts automatically, so pause cash-outs deliberately while you follow runbook [[a:b10-05|RB-04 Reconciliation or ledger drift]].
 
 :::note Partial
 New statement sources are created by engineering today. See [[a:b03-08|features that are only partially available]]. You choose an existing source on the screen.
@@ -4278,7 +4309,7 @@ New statement sources are created by engineering today. See [[a:b03-08|features 
 
 @@article id=b08-07 book=8 order=7 title="Cash-outs: paying a merchant its balance" roles=FINANCE,OPERATOR minutes=2 ui=AVAILABLE related=b08-08,b04-05,b08-13
 :::summary Big picture in 20 seconds
-A cash-out pays a merchant the money in its wallet, into its real bank account. One Finance person processes it, and a different Finance person approves the final step. Nothing leaves the wallet until that last step.
+A cash-out pays a merchant the money in its wallet, into its real bank account. One Finance user with `cashout:review` processes it; the merchant who requested it is a different principal, and the decision (wallet reduced, bank transfer recorded) is audited in one step.
 :::
 
 ### What a cash-out is
@@ -4287,38 +4318,36 @@ A merchant's wallet is a number on our books. It says how much we owe the mercha
 Example: Noon Mart has at least 100.0000 LYD in its wallet and asks to cash out 100.0000 LYD. At the end, the wallet goes down by 100.0000 and our treasury goes down by 100.0000 (Entry 8).
 
 ### States
-A cash-out moves through these states: `PENDING` → `PROCESSING` → `COMPLETE` → `SUBTRACTED`, or `REJECTED`.
+A cash-out moves through these states: `PENDING` (or `PROCESSING`) → `COMPLETE`, or `REJECTED`. `SUBTRACTED` stays in the enum and is treated as terminal on read, but the current approval path never writes it.
 
 | State | Meaning |
 | :--- | :--- |
 | `PENDING` | Requested; waiting for Finance. |
 | `PROCESSING` | Finance has started paying it. |
-| `COMPLETE` | The bank transfer has been made. |
-| `SUBTRACTED` | A second Finance person approved, and the amount was taken off the merchant's wallet. |
+| `COMPLETE` | The bank transfer has been recorded, and the wallet was reduced in the same transaction. |
+| `SUBTRACTED` | Legacy terminal state; accepted on read, not written by the current path. |
 | `REJECTED` | Finance refused it. |
 
 ### The steps on the **Cash-Outs** screen
 1. Open the request and read the **bank details snapshot**. It is a copy of the bank details as they were when the request was made. If the merchant later changes its bank account, a request already made keeps the old snapshot.
 2. Check four things: the destination is the merchant's verified bank account, the merchant is `ACTIVE`, the wallet has enough balance, and no negative balance or hold applies.
-3. Use **Process**. Open the checklist [[c:sg-process-cashout|Process or approve a cash-out]] first.
-4. Make the real bank transfer outside the platform, using the bank's own controls.
-5. Mark it complete.
-6. A **different** Finance user uses **Approve and execute** to subtract the amount. The ledger entry is a wallet debit and a treasury credit (Entry 8). The same checklist applies.
-7. If it must be refused, use **Reject and release**. Open [[c:sg-reject-cashout|Reject a cash-out]] first. Nothing has been subtracted before the final step, so the merchant's balance is unchanged.
+3. Make the real bank transfer outside the platform, using the bank's own controls, or confirm that it has been made.
+4. Use **Process** with an `APPROVE` or `REJECT` decision. Open the checklist [[c:sg-process-cashout|Process or approve a cash-out]] first. `APPROVE` subtracts the amount and posts the wallet debit / treasury credit (Entry 8) in the same transaction; `REJECT` releases the request and posts nothing.
+5. If it must be refused, use **Reject and release**. Open [[c:sg-reject-cashout|Reject a cash-out]] first.
 
 ### Rules
 * A merchant who is suspended, has a negative balance, or has unresolved AML matters **cannot cash out**. AML means anti-money-laundering.
-* Cash-outs stop automatically when the ledger equation shows drift. See [[a:b08-05|the ledger equation and what to do when it does not hold]].
-* The person who processes it is not the person who approves the subtraction.
+* The ledger-drift alert does **not** stop cash-outs automatically today; Finance must pause them deliberately. See [[a:b08-05|the ledger equation and what to do when it does not hold]].
+* The current code has no second Finance approval step and never writes `SUBTRACTED`. The intended control is two Finance people; if that is required, it must be added before the guide claims it. Until then, the merchant requester vs Finance processor separation and the audit row are the controls in force.
 @@end
 
 @@article id=b08-08 book=8 order=8 title="Adjustments: refunds, chargebacks, manual entries and corrections" roles=FINANCE,OPERATOR minutes=3 ui=AVAILABLE related=b08-09,b04-05,b08-07
 :::summary Big picture in 20 seconds
-An adjustment is any money movement that is not an ordinary successful payment. It is the only way to change the books after the fact, and it always needs two people.
+An adjustment is any money movement that is not an ordinary successful payment. It is the main way to change the books after the fact, and most types need two people. The dispute intake is the exception: its reserve leg can post before a checker, and a later outcome needs the human check.
 :::
 
 ### What an adjustment is
-An **adjustment** is any money movement that is not an ordinary successful payment. Examples are a refund, a dispute outcome and a correction. It is the only way to change books after the fact, and it **always needs two people**: one proposes it and a different one approves it.
+An **adjustment** is any money movement that is not an ordinary successful payment. Examples are a refund, a dispute outcome and a correction. For most types the maker proposes and a different checker approves. The documented exception is the **chargeback reserve**: intake can post the reserve before a checker, and the subsequent outcome (won/lost) still needs a human Finance check.
 
 ### Types
 Each adjustment has one type. Use the table to pick the right one.
@@ -4351,12 +4380,12 @@ Example: Layla returns her purchase, and Noon Mart's 100.0000 LYD sale is refund
 1. **Executed adjustments are never edited.** A wrong one is offset by a new one.
 2. **Check the amount and the currency** before proposing. A refund can never exceed the original payment.
 3. **Link a refund to any dispute** on the same payment so the same money is not returned twice.
-4. **The system drafts chargebacks, but never approves them.** A human checker is required before any money moves.
+4. **The system drafts chargebacks and can post the intake reserve automatically.** A human checker is required for the outcome (won/lost) and for the refund/void legs; the reserve is the exception to "no money before approval".
 @@end
 
 @@article id=b08-09 book=8 order=9 title="Disputes and chargebacks" roles=FINANCE,OPERATOR minutes=3 ui=AVAILABLE related=b08-08,b08-13,b04-05
 :::summary Big picture in 20 seconds
-A dispute is a claim that a payment should be returned. The system drafts the chargeback, but no money moves until a human Finance checker approves it. The money waits in a reserve until the dispute is won or lost.
+A dispute is a claim that a payment should be returned. The system drafts the chargeback and can post the intake reserve before a checker; the outcome (won or lost) and the final wallet effect need a human Finance check. The money waits in a reserve until the dispute is won or lost.
 :::
 
 ### What a dispute is
@@ -4384,9 +4413,9 @@ A dispute moves through these states: `OPENED` → `EVIDENCE_REQUESTED` → `EVI
 
 ### How the system drafts the chargeback
 1. A dispute is created.
-2. A **system drafting identity** creates a chargeback adjustment in a waiting state.
-3. A human `FINANCE` checker must approve it. The system can never approve or execute.
-4. Until a human approves, **no money moves** and the merchant's wallet is untouched. A priority-2 case opens if the request is still waiting shortly before the evidence deadline.
+2. A **system drafting identity** creates a chargeback adjustment, and the intake **reserve leg** is posted when the platform held the cash (the merchant-direct case posts no reserve). The reserve respects the merchant's negative-balance ceiling; if it would breach it, the reserve is held for review instead.
+3. A human `FINANCE` checker must approve the outcome adjustment. The system can never approve or execute the outcome.
+4. The reserve can already be on the books before that check. A priority-2 case opens if the request is still waiting shortly before the evidence deadline.
 
 ### What the money does
 The ledger records each moment of a dispute. The example is the same 100.0000 LYD sale: the merchant wallet holds 97.0000 of it and income holds 3.0000 of commission.
@@ -4396,7 +4425,7 @@ The ledger records each moment of a dispute. The example is the same 100.0000 LY
 | Dispute approved for reserve | Wallet and income reduced; money goes to `CHARGEBACK_RESERVE` (Entry 10, first part). |
 | Dispute lost | Reserve goes out to the payer or scheme (Entry 10, second part). |
 | Dispute won | Reserve returns to the merchant and income (Entry 12). |
-| Dispute on an AML-held payment | Handled against the hold (Entry 11), not the wallet. |
+| Dispute on an AML-held payment | The current dispute flow does not net the chargeback against the `AML_HOLD`. Resolve the AML case first (void and return, Entry 11); do not assume the dispute engine will touch the hold. |
 
 With the example numbers:
 * Approved for reserve: wallet −97.0000, income −3.0000, `CHARGEBACK_RESERVE` +100.0000.
@@ -4460,7 +4489,7 @@ Each measure below is built from ledger accounts. Read the "Meaning" column as a
 | Chargeback losses | Reserve paid out on lost disputes, net of commission reversed. |
 | Refund commission reversed | Debits to income from refunds, shown as contra-revenue. |
 | Net contribution | Net revenue minus chargeback losses. |
-| Commission receivable | Commission earned but not yet netted. |
+| Commission receivable | Commission earned but not yet netted; the receivables panel shows this account only. |
 
 Example: Layla's 100.0000 LYD sale at Noon Mart earns 3.0000 commission, and the payment company fee is 0.8000. Gross commission revenue is 3.0000. Realised gateway cost is 0.8000. Net revenue is 3.0000 − 0.8000 = 2.2000.
 
@@ -4470,21 +4499,21 @@ Liquidity means having enough cash, at the right time, to pay what we owe. Each 
 | Panel | What it shows | When to worry |
 | :--- | :--- | :--- |
 | Invariant status | The latest drift and when it ran. | Any non-zero drift. |
-| Treasury cover | Treasury plus clearing versus wallets plus holds plus reserves. | Below the floor. |
-| Clearing ageing | Clearing per gateway, by age. | Older than the settlement lag. |
-| Cash-out queue | Pending amounts and forecast. | Demand above available cash. |
-| Holds and reserves | AML hold and chargeback reserve, oldest item. | Aged beyond deadlines. |
-| Receivables | Commission receivable and negative merchant balances versus ceilings. | Ceiling approached. |
+| Treasury cover | **Treasury divided by gateway clearing** (the cover ratio in the current API). It is not "treasury plus clearing versus all obligations". | below the ratio your Finance lead has set |
+| Clearing ageing | Clearing per gateway, by age (0-7, 8-30, 31+ days). | Older than the settlement lag. |
+| Cash-out queue | Pending/processing counts and next-day demand. | Demand above available cash. |
+| Holds and reserves | AML hold, chargeback reserve and suspense balances, with the age of the **oldest open operator case** (not the oldest hold). | an old open case is the signal to investigate |
+| Receivables | Commission receivable only. | Ceiling approached. |
 
-For example, treasury 500.0000 plus clearing 100.0000 is 600.0000. If wallets are 450.0000, holds 50.0000 and reserves 20.0000, that side is 520.0000. We have more on the left than we owe on the right, so cover is above 520.0000. Whether it is above the floor depends on the floor your Finance lead has set. These numbers are only an example.
+For example, treasury 500.0000 and clearing 100.0000 gives a cover ratio of 5.0000, whatever the wallet, hold or reserve totals are. These numbers are only an example.
 
 ### Who sees what
-Merchants see their own gross, commission and net, **never** gateway costs or our margin.
+Merchants see their own gross, commission and net. A merchant's own payment lists do expose the **gateway fee** charged on that payment; what they do not see is the platform's internal cost model or margin. Do not tell a merchant "you never see gateway costs".
 @@end
 
-@@article id=b08-12 book=8 order=12 title="All fifteen worked journal entries (plus one)" roles=FINANCE minutes=3 ui=AVAILABLE related=b08-01,b08-04
+@@article id=b08-12 book=8 order=12 title="All seventeen worked journal entries" roles=FINANCE minutes=3 ui=AVAILABLE related=b08-01,b08-04
 :::summary Big picture in 20 seconds
-This is the reference table of the fifteen standard journal entries plus the late-success event (entry 16). Use it with the ledger explorer to see every debit and credit for a 100 LYD sale.
+This is the reference table of the seventeen standard ledger scenarios: the original fifteen worked entries, the late-success settlement that parks money in `SUSPENSE`, and the split-surcharge confirmation. Use it with the ledger explorer to see every debit and credit for a 100 LYD sale.
 :::
 
 ### How to read the table
@@ -4493,10 +4522,11 @@ Each row is one journal entry: an event, the accounts debited and the accounts c
 Each row uses a 100.0000 LYD link and 3% commission unless said otherwise. The example is Layla paying Noon Mart 100.0000 LYD: the merchant gets 97.0000 and the commission is 3.0000. Entries 6, 7 and 10 have two parts, shown as "a" and "b".
 
 ### Find your entry
-* Money coming in from a payment: entries 1, 2, 5, 6, 7 and 13.
+* Money coming in from a payment: entries 1, 2, 5, 6, 7 and 13, plus the split-surcharge entry 17.
 * Settlement from the payment company: entries 3 and 4.
-* Cash-outs and refunds: entries 8, 9 and 14.
+* Cash-outs and refunds: entries 8, 9 and 14. A refund of a `MERCHANT_DIRECT` payment uses the `REFUND` stage of the merchant-direct scenario: only the commission recognition reverses (debit `PLATFORM_INCOME`, credit `COMMISSION_RECEIVABLE`), because the platform never held the money.
 * Holds and disputes: entries 7, 10, 11, 12 and 15.
+* A settlement that cannot use its link slot: entry 16.
 * An extra event in the explorer: entry 16.
 
 ### The entries
@@ -4522,9 +4552,12 @@ Account names are the code names from [[a:b08-02|the eleven accounts]]. Amounts 
 | 13 | NeomPay confirmation | `TREASURY` 100.0000 | `MERCHANT_WALLET` 97.0000; `PLATFORM_INCOME` 3.0000 |
 | 14 | NeomPay full refund | `MERCHANT_WALLET` 97.0000; `PLATFORM_INCOME` 3.0000 | `TREASURY` 100.0000 |
 | 15 | Chargeback with only 40.0000 in the wallet | `MERCHANT_WALLET` 97.0000; `PLATFORM_INCOME` 3.0000 | `CHARGEBACK_RESERVE` 100.0000 |
-| 16 | Late success on an already-paid link (the explorer's extra event) | `GATEWAY_CLEARING` 100.0000 | `SUSPENSE` 100.0000 |
+| 16 | Settlement that cannot use the link slot (`SUSPENSE_SETTLEMENT`) | `GATEWAY_CLEARING` 100.0000 | `SUSPENSE` 100.0000 |
+| 17 | Split surcharge confirmation (customer pays half the commission, 1.5000) | `GATEWAY_CLEARING` 101.5000; `GATEWAY_FEE_EXPENSE` 0.8000 | `MERCHANT_WALLET` 98.5000; `PLATFORM_INCOME` 3.0000; `GATEWAY_FEE_ACCRUAL` 0.8000 |
 
 **Reading entry 15.** The wallet goes from +40.0000 to −57.0000, because 40.0000 − 97.0000 = −57.0000. The ledger equation still holds: a negative wallet is arithmetically the same as the merchant owing us money. See [[a:b08-13|negative balances and ceilings]].
+
+**Reading entry 16.** The money is real but the link slot was already used, so it is parked in `SUSPENSE` until the automatic refund adjustment is reviewed. A refund of that parked money debits `SUSPENSE` and credits `TREASURY`; it must not touch the merchant wallet, because the merchant was never credited. The merchant-direct refund is a reversal of commission only, as noted above.
 
 ### Try it
 The explorer below lets you change the amounts.
@@ -4607,7 +4640,7 @@ Read the table from top to bottom. L1 and L2 look at who the merchant is. L3 and
 | L1 Onboarding screening | Is the business or any owner sanctioned, politically exposed or in negative news? | When a join request is submitted; again when an owner changes. |
 | L2 Ongoing screening | Has anything changed since approval? | Periodically by risk tier, and whenever a watch-list is updated. |
 | L3 Transaction-time check | Is this merchant or payer allowed to transact right now? | On the payment path, inside the start-of-payment guard, using cheap local checks. |
-| L4 Transaction monitoring | Do patterns or amounts break thresholds? | At confirmation and in daily batch analysis. |
+| L4 Transaction monitoring | Apply the configured AML rules to the payment path and to the periodic screening run. There is no separate daily transaction-monitoring batch in the current code. | On the payment path and on the periodic screening schedule. |
 | L5 Case management | Review, decide and document. | Continuously. |
 | L6 Regulatory reporting | Report what the law requires. | When a rule or a case requires it. |
 | L7 Record keeping and governance | Prove what was done and why. | Continuously. |
@@ -4620,11 +4653,7 @@ Payments have a strict speed budget. A payer waits while we work, so we cannot r
 3. **Daily batch:** structuring, many-to-one and one-to-many patterns, sudden activity after dormancy, rapid in-and-out movement, and a merchant's activity compared with its declared volume.
 
 ### When a payment method requires a live screening call
-Sometimes a payment method (a rail) legally requires a screening call during the payment. Then a strict timeout applies. The default is 800 milliseconds. Each rail has a policy for when the call is too slow:
-* **Fail closed**: block the payment.
-* **Fail open and flag**: let the payment continue and open a case.
-
-The default is fail open and flag below the rail's screening threshold, and fail closed above it.
+The historical design described a per-rail live screening call with an 800 ms timeout and a fail-open/fail-closed policy. That rail screening policy is **not implemented** in the current code: the transaction-time checks are the local watch-list, velocity rules and the AML rules described above. Do not promise a rail-level screening guarantee to a partner or an auditor.
 @@end
 
 @@article id=b09-03 book=9 order=3 title="Screening: lists, matches and how to decide them" roles=COMPLIANCE,MLRO minutes=3 ui=AVAILABLE related=b09-05,b05-05,b09-08
@@ -4673,9 +4702,9 @@ Every screening ends with one result. Read the table to see what each result mea
 A `POTENTIAL_MATCH` is a question, not an answer. Omar opens the screening and reviews each candidate with its list, score and attributes. He compares what he can: date of birth, nationality and ID. Then he uses **Disposition** and **Save**. Before he starts, he opens the checklist [[c:sg-aml-disposition|Decide a screening match]].
 
 Disposition has three choices:
-* `FALSE_POSITIVE`: a different person. You may set `suppress_future` with an **expiry date**, so the same pair does not reopen on every periodic screening. Suppression ends automatically if the person's identifying data changes.
-* `TRUE_MATCH`: the match is real.
-* `ESCALATED`: refer to the MLRO.
+* `FALSE_POSITIVE`: a different person. The screen lets you set a suppression date, but the current screening path does **not** consult that stored suppression, so the same pair can reopen on the next periodic screening. Do not rely on it to silence a match forever.
+* `TRUE_MATCH`: the match is real. Saving it opens an AML case; for an active merchant it also suspends the merchant immediately, so this is not a paperwork-only choice.
+* `ESCALATED`: refer to the MLRO. It opens/escalates the case; it does **not** create a suspicious-activity report draft automatically. A report is a separate manual step.
 
 Always write the rationale: what you compared (date of birth, nationality, ID) and why you decided.
 
@@ -4683,12 +4712,12 @@ Always write the rationale: what you compared (date of birth, nationality, ID) a
 Each screening stores exactly which list versions were checked and a fingerprint of the input. This is called reproducibility. A past decision can be replayed against the lists that were in force at that time.
 
 ### What happens when a list changes
-When a list changes, all active subjects are re-screened. A new match on an active merchant opens a case and **restricts cash-out immediately**. Payments continue unless severity is `CRITICAL`. See [[a:b09-05|how cases work]] for what happens next.
+When a list changes, all active subjects are re-screened. A new match on an active merchant opens a case. A **confirmed** match suspends the merchant and restricts cash-out immediately; a **potential** match does not hold cash-out automatically. Payments continue unless severity is `CRITICAL`. See [[a:b09-05|how cases work]] for what happens next.
 @@end
 
 @@article id=b09-04 book=9 order=4 title="Rules: velocity limits, AML rules and how they change" roles=COMPLIANCE,MLRO,FINANCE minutes=3 ui=AVAILABLE related=b09-05,b04-05
 :::summary Big picture in 20 seconds
-Velocity rules limit how often or how much. AML rules look for suspicious patterns and can hold money or open cases. Every rule change needs two people, and a dry-run shows the effect before it goes live.
+Velocity rules limit how often or how much. AML rules look for suspicious patterns and can hold money or open cases. Every AML rule change needs two people; the current screen has no dry-run replay and no immediate emergency-tightening path, so a maker proposes and an MLRO checker approves before it is active.
 :::
 
 Think of a shop owner who watches the till. One rule says "no more than a few sales from the same person in an hour". Another says "look closely when many payments are just under the limit". Our platform has the same two kinds of watching.
@@ -4725,22 +4754,22 @@ Rules evaluate by *subject*: the merchant, the owner or the payer identifier. So
 
 ### How a rule change is controlled
 * **Every rule change needs two people.** The `MLRO` approves AML rules. See [[a:b04-05|who approves what]].
-* **Tightening** in an emergency may be activated at once and ratified within 24 hours.
+* There is **no emergency tightening path and no dry-run replay** in the current AML rule screen. A maker proposes the new version and a checker must approve it before it is active; a reviewer who must move faster should use an existing broad rule, not an unapproved change.
 * **Loosening** never skips review.
-* A **dry-run** replays recent payments against a proposed rule. It shows how many holds and cases the rule would have made, so a noisy rule is caught first.
+* The **scope** field is stored on the rule, but the current evaluator does **not** filter by it. Do not rely on a scope to limit a rule to one merchant, rail or channel; encode the limit in the rule parameters (for example the rail code or amount).
 * Open the checklist [[c:sg-aml-rule-change|Create or change an AML rule]] before **Create** or **Save** on the **AML Rules** screen.
 
 ### Rule quality
 A rule whose precision falls is flagged for retuning. Precision falls when many holds end in release. The flag is there so reviewers are not buried in noise.
 
 :::note Where to change it
-The **AML Rules** screen manages AML rules. **Velocity rules** are managed on the **Pricing & Limits** screen. Both need a second person, see [[a:b04-05|who approves what]].
+The **AML Rules** screen manages AML rules; AML rule changes create an approval. **Velocity rules** are managed on the **Pricing & Limits** screen and are applied directly and audited today, with a checklist but no maker-checker. The intended control is a second person for both. See [[a:b04-05|who approves what]].
 :::
 @@end
 
 @@article id=b09-05 book=9 order=5 title="Cases: lifecycle, severity, deadlines and what money does" roles=COMPLIANCE,MLRO minutes=3 ui=AVAILABLE related=b09-06,b08-04,b04-05
 :::summary Big picture in 20 seconds
-A case is the file we open when something looks suspicious. One analyst proposes a resolution, and the MLRO must approve it. Money moves only after that approval, and the severity sets the deadline.
+A case is the file we open when something looks suspicious. One analyst proposes a resolution, and the MLRO must approve it. The held money is released or returned only after that approval, and the severity sets the deadline in calendar hours.
 :::
 
 Omar in compliance sees a new case. A rule found that Noon Mart received many payments just below a limit, and the system held that money. Omar studies the payments and writes his notes. He proposes to release the money. He cannot release it himself. The MLRO must approve first, and only then does the money move.
@@ -4750,7 +4779,7 @@ A case moves through these states: `OPEN` → `IN_REVIEW` → `PENDING_CHECKER` 
 
 1. A rule hit, a screening match, a combined event or an analyst's referral creates the case. The system computes a **severity** and a deadline.
 2. A `COMPLIANCE` analyst (the maker) investigates, records notes, and uses **Propose** to suggest a resolution. Open the checklist [[c:sg-aml-propose-resolution|Propose an AML case resolution]] first.
-3. An `MLRO` (the checker, never the same person) approves. **Only then does money move.**
+3. An `MLRO` (the checker, never the same person) approves. **Only then is the held money released or returned.** The escrow itself may already have been booked when the payment was captured.
 4. The resolution and the ledger posting are one atomic step. Atomic means they happen together or not at all.
 
 ### The four resolutions
@@ -4761,7 +4790,7 @@ The analyst proposes one resolution and the MLRO approves it. Read the table to 
 | Release | The held money goes to the merchant and income (Entry 7, release). Commission becomes income now. |
 | Void and return | The money is returned to the payer (Entry 11). No commission was ever recognised. |
 | Freeze | Only the case state changes; the money stays in `AML_HOLD`. |
-| Escalate to STR | A suspicious-activity report draft is created. Details: [[a:b09-07]] |
+| Escalate to STR | The case becomes `ESCALATED_STR`, the held money stays held, and a P1 operator case opens. **No suspicious-activity report draft is created automatically**; a person creates the report separately. Details: [[a:b09-07]] |
 
 ### How severity is decided
 Severity is the case's urgency level: `LOW`, `MEDIUM`, `HIGH` or `CRITICAL`. It starts from the rule's base level. Then these inputs raise it. They are stored, so the result can be explained.
@@ -4782,14 +4811,14 @@ Severity sets how fast the case must be resolved.
 | Severity | Default deadline |
 | :--- | :--- |
 | `CRITICAL` | 4 hours |
-| `HIGH` | 1 business day |
-| `MEDIUM` | 3 business days |
-| `LOW` | 5 business days |
+| `HIGH` | 24 hours |
+| `MEDIUM` | 72 hours |
+| `LOW` | 120 hours |
 
 Breaches raise alerts. A case cannot be closed without a written rationale and, for holds, a ledger outcome.
 
 ### A dispute on held money
-A chargeback is a payer's dispute that takes money back. A chargeback on an AML-held payment is processed against the hold (void and return). It never touches the merchant's wallet.
+A chargeback is a payer's dispute that takes money back. The current dispute flow does **not** net a chargeback against an `AML_HOLD`; it treats the held payment separately. Resolve the AML case first (void and return, Entry 11), then handle any remaining dispute on the normal path.
 @@end
 
 @@article id=b09-06 book=9 order=6 title="Restricting a merchant: suspension, emergency ratification and screening outcomes" roles=COMPLIANCE,MLRO,OPERATOR minutes=2 ui=AVAILABLE related=b04-04,b05-08,b09-03
@@ -4806,15 +4835,15 @@ Sometimes waiting is dangerous. Suppose Omar sees a sanctions match on a merchan
 ### What ratification means
 To ratify is to confirm after the fact. A different person from `COMPLIANCE`, or the `MLRO`, must review the emergency suspension within 24 hours. That person either **ratifies** it or **revokes** it.
 
-If nobody does, a priority-2 alert fires and the suspension **stays in force**. It is never reversed automatically. This is fail safe: restricted, not open.
+If nobody does, a priority-2 alert fires and the suspension stays in force for a **48-hour grace window**. If it is still unratified after the grace, the deadline worker **lifts the emergency suspension automatically** and restores the merchant's previous status; the unratified approval is closed and the action is recorded for review. It is not permanent by default, and it is not silently forgotten.
 
 ### Screening outcomes that restrict a merchant
 Read the table to see what each screening outcome does to the merchant. For how screening results are decided, see [[a:b09-03|screening and disposition]].
 
 | Outcome | Result |
 | :--- | :--- |
-| Sanctions `CONFIRMED_MATCH` | Immediate suspension by the emergency path; cash-out frozen; held money stays in hold; a suspicious-activity draft is created; nothing more happens until the MLRO decides. |
-| `POTENTIAL_MATCH` | Each match must be decided. Until then an applicant cannot be approved, or an existing merchant's cash-out is held. |
+| Sanctions `CONFIRMED_MATCH` | Immediate suspension by the emergency path; cash-out frozen; held money stays in hold; a case opens; nothing more happens until the MLRO decides. The current code does not create a suspicious-activity report draft automatically. |
+| `POTENTIAL_MATCH` | Each match must be decided. Until then an applicant cannot be approved. A potential match on an existing merchant opens no case and does **not** automatically hold its cash-out; if the risk warrants it, a reviewer must act explicitly. |
 | New match after a list update | A case opens; cash-out is restricted at once; payments continue unless the case is `CRITICAL`. |
 
 ### Reinstating a merchant
@@ -4837,23 +4866,24 @@ We must not guess what the authority requires. Every reporting parameter is **da
 ### Reporting rules
 A **reporting rule** says, per authority and report type, when a report is triggered. It can use an amount, a window and conditions. The rule also cites the **source**: the circular or written instruction that justifies it.
 
-Each rule is `PROVISIONAL` or `CONFIRMED`. **A provisional rule can never produce a live filing**; the database refuses it.
+Each rule is `PROVISIONAL` or `CONFIRMED`. **A provisional rule can never produce a live filing**; the submission gate refuses it. There is no database constraint yet, so the API check is the enforcement point.
 
 ### Report types
-There are three types of report. Read the table to see what starts each one.
+There are four types of report. Read the table to see what starts each one.
 
 | Type | Triggered by |
 | :--- | :--- |
 | `LARGE_TRANSACTION` | A rule (can be drafted automatically). |
 | `SUSPICIOUS_ACTIVITY` (STR) | A case. Always reviewed by a person. |
 | `PERIODIC_RETURN` | A schedule. |
+| `INCIDENT` | An incident record. |
 
 ### The life of a report
 A report moves through these states:
 
 `DRAFT` → `PENDING_CHECKER` → `APPROVED` (content frozen, fingerprint stored) → `SUBMITTED` → `ACKNOWLEDGED` or `REJECTED_BY_AUTHORITY`.
 
-If the authority rejects a report, it is corrected by a new linked report.
+If the authority rejects a report, it is corrected by a new revised report. The record keeps a correction reference for that purpose, but the current UI does not yet offer a one-click link between the old and the new report, so quote both references in the correction's reason.
 
 Submission is a two-person action: `COMPLIANCE` proposes, `MLRO` approves. On the **AML Reports** screen, **Create** and **Save** are guarded by the checklist [[c:sg-aml-report|Create or save a regulatory report]].
 
@@ -4861,7 +4891,7 @@ Submission is a two-person action: `COMPLIANCE` proposes, `MLRO` approves. On th
 Until the Central Bank's thresholds, formats, deadlines and receiving channel are confirmed in writing, rules stay `PROVISIONAL`. The platform works in **internal-only mode**. In this mode it can detect, hold and record, but it cannot file.
 
 ### Confidentiality
-The existence of a suspicious-activity report is never disclosed to the subject. The subject is the person or business the report is about. See [[a:b09-08|what you may say, and to whom]]. The saved report is read-only; a correction is a new report.
+The existence of a suspicious-activity report is never disclosed to the subject. The subject is the person or business the report is about. See [[a:b09-08|what you may say, and to whom]]. The saved report is read-only; a correction is a new report. The current create form does not yet link the new report to the rejected one.
 @@end
 
 @@article id=b09-08 book=9 order=8 title="Confidentiality and tipping-off: what you may say, and to whom" roles=ALL minutes=2 ui=AVAILABLE related=b00-03,b05-09,b02-05
@@ -4877,7 +4907,7 @@ A merchant calls support and asks, "Why is my account restricted? Am I under inv
 ### What is confidential
 Screenings, matches, cases, rule hits that opened cases, reports, and the reasons for AML suspensions. This is called **AML-confidential**.
 
-Only `COMPLIANCE`, `MLRO` and (for audit) `SECURITY_ADMIN` may see it. `SUPPORT` can see *that* a merchant is suspended, never *why*. Every read of an AML case is logged.
+Only `COMPLIANCE`, `MLRO`, or an account granted the explicit `aml:read` / `aml:write` authority, may see AML-confidential data. `SECURITY_ADMIN` is **not** automatically allowed; security authority and AML authority are separate. `SUPPORT` can see *that* a merchant is suspended, never *why*. AML case detail reads and document views are audited; merchant detail and list reads are not.
 
 ### What you may say to a merchant or customer
 These are examples of allowed wording. Read the table to find your situation.
@@ -4909,7 +4939,7 @@ Being unhelpful to a customer is acceptable. Tipping off is not.
 
 @@article id=b09-09 book=9 order=9 title="Records, retention and immutability" roles=COMPLIANCE,MLRO,SECURITY_ADMIN minutes=1 ui=AVAILABLE related=b04-07,b09-08
 :::summary Big picture in 20 seconds
-We keep AML records for 5 years after the relationship ends by default. Report payloads, screening results and case decisions are never edited; a correction is a new record. Every decision can be replayed, and national ID numbers and documents are encrypted.
+We keep AML records for 5 years by default. Report payloads, screening results and case decisions are never edited; a correction is a new record. Every decision can be replayed, and national ID numbers and documents are encrypted.
 :::
 
 An auditor asks: "Why did you release this payment last year?" We must be able to show exactly what we knew, what rules and lists we used, and who decided. That is why we keep records, and why we do not change these records afterwards.
@@ -4918,7 +4948,7 @@ An auditor asks: "Why did you release this payment last year?" We must be able t
 We keep KYB records, screenings, rule versions, cases, reports and the audit trail.
 
 ### How long we keep them
-By default **5 years after the end of the relationship**. This is a setting to be confirmed against Central Bank requirements.
+The stated period is **5 years**. The current retention worker applies it by **row age**, not by a legal relationship-end date. The worker is **off by default** and its configured tables are notifications, inbound events, attempt step logs, audit rows, change logs and expired payment attempts; it does **not** purge AML cases, screenings, KYB documents or report payloads. Those records therefore remain unless a person handles them. Treat the 5-year statement as the policy target and the worker as a separate, partial mechanism.
 
 A request to delete personal data does not override a regulatory retention period. After the period, personal data is erased or irreversibly anonymised. Ledger entries remain, because they contain no personal data.
 
@@ -4929,7 +4959,7 @@ Immutable means it cannot be changed. Frozen report payloads, screening results 
 A decision can be replayed. The rule version, the list versions and the input fingerprint are stored with it.
 
 ### Protection
-National ID numbers and document contents are encrypted, shown masked and every read is logged.
+National ID numbers and document contents are encrypted, shown masked, and document views are audited. AML case detail reads are audited too. Phone numbers are not encrypted or masked in the same way, and ordinary merchant detail/list reads are not audited; still treat all personal data as confidential.
 @@end
 
 @@article id=b09-10 book=9 order=10 title="If you notice something suspicious: what every employee should do" roles=ALL minutes=2 ui=AVAILABLE related=b09-01,b09-08,b03-06
@@ -5024,7 +5054,7 @@ After repeated partner faults the **circuit breaker opened**. The route is hidde
 6. **Tell merchants** (through your manager) only that a payment method is temporarily unavailable.
 
 ### Gateway Admin follow-up
-Contact the partner and check whether the problem is on their side. If the route must stay off for a long time, pause it deliberately and record why. Pausing is a risk-reducing action and may be immediate. Resuming goes through the normal review. For a maintenance action, force `DEGRADED` or `OPEN_BREAKER` with a reason and expiry instead of editing the gateway settings.
+Contact the partner and check whether the problem is on their side. If the route must stay off for a long time, pause it deliberately and record why. Pausing is a risk-reducing action and may be immediate. **Resuming is a direct action on the current Routes screen; it is not an approval step.** Use it only after the partner and the probe are healthy, and write the reason.
 
 ### What not to do
 Do not edit gateway settings to "try something" during an outage. Do not use force `HEALTHY` as a substitute for fixing the partner. Do not ask customers to retry repeatedly.
@@ -5032,13 +5062,13 @@ Do not edit gateway settings to "try something" during an outage. Do not use for
 
 @@article id=b10-03 book=10 order=3 title="RB-02 Partner changed its signature or sender address" roles=GATEWAY_ADMIN,SECURITY_ADMIN,OPERATOR minutes=2 ui=AVAILABLE related=b06-06,b07-05,b10-02
 :::summary Big picture in 20 seconds
-Use this runbook when signature checks suddenly fail, or a valid message arrives from an unknown address. Never accept unsigned messages; confirm the change with the partner in writing, add the new secret or address through two people, then replay the stored messages.
+Use this runbook when signature checks suddenly fail, or a valid message arrives from an unknown address. Never accept unsigned messages; confirm the change with the partner in writing, update the secret or address range, then re-drive the stored messages through Engineering. There is no replay button and no dedicated signature-spike alert.
 :::
 
 A partner proves that a message is really from them by adding a **signature** (a code calculated from the message and a secret). We check the signature on each signed message. If the partner changes how it signs, or moves to new servers, our check starts to fail even though the message is honest.
 
 ### What you see
-An alert about a **spike of signature failures**, or a **valid signature from an address not on our list**. Payments that depend on webhooks stay in `VERIFYING` or become `UNKNOWN`.
+Signature failures on the **Transactions & Webhooks** screen, or a valid signature from an address not on our list. There is no dedicated signature-spike alert; the signal is the inbox table and the failed-signature count. Payments that depend on webhooks stay in `VERIFYING` or become `UNKNOWN`.
 
 ### What it usually means
 The partner changed how it signs (field order, algorithm, case) or moved its servers.
@@ -5049,8 +5079,8 @@ The raw messages were stored in the inbox unchanged, so nothing is lost.
 ### What you do
 1. **Do not accept unsigned messages** to "get things moving". That is what an attacker wants.
 2. **Gateway Admin:** contact the partner through the official contact and confirm the change in writing.
-3. **Add the new secret version or address range** through the two-person route: Gateway Admin proposes, Security Admin approves. Keep an overlap, so the old and the new both work.
-4. **Replay** the stored messages once the new recipe is approved.
+3. **Update the secret version or address range.** Credential-set changes apply directly and are audited; there is no two-person approval. Keep a record of the change and ask a second person to review the values before you save.
+4. **Re-drive the stored messages** only through Engineering. There is no replay action on the screen.
 5. Check that attempts resolve. Then follow [[a:b10-04|RB-03 A backlog of UNKNOWN payments]] for what remains.
 6. Record the change and the evidence.
 
@@ -5081,33 +5111,33 @@ An `UNKNOWN` payment is one where the partner has not told us clearly whether it
 The backlog is back to normal, the oldest item is recent, and cases carry notes of how each was resolved.
 @@end
 
-@@article id=b10-05 book=10 order=5 title="RB-04 Reconciliation or ledger drift: payouts stop" roles=FINANCE,SECURITY_ADMIN minutes=1 ui=AVAILABLE related=b08-05,b08-06,b10-01
+@@article id=b10-05 book=10 order=5 title="RB-04 Reconciliation or ledger drift: pause payouts deliberately" roles=FINANCE,SECURITY_ADMIN minutes=1 ui=AVAILABLE related=b08-05,b08-06,b10-01
 :::summary Big picture in 20 seconds
-Use this runbook when the ledger shows drift or reconciliation shows many mismatched lines. Payouts have stopped; treat it as `P1`, correct items only through approved routes, and never edit a number to make it balance.
+Use this runbook when the ledger shows drift or reconciliation shows many mismatched lines. The current code opens a P1 case but does **not** stop payouts automatically; pause cash-outs deliberately, correct items only through approved routes, and never edit a number to make it balance.
 :::
 
-Our ledger has a platform-wide equation: what we have must equal what we owe plus what we earned minus what it cost us. **Drift** is the difference between the two sides. It must be 0.0000 LYD. **Reconciliation** compares our records with the partner's statement. When either one fails, we cannot trust our own numbers, so the platform stops paying money out until people understand why.
+Our ledger has a platform-wide equation: what we have must equal what we owe plus what we earned minus what it cost us. **Drift** is the difference between the two sides. It must be 0.0000 LYD. **Reconciliation** compares our records with the partner's statement. When either one fails, we cannot trust our own numbers, so the intended control is to stop paying money out until people understand why. The current code only raises the case, so a person must pause the payout queue.
 
 ### What you see
 The invariant screen shows a drift other than 0.0000, or reconciliation shows many `MISSING_AT_GATEWAY`, `MISSING_LOCALLY` or `AMOUNT_MISMATCH` lines.
 
 ### What the platform did
-**Automatic payouts stopped.**
+It opened an operator case and marked the check as failed. It did **not** stop payouts; that is a manual decision in the current code.
 
 ### Steps
 1. **Treat it as `P1`** and tell your manager and the Security Admin.
-2. **Do not cash out manually** while payouts are stopped.
+2. **Pause cash-outs deliberately** (the platform will not do it for you) and do not process a payout until the drift is understood.
 3. **Re-run the statement ingest** and check that the file and its time zone are right. See [[a:b08-06|reconciliation]].
 4. **Inspect each problem line.** `MISSING_AT_GATEWAY` is the most serious: we may have credited money we did not receive.
 5. **Post fee variances** to the fee expense through the true-up, as described in [[a:b08-10|settlement]].
 6. **Resolve unmatched items** through approved adjustments only.
 7. **Never edit a number** to make it balance.
-8. **Resume payouts** only when the drift is understood and zero, and your manager agrees.
+8. **Resume payouts** only when the drift is understood and zero, and your manager agrees. Since the platform did not stop them, the resume is your deliberate decision too.
 @@end
 
 @@article id=b10-06 book=10 order=6 title="RB-05 Credentials or tokens expired or failing" roles=GATEWAY_ADMIN,SECURITY_ADMIN minutes=1 ui=AVAILABLE related=b06-09,b10-02
 :::summary Big picture in 20 seconds
-Use this runbook when a credential set turns `FAILING` and its route disappears from customers' choices. Find the cause, replace the secret with two people, run `CREDENTIAL_CHECK`, and plan future rotations so old and new versions overlap.
+Use this runbook when a credential set turns `FAILING` and its route disappears from customers' choices. Find the cause, replace the set's entries (all of them), run the live **Verify** action, and accept that there is no overlap window for a gateway credential set.
 :::
 
 A **credential set** is the group of secrets and tokens we use to log in to a partner. Secrets expire, partners rotate them, and passwords change. When the login stops working, payments through that partner would fail, so the platform takes the route out of the customer's list.
@@ -5120,10 +5150,10 @@ The route was removed from selection. Payments already running continue on their
 
 ### Steps
 1. **Check the cause:** expired secret, rotated token, changed password at the partner, or a merchant's own account problem (for merchant-owned credentials).
-2. **Replace the secret** through the credential field (write-only). The change needs two people.
-3. **Run `CREDENTIAL_CHECK`.** When it passes, the set becomes `VERIFIED` and the route returns.
+2. **Replace the secret** through the credential field (write-only). **Rotate secrets replaces every entry**, and the change is applied directly and audited; it is not a two-person approval.
+3. **Run Verify** on the Credential Sets screen (not the wizard's dry-run `CREDENTIAL_CHECK`). When it passes, the set becomes `VERIFIED` and the route returns.
 4. **For merchant-owned accounts**, tell the merchant through your manager that its account needs attention.
-5. **Plan rotations** so they overlap (two versions at once), to avoid downtime.
+5. **Plan the replacement as a cut-over, not an overlap.** A gateway credential set does not keep old and new versions both working. The overlap described elsewhere exists only for merchant webhook signing secrets.
 @@end
 
 @@article id=b10-07 book=10 order=7 title="A secret may have leaked, or an account may be taken over" roles=ALL minutes=2 ui=AVAILABLE related=b11-03,b11-02,b10-01
@@ -5143,9 +5173,9 @@ A **secret** is anything that proves who you are or lets a system in: a password
 ### What to do at once
 1. **Tell the Security Admin immediately.** Do not wait to be sure.
 2. **Do not try to hide it or fix it quietly.**
-3. **Change your own password** if it is your account, from a clean device, and tell the Security Admin so sessions can be revoked.
+3. **Ask the Security Admin to reset your password** from a clean device; there is no self-service change-password screen yet. Sign out and revoke the affected sessions.
 4. **For a merchant token:** the merchant revokes it in its portal and creates a new one.
-5. **For a partner secret:** the Gateway Admin and Security Admin rotate it with an overlap, as in [[a:b10-06|RB-05 Credentials or tokens expired or failing]].
+5. **For a partner secret:** the Gateway Admin replaces the credential set and verifies it, as in [[a:b10-06|RB-05 Credentials or tokens expired or failing]]. A gateway credential set has no overlap window; schedule the cut-over with the partner.
 6. **Write down** what was exposed, where, and for how long.
 
 ### Why speed matters
@@ -5344,7 +5374,7 @@ Most losses involving staff are not dramatic. They are small shortcuts that beco
 * **Do not use another person's account**, even with their permission.
 * **Do not approve what you cannot explain.** See [[a:b00-03|the Ten Golden Rules]].
 * **Do not ask others to approve unseen.**
-* **Do not look at records out of curiosity.** Every read is logged.
+* **Do not look at records out of curiosity.** Document views are audited, but not every read is logged; the absence of a log is not permission.
 * **Do not accept gifts or favours** from merchants, partners or applicants.
 * **Report pressure.** If anyone pushes you to bypass a control, report it.
 
@@ -5357,41 +5387,51 @@ Breaking these rules can lead to disciplinary action, and for some acts (tipping
 
 ### BOOK 12 — DEPLOYMENT & HOSTING
 
-@@article id=b12-01 book=12 order=1 title="Where each part runs: the one-to-five server model" roles=SECURITY_ADMIN,GATEWAY_ADMIN minutes=3 ui=AVAILABLE related=b02-02,b12-02,b12-05
+@@article id=b12-01 book=12 order=1 title="Where each part runs: the fourteen-role model" roles=SECURITY_ADMIN,GATEWAY_ADMIN minutes=3 ui=AVAILABLE related=b02-02,b12-02,b12-05
 :::summary Big picture in 20 seconds
-The platform is made of five roles: database, core, admin, merchant and checkout. Each role can have its own server or share one, but the rules about who may connect to whom never change.
+The deployment has fourteen roles: six compute roles and eight storage roles. They can share a host or be spread across many, but the rules about who may connect to whom never change.
 :::
 
-A **role** is one job that a server does. We have five jobs. In a large installation every job has its own machine. In a small one, one machine does several jobs. The access rules below stay the same in both cases.
+A **role** is one job that a server does. There are **fourteen**: six deployment roles (`db`, `core`, `admin`, `merchant`, `checkout`, `fake-rails`) and eight storage roles (`pg-primary`, `pg-replica`, `pgbouncer`, `redis`, `audit-db`, `log-db`, `backup`, `object-storage`). The **sandbox core** is a second instance of the `core` role (`pg-core-sandbox`), not a separate role. In a large installation every role can have its own machine; in a small one, one machine does several. The access rules below stay the same in both cases.
 
-### The five roles
-Read the table by row. The last column tells you who is allowed to open a connection to that role. The admin, merchant and checkout hosts are called the **edge hosts** because they sit at the edge, where staff, merchants and payers connect. The core accepts connections only from the three edge hosts.
+### The roles
+Read the table by row. The last column tells you who is allowed to open a connection to that role. The admin, merchant and checkout hosts are called the **edge hosts** because they sit at the edge, where staff, merchants and payers connect. The core accepts connections only from the three edge hosts and the other internal services that need it.
 
 | Role | What runs there | Who may connect to it |
 | :--- | :--- | :--- |
-| Database host | The PostgreSQL 18 database | **Only** the core host |
-| Core host | `core-back` (port 4000, mutual-TLS) | **Only** the three edge hosts |
-| Admin host | `admin-back` (4101, local only) and the Back Office pages through a LAN-only web server | Office network only |
-| Merchant host | `merchant-back` (4102, local only) and the merchant portal through a public web server | The public internet, encrypted |
-| Checkout host | `checkout-back` (4103, local only) and the checkout through a public web server | The public internet, encrypted |
+| Database (`pg-primary`, `pg-replica`) | PostgreSQL 18 and, when enabled, PgBouncer | core; replicas and the backup host for replication; the backup host for backups |
+| `audit-db`, `log-db` | Dedicated PostgreSQL clusters when they do not share the primary | core; the backup host |
+| `redis` | The cache and shared state | core; the backup host |
+| Core | `core-back` (port 4000, mutual TLS) | the edge hosts and the internal services that call it |
+| Admin | `admin-back` (4101) and the Back Office pages through a LAN-only web server | office network only |
+| Merchant | `merchant-back` (4102) and the merchant portal through a public web server | the public internet, encrypted; 4102 restricted to the LAN/proxy |
+| Checkout | `checkout-back` (4103) and the checkout through a public web server | the public internet, encrypted; 4103 restricted to the LAN/proxy |
+| `fake-rails` | The emulator, when enabled | its portal users and the core, in a test or development deployment |
+| `backup` | The backup daemon | core and the PostgreSQL hosts that push WAL |
+| `object-storage` | The shared encrypted vault | core and the backup daemon |
 
 Three terms in the table:
 * **Mutual TLS** means both sides of a connection prove who they are with certificates. [[a:b12-03|How the certificates work]] is explained later in this book.
-* **Local only** means the service listens on its own machine and nobody else can reach that port directly.
-* **LAN-only** means the web server answers only inside the office network (the local area network).
+* **LAN-restricted** means the port is not opened to the public internet; the firewall allows only the office/LAN ranges or the local proxy.
+* **LAN-only** means the web server answers only inside the office network.
 
-### One to five physical servers
-The five roles can each have their own server, or share. The deployment tool groups roles by address: roles given the same server address run on the same server.
-* **Five servers:** every role isolated.
-* **Two servers:** for example core, admin and database on an internal server, and merchant and checkout on a public server.
-* **One server:** all roles on one machine (for small or staging use), still with separate ports and mutual-TLS.
+### One to many physical servers
+Roles can each have their own server, or share. The deployment tool groups roles by address: roles given the same server address run on the same server. Co-location is supported, including the database and the core on one host (even `127.0.0.1`); the isolation that matters is logical, not physical: the edge processes still never receive database credentials or the master key, and each service still talks to the others only over its own port and certificate.
+
+* **Many servers:** every role isolated.
+* **Two servers:** core, admin, database, Redis and backup on an internal server; merchant and checkout on a public server.
+* **One server:** all roles on one machine (for small or staging use), still with separate ports and mutual TLS.
 
 ### Rules that never change
-These rules hold on one server and on five. Each rule keeps an attacker from reaching more than they must.
-* The **database host never shares an address with the core**.
-* Only the core has database credentials and the master encryption key.
+These rules hold on one server and on many. Each rule keeps an attacker from reaching more than they must.
+* Only the core and the backup daemon hold database credentials; the master encryption key stays on the core. The backup daemon's access is scoped to backup/replication, and audit/log shippers use their own targets when configured.
 * The edge servers never receive database variables or the master key.
 * The Back Office is never reachable from the internet and its port is never forwarded by the router.
+* The database, Redis, audit/log and object-storage ports are never opened to the public internet; only the named internal peers may reach them.
+
+:::note Test deployments may differ
+A test server can deliberately expose the Back Office on a public test host for remote staff. That is a test-only exception, never the production rule. The deploy config must restrict `LAN_ALLOWED_CIDRS`; if it contains `0.0.0.0/0` or `::/0`, the LAN-only claim is not in force.
+:::
 @@end
 
 @@article id=b12-02 book=12 order=2 title="Network protection: firewalls, LAN-only access and TLS" roles=SECURITY_ADMIN minutes=2 ui=AVAILABLE related=b12-01,b12-03
@@ -5406,16 +5446,18 @@ Read the table by row. "Open inbound" lists what may connect to the server from 
 
 | Role | Open inbound | Blocked |
 | :--- | :--- | :--- |
-| Database | SSH, and the database port **only from the core's address** | everything else |
-| Core | SSH, and port 4000 **only from the admin, merchant and checkout addresses** | the public internet |
-| Admin | SSH, and the Back Office port **only from the office network ranges** | everything not on the LAN; port 4101 is local-only |
-| Merchant | SSH, 80 and 443; 4102 is local-only | direct access to 4102 |
-| Checkout | SSH, 80 and 443; 4103 is local-only | direct access to 4103 |
+| Database | SSH, and the database port **only from the core, replica and backup addresses** | everything else |
+| Core | SSH, and port 4000 **only from the admin, merchant, checkout and other calling service addresses** | the public internet |
+| Admin | SSH, and the Back Office port **only from the office network ranges** | everything not on the LAN; 4101 is LAN/proxy-restricted |
+| Merchant | SSH, 80 and 443; 4102 is LAN/proxy-restricted | direct public access to 4102 |
+| Checkout | SSH, 80 and 443; 4103 is LAN/proxy-restricted | direct public access to 4103 |
+| Redis | SSH, the Redis port **only from core and backup** | everything else |
+| Backup | SSH, the daemon port **only from core and the WAL-pushing PostgreSQL hosts** | everything else |
 
 If several roles share a server, the rules are combined for that server. The SSH rule is always present and the firewall is enabled last, so a deployment can never lock itself out.
 
 ### TLS for the public portals
-**TLS** is the encryption you see as the padlock in a browser. Public portals use encrypted connections (TLS 1.3, HSTS, strict content rules). HSTS tells browsers to always use the encrypted address.
+**TLS** is the encryption you see as the padlock in a browser. Public portals use encrypted connections with **TLS 1.2 and TLS 1.3**, HSTS and strict content rules. HSTS tells browsers to always use the encrypted address.
 
 Web servers are configured so live-update streams are not buffered. A buffer would hold data back; without one, screens that update by themselves receive each update at once. Each portal's ports and whether TLS is on come from configuration. When TLS is turned off, the operator is responsible for the certificate set-up.
 
@@ -5436,14 +5478,18 @@ Between our own services, **both sides show an identity card** (this is mutual T
 * the name on the card matches the channel. The admin service may use only the admin channel, and so on.
 
 ### The cards
-The deployment tool creates an internal certificate authority and four certificates:
+The deployment tool creates an internal certificate authority and a certificate for every service that must prove its identity:
 * the **core** certificate (valid for the core's private address, the local address and an internal name),
-* a client certificate for **admin-back**, one for **merchant-back**, one for **checkout-back**.
+* a client certificate for **admin-back**, one for **merchant-back** and one for **checkout-back**,
+* a **backup** client certificate and a **WAL-archive** client certificate (WAL ingest only),
+* an **object-storage** client certificate for the shared vault,
+* a **Fake Rails** client certificate when that service is enabled,
+* storage client certificates for the PostgreSQL/Redis peers that must connect over TLS.
 
 ### Least privilege
 **Least privilege** means each server gets only the access it needs.
 * The authority's **private key never leaves the deployment workstation**.
-* The core host receives only the authority's public certificate and its own certificate and key.
+* The core host receives the authority's public certificate, its own certificate and key, and the storage client certificates it needs for the PostgreSQL/Redis peers.
 * Each edge host receives only the authority's public certificate and **its own** client certificate and key.
 * So a compromised checkout server cannot impersonate the admin or merchant service, and has no database access or master key.
 
@@ -5473,18 +5519,18 @@ Deployment is driven by one file, `deploy.env`. It is **validated before the fir
 Neither is ever written to an edge server.
 
 ### How secrets travel
-Secrets are streamed to the server over an encrypted connection, so they never rest on the deployment workstation's disk. The shared environment file on each server is readable only by its owner.
+Secrets are streamed to the server over an encrypted connection and the shared environment file on each server is readable only by its owner. The deployment is still *run* from the operator workstation, and the internal certificate authority's private key is used there to issue certificates. So the workstation is part of the trust boundary: keep it patched, disk-encrypted and access-controlled, and do not run a deployment from a shared or untrusted machine.
 
 ### Rules
 1. **Never commit** `deploy.env` or any key to a repository.
 2. **Never paste** configuration values into chat or tickets.
 3. Treat the master key as the most valuable secret: losing it makes stored secrets unreadable; leaking it exposes them.
-4. A change to secrets or certificates is a **security change**: two people.
+4. A change to the internal CA or to a server certificate is a **security change** and needs a second pair of eyes. Ordinary service secrets and credential sets are applied directly; they are sensitive, but they are not a two-person approval today.
 @@end
 
-@@article id=b12-05 book=12 order=5 title="The twelve-step deployment, in plain words" roles=SECURITY_ADMIN,GATEWAY_ADMIN minutes=5 ui=AVAILABLE related=b12-06,b12-07,b12-01
+@@article id=b12-05 book=12 order=5 title="The fourteen-step deployment, in plain words" roles=SECURITY_ADMIN,GATEWAY_ADMIN minutes=5 ui=AVAILABLE related=b12-06,b12-07,b12-01
 :::summary Big picture in 20 seconds
-A deployment installs one new release in twelve fixed steps: check, build, secure, back up, switch the core, switch the outer services, then verify. If the final check fails, the old release is still on disk and you switch back by hand.
+A deployment installs one new release in fourteen fixed steps: check, build, secure, provision storage and back up, switch the core, switch the outer services, verify end to end, then seed and tidy up. The end-to-end check is step 11. If it fails, the old release is still on disk and you switch back by hand.
 :::
 
 A **release** is one dated version of the platform's programs. Deploying means putting a new release on the servers and starting it. The tool always runs the steps **in the same order**, so that the core and database changes are ready *before* the outer services switch over.
@@ -5494,13 +5540,13 @@ Here is one deployment day in plain words. The step numbers match the table in t
 
 **Before anything changes (steps 1 to 4).**
 * The tool reads the configuration file and prints a map: which service goes on which server. If the file is wrong, the tool stops here and no server is touched.
-* It builds the three web apps (admin, merchant and checkout) on the deployment workstation.
+* It builds the web apps in the background: admin, merchant and checkout, plus Fake Rails when that service is enabled.
 * It makes sure the certificates exist and are valid.
 * It prepares each server: it installs the software that is needed and sets the firewall rules.
 
-**Protect the data first (step 5).** The tool checks the database. If this release carries database changes that are not yet applied, it first saves a compressed backup. That backup is the safety copy for what comes next.
+**Protect the data first (step 5).** The tool provisions the storage engines and checks the database. If this release carries database changes that are not yet applied, it first saves a compressed backup. That backup is the safety copy for what comes next.
 
-**Switch the services, one tier at a time (steps 6 to 9).** The order is core, admin, merchant, checkout. For each one the tool does the same things:
+**Switch the services, one tier at a time (steps 6 to 10).** The order is core, Fake Rails (when enabled), admin, merchant, checkout. For each one the tool does the same things:
 1. It copies the new release into a new dated folder next to the old ones.
 2. It installs what the release needs. For the core, it also applies the database changes.
 3. It points the `current` link at the new folder and restarts the service.
@@ -5508,7 +5554,7 @@ Here is one deployment day in plain words. The step numbers match the table in t
 
 The old release is not touched. It stays in its own folder.
 
-**Prove it works, then tidy up (steps 10 to 12).** Each outer service makes a mutual-TLS connection to the core and must get an OK. Then the tool removes the oldest releases and prints a summary.
+**Prove it works, then finish (steps 11 to 14).** Step 11 is the end-to-end check: each outer service makes a mutual-TLS connection to the core and must get an OK. Step 12 seeds the Fake Rails blueprints and the synthetic history when those are enabled. Step 13 removes the oldest releases, and step 14 prints the audit summary.
 
 ### What "undo" means
 Undo means **going back to the previous release's programs**. Because the old folder is still there, you point the `current` link back at it, then stop and start the service from that old folder. A plain restart keeps running the new release.
@@ -5517,23 +5563,25 @@ What the tool does if the end-to-end check fails: it stops with an error, and th
 
 Undo does **not** reverse database changes. Database changes only go forward. If a release changed the database, going back changes only the programs. The backup from step 5 is the safety copy. Restoring it is a decision for the operators, not something the tool does for you.
 
-### The twelve steps
-Read the table in order. The left column is the step number, the middle is its short name, and the right says what the tool does. The tool's own log can show up to fourteen step numbers, because it also numbers the optional Fake Rails steps and a release-count line. The end-to-end check is step 12 there. The order is the same.
+### The fourteen steps
+Read the table in order. The left column is the step number, the middle is its short name, and the right says what the tool does.
 
 | # | Step | What it does |
 | :-- | :--- | :--- |
 | 1 | Validate and plan | Checks the configuration and prints a map of which service goes on which server. |
-| 2 | Build the three web apps | Compiles admin, merchant and checkout. |
+| 2 | Build the web apps | Compiles admin, merchant and checkout, and Fake Rails when enabled, in the background. |
 | 3 | Ensure certificates | Creates or checks the internal authority and certificates. |
 | 4 | Prepare servers | Installs required software and sets firewall rules. |
-| 5 | Database check and backup | Verifies the database; if changes are pending, takes a compressed backup first. |
+| 5 | Provision storage and pre-migration backup | Prepares PostgreSQL, PgBouncer, Redis, audit/log databases and object storage; takes a compressed backup before pending migrations. |
 | 6 | Deploy the core | Copies the release, installs, migrates the database, switches to the new release and checks health. |
-| 7 | Deploy admin | Same for the Back Office; LAN-only web server. |
-| 8 | Deploy merchant | Same for the merchant portal; public web server. |
-| 9 | Deploy checkout | Same for the checkout; public web server. |
-| 10 | End-to-end check | Each edge completes a mutual-TLS handshake with the core and receives OK. A failure stops the deployment; the previous release stays on disk for a manual return. |
-| 11 | Prune old releases | Keeps the most recent few (default five). |
-| 12 | Audit summary | Prints the release, hosts and certificate expiry dates. |
+| 7 | Deploy Fake Rails | Same for the emulator, when `FAKE_RAILS_ENABLED` is true. |
+| 8 | Deploy admin | Same for the Back Office; LAN-only web server. |
+| 9 | Deploy merchant | Same for the merchant portal; public web server. |
+| 10 | Deploy checkout | Same for the checkout; public web server. |
+| 11 | End-to-end check | Each edge completes a mutual-TLS handshake with the core and receives OK. A failure stops the deployment; the previous release stays on disk for a manual return. |
+| 12 | Seed | Seeds Fake Rails blueprints and, when enabled, the synthetic operational history. |
+| 13 | Prune old releases | Keeps the most recent few (default five). |
+| 14 | Audit summary | Prints the release, hosts and certificate expiry dates. |
 
 ### Useful modes
 * A **dry run** prints every action without doing it. Use it first.
@@ -5551,7 +5599,7 @@ Before real money moves, we need a place where mistakes cost nothing. There are 
 ### Sandbox
 Every gateway has a sandbox environment on the partner's side. A gateway is our set-up for one payment company, and the partner is that payment company. The sandbox is the partner's practice environment. It is where building and testing happen. For the difference between sandbox and live, see [[a:b06-10|Sandbox, live, rollback and what changes for new versus running payments]].
 
-Our platform also runs its own **Sandbox** plane. It has a separate core service and database, reached from the merchant portal's **Sandbox Studio** and the admin **Sandbox** screens. Sandbox links start with `sbx_` and sandbox API tokens with `pg_test_`. Every rail call goes to Fake Rails, so no real partner is contacted. A merchant who is still waiting for approval can train there; Live stays locked until the merchant is approved.
+Our platform also runs its own **Sandbox** plane. It has a separate core service and database, reached from the merchant portal's **Sandbox Studio** and the admin **Sandbox** screens. Sandbox links start with `sbx_` and sandbox API tokens with `pg_test_`. The seeded sandbox catalog points every rail at Fake Rails. The plane does not currently pin an edited sandbox route to Fake Rails, so never point a sandbox gateway at a real partner or use a live credential there. A merchant who is still waiting for approval can train in the seeded plane; Live stays locked until the merchant is approved.
 
 ### Fake Rails
 **Fake Rails** is our own testing service that **imitates payment companies**. It answers every rail inside the Sandbox plane. It can be configured to behave badly on purpose, so we can practise and test how the platform reacts. The bad behaviours are:
@@ -5561,7 +5609,7 @@ Our platform also runs its own **Sandbox** plane. It has a separate core service
 * conflicting answers.
 
 ### Rules
-* Fake Rails must **never run in a production deployment**. The deploy refuses it when `DEPLOY_ENV` is `production`; it runs only in a test or development stack with an explicit opt-in. It is protected by explicit switches and allowed-host lists.
+* Fake Rails must **never run in a production deployment**. The service runs with `NODE_ENV=production` on a deployed host, so it guards on that and requires the explicit `FAKE_RAILS_ALLOW_IN_PRODUCTION=true` opt-in; the deploy validator requires the same opt-in for any Fake Rails host. It is protected by explicit switches and allowed-host lists. Never set that opt-in on a real-money deployment.
 * Never point live credentials at it.
 * Never use real customer data in any test environment.
 * Always check the **SANDBOX/LIVE** badge before acting.
@@ -5584,13 +5632,13 @@ A **rollback** is a return to the previous release. Because old releases remain,
 A **backup** is a saved copy of the database that you can restore after a disaster. Before database changes, a compressed backup is saved. The rest of this section is about the **Backups** screen.
 * The screen shows the engine, the schedule, the latest full and delta backups and the latest restore drill.
 * `SECURITY_ADMIN` can start a backup or a drill and propose a policy change. A second person must approve the policy.
-* A drill restores into an isolated scratch database and checks the ledger invariants without touching production.
+* A drill restores into an isolated scratch database and checks the ledger invariants without touching production. When the shared object vault is configured it also checks the object-storage parity.
 * Keep backups protected like production data.
 
 For more, read [[a:b12-09|Backups from zero]], [[a:b12-10|The Backups screen]] and [[a:b12-11|Operating backups safely]].
 
 ### Platform settings
-**Platform Settings** lists every setting key with its versions and effective date. `SECURITY_ADMIN` can create or edit a setting, export a settings backup and preview a restore. Sensitive changes go through approval. Payer-facing checkout copy stays on **Checkout Help**. `merchant_reports.policy` controls whether the merchant report runner/Studio is enabled and whether merchants may attach asset bundles; the merchant AI transcript always states the current asset policy. It is explained in [[a:b07-10|the Checkout Help article]].
+**Platform Settings** lists every setting key with its versions and effective date. `SECURITY_ADMIN` can create or edit a setting, export a settings backup and preview a restore. The current `PUT /settings` writes a new version directly with a checklist and audit; it does **not** create a maker-checker approval. The intended control is approval for sensitive keys. Payer-facing checkout copy stays on **Checkout Help**. `merchant_reports.policy` controls whether the merchant report runner/Studio is enabled and whether merchants may attach asset bundles; the merchant AI transcript always states the current asset policy. It is explained in [[a:b07-10|the Checkout Help article]].
 
 ### Health checks
 A **health check** asks a service "are you working?". The tool checks:
@@ -5616,7 +5664,7 @@ A service objective is a number we aim to meet. Read the table as "measure, then
 
 @@article id=b12-08 book=12 order=8 title="The database, timers and workers in plain words" roles=SECURITY_ADMIN,GATEWAY_ADMIN minutes=1 ui=AVAILABLE related=b02-07,b12-01,b07-06
 :::summary Big picture in 20 seconds
-One PostgreSQL database holds the money records, and only the core connects to it. Timers are stored in the database too, so a restart or a crash loses no payment's timers.
+One PostgreSQL database holds the money records. The core connects to it; the backup daemon and the replication peers connect only for backup/replication, and audit/log shippers use their own targets when configured. Timers are stored in the database too, so a restart or a crash loses no payment's timers.
 :::
 
 A payment platform must remember two things even after a crash: the money records and the clocks that are running on payments. We keep both in the database.
@@ -5673,7 +5721,7 @@ The full and delta copies are the starting point. The WAL tells you everything t
 The platform proves that this works by doing it every week in a **restore drill**. You can follow the drill on [[a:b12-10|the Backups screen]].
 
 ### Schedules and checks
-A **cron expression** is a short schedule written as five fields. The default full backup is `0 2 * * 0`, which means 02:00 on Sunday. All schedules run in **UTC**. A backup is checked with `pg_verifybackup` before it is encrypted and stored.
+A **cron expression** is a short schedule written as five fields. The default full backup is `0 2 * * 0`, which means 02:00 on Sunday. All schedules run in **UTC**. A `pg-native` backup is checked with `pg_verifybackup` before it is encrypted and stored; that command is specific to the pg-native engine, so WAL-G and Barman copies are verified by those engines instead.
 
 ### How little can be lost
 WAL reaches the daemon in two independent ways:
@@ -5730,7 +5778,7 @@ Read the table by row: the tile name, what it shows, and how its status is decid
 
 | Tile | What it shows | How to read it |
 | :--- | :--- | :--- |
-| **WAL archive lag** | Seconds since the newest change was safely archived, and the **Alert threshold**. | **Healthy** up to the threshold (default 300 s). **Attention** above it. **Critical** above twice the threshold. See [[s:s-wal-archive-lag-high]]. |
+| **WAL archive lag** | Seconds since the newest change was safely archived, and the **Alert threshold**. | **Healthy** up to the threshold (default 300 s in both the daemon policy and the core fallback). **Attention** above it. **Critical** above twice the threshold. See [[s:s-wal-archive-lag-high]]. |
 | **Daemon status** | **Reachable** or **Unreachable**: whether the core can talk to the backup daemon over mutual TLS. | **Healthy** or **Failed** badge. |
 | **Storage targets** | Healthy targets over total targets, for example `3/3`. | **Healthy** only when every target is healthy, otherwise **Attention**. |
 | **Last backup** | Time of the newest backup and its status. | **Passed**, **Running**, **Queued** or **Failed**; **No backups yet** on a new system. |
@@ -5755,7 +5803,7 @@ Most cards give the detail behind a tile. The last two show the schedule and the
 * Changing these needs two people. See [[a:b12-11|how to operate backups safely]].
 
 **Latest restore drill**
-* The result, the drill id, **Started**, **Target time**, **Replayed LSN**, **Duration**, **Journal lines** and three check badges.
+* The result, the drill id, **Started**, **Target time**, **Replayed LSN**, **Duration**, **Journal lines** and the check badges (three ledger checks, plus object storage when the shared vault is configured).
 
 **Scheduled backups**
 * A table with **Backup ID**, **Target**, **Kind**, **Engine**, **Status**, **Started**, **Completed**, **Duration**, **Size** and **Error**.
@@ -5764,12 +5812,12 @@ Most cards give the detail behind a tile. The last two show the schedule and the
 A backup that has never been restored is only a wish. A drill proves recovery works, without touching production. It has four stages:
 1. The daemon restores the latest backup chain into an **isolated scratch cluster**. This is a temporary database server used only for the test. It runs on the loopback address (port 55432). Archiving is switched off in that cluster, so it can never write into the real archive.
 2. It replays the archived WAL up to a **target time** (default: now minus 5 minutes) and waits until recovery has finished.
-3. It runs exactly **three invariant checks** (below).
+3. It runs the invariant checks below: three on the ledger and audit data, plus a fourth on the shared object vault when object storage is configured.
 4. It signs the report with HMAC-SHA256 and **destroys the scratch cluster**, so no customer data is left behind.
 
 Drills run every week by default (Sunday 04:00 UTC) and on demand.
 
-### The three invariant checks
+### The invariant checks
 An invariant is something that must always be true. Read the table by row. Each check looks at the restored copy.
 
 | Badge | Plain meaning | If it fails |
@@ -5777,6 +5825,7 @@ An invariant is something that must always be true. Read the table by row. Each 
 | **Double-entry zero drift** | In the restored database, total debits equal total credits (drift `0.0000`). | The restored ledger does not balance. Priority 1. |
 | **Sharded balance parity** | Every shard of every account adds up to its own journal lines, its checkpoint agrees with those lines, and the numbering of its postings has no gaps. | Some account balance disagrees with the journal. Priority 1. |
 | **Audit hash chain** | Every audit record is present, in an unbroken sequence with no gaps, and each record's fingerprint still matches the one before it. | An audit row was changed, damaged or removed. Priority 1. |
+| **Object storage parity** | The restored ACTIVE object set matches the backup manifest: no missing, extra or changed rows, and a bounded sample decrypts. | Stored evidence may be missing or unreadable. Priority 1. |
 
 ### What the drill result means for you
 Each badge reads `<check>: Passed`, `<check>: Failed` or `<check>: Pending`. **Any failed check is a priority-1 incident**. See [[s:s-restore-drill-failed|A restore drill failed]] for what to do.
@@ -5848,7 +5897,7 @@ This table lists codes that appear in the platform's documentation. If you meet 
 | `GATEWAY_FAULT` | Error classification | The partner is broken. Counts toward the circuit breaker. | [[a:b10-02]] |
 | `AMBIGUOUS` | Error classification | We cannot tell what happened. Treated as `UNKNOWN` on money steps. | [[a:b07-03]] |
 | `INSUFFICIENT_FUNDS` | Customer-facing reason | The customer's account did not have enough. | Tell the customer to use another method. |
-| `LINK_NOT_AVAILABLE` | Starting a payment | The link expired, was cancelled or has no free slot. | Merchant creates a new link, or wait if a payment is in progress. |
+| `PAYMENT_LINK_NOT_AVAILABLE` | Starting a payment | The link expired, was cancelled or has no free slot. | Merchant creates a new link, or wait if a payment is in progress. |
 | `VALIDATION_FAILED` | Back Office or portal request | The request shape was wrong (for example a field name). | Report with the screen; do not retry blindly. |
 | `SCHEMA_INVALID` | AI import check | The spec file has the wrong shape. | Use the repair message ([[a:b06-14]]). |
 | `STEP_TYPE_NOT_IMPORTABLE` | AI import check | A step type must be added in the wizard instead. | [[a:b06-14]] |
@@ -5874,16 +5923,19 @@ This table lists codes that appear in the platform's documentation. If you meet 
 | Join request | `DRAFT`, `SUBMITTED`, `IN_REVIEW`, `INFO_REQUESTED`, `PENDING_CHECKER`, `APPROVED`, `REJECTED`, `WITHDRAWN`, `EXPIRED` |
 | KYB document | `UPLOADED`, `ACCEPTED`, `REJECTED`, `EXPIRED` |
 | Owner screening | `NOT_SCREENED`, `CLEAR`, `POTENTIAL_MATCH`, `CONFIRMED_MATCH` |
-| Approval request | `DRAFT`, `PENDING_REVIEW`, `APPROVED`, `EXECUTED`, `REJECTED` |
+| Approval request | `DRAFT`, `PENDING_REVIEW`, `APPROVED`, `EXECUTED`, `REJECTED`, `EXPIRED` |
 | Adjustment | `DRAFT`, `PENDING_REVIEW`, `APPROVED`, `EXECUTING`, `EXECUTED`, `REJECTED` |
-| Cash-out | `PENDING`, `PROCESSING`, `COMPLETE`, `SUBTRACTED`, `REJECTED` |
+| Cash-out | `PENDING`, `PROCESSING`, `COMPLETE`, `REJECTED`. `SUBTRACTED` exists in the enum and is accepted as a terminal state on read, but the current approval path writes `COMPLETE`; do not expect a separate subtraction step. |
 | Dispute | `OPENED`, `EVIDENCE_REQUESTED`, `EVIDENCE_SUBMITTED`, `WON`, `LOST`, `EXPIRED`, `WITHDRAWN` |
 | Operator case | `OPEN`, `IN_PROGRESS`, `PENDING_CHECKER`, `RESOLVED` |
-| Operator case kind | `UNKNOWN`, `HELD`, `CONFLICT`, `MISMATCH`, `LATE_SUCCESS`, `MANUAL_REVIEW`, `UNMATCHED_STATEMENT` |
+| Operator case type | 66 type-aware `caseType` values (payment, reconciliation, route, statement, report, backup, ledger, credential, KYB, audit, cash-out, dispute, emergency, commission, AML, platform and others). The seven payment-oriented kinds (`UNKNOWN`, `HELD`, `CONFLICT`, `MISMATCH`, `LATE_SUCCESS`, `MANUAL_REVIEW`, `UNMATCHED_STATEMENT`) remain as a compatibility view, not the whole list. |
 | AML case | `OPEN`, `IN_REVIEW`, `PENDING_CHECKER`, `RELEASED`, `REJECTED_VOID`, `FROZEN`, `ESCALATED_STR` |
 | Screening result | `CLEAR`, `POTENTIAL_MATCH`, `CONFIRMED_MATCH`, `ERROR` |
 | Match disposition | `UNREVIEWED`, `FALSE_POSITIVE`, `TRUE_MATCH`, `ESCALATED` |
 | Regulatory report | `DRAFT`, `PENDING_CHECKER`, `APPROVED`, `SUBMITTED`, `ACKNOWLEDGED`, `REJECTED_BY_AUTHORITY` |
+| Incident | `DETECTED`, `TRIAGED`, `DECLARED`, `CONTAINED`, `MONITORING`, `RESOLVED`, `POSTMORTEM`, `CLOSED` |
+| Filing adapter | `ACTIVE`, `DISABLED` |
+| External submission | `PENDING`, `SUBMITTED`, `FAILED`, `ACKNOWLEDGED`, `REJECTED` |
 | Gateway | `DRAFT`, `SANDBOX_VERIFIED`, `PENDING_APPROVAL`, `LIVE`, `SUSPENDED`, `RETIRED` |
 | Gateway version | `DRAFT`, `SANDBOX_VERIFIED`, `PENDING_APPROVAL`, `LIVE`, `SUPERSEDED`, `ROLLED_BACK` |
 | Route status | `ACTIVE`, `PAUSED`, `DRAINING` |
@@ -5894,17 +5946,17 @@ This table lists codes that appear in the platform's documentation. If you meet 
 @@end
 
 @@article id=b13-03 book=13 order=3 title="Roles at a glance" roles=ALL minutes=1 ui=AVAILABLE related=b03-02,b04-05
-| Role | Can propose (maker) | Can decide (checker) | Sees AML data | Moves money |
+| Role | Default maker flag | Default checker flag | Sees AML data | Moves money |
 | :--- | :---: | :---: | :---: | :---: |
 | `GATEWAY_ADMIN` | yes | no | no | no |
-| `SECURITY_ADMIN` | yes | yes | audit only | no |
-| `FINANCE` | yes | yes | no | yes (with two people) |
+| `SECURITY_ADMIN` | yes | yes | no (only with an explicit AML authority) | no |
+| `FINANCE` | no | yes | no | yes (processes cash-outs; adjustments are maker-checker) |
 | `OPERATOR` | yes | no | no | no |
-| `COMPLIANCE` | yes | no | yes | proposes holds and releases |
-| `MLRO` | yes | yes | yes | approves holds and releases |
+| `COMPLIANCE` | no | yes | yes | proposes holds and releases |
+| `MLRO` | no | yes | yes | approves holds and releases |
 | `SUPPORT` | no | no | no | no |
 
-This is the *typical* pattern. Your account's own maker and checker switches and authorities decide what you can really do ([[a:b03-02|Your account]]). Merchant-side roles are `MERCHANT_ADMIN`, `MERCHANT_STAFF` and `MERCHANT_CASHIER`.
+These are the **seeded default switches**, not the server's authority. The server decides from `approval:check` and the role's authorities; a checker can never approve their own request. Merchant-side roles are `MERCHANT_ADMIN`, `MERCHANT_STAFF` and `MERCHANT_CASHIER`.
 @@end
 
 @@article id=b13-04 book=13 order=4 title="About this guide: version, updates and the Academy" roles=ALL minutes=1 ui=AVAILABLE related=b00-02,b00-01
@@ -5921,27 +5973,30 @@ This is the *typical* pattern. Your account's own maker and checker switches and
 | :--- | :--- |
 | Decimal places for money in the books | 4 (LYD shown with 3) |
 | Wrong OTP tries (default) | 3 |
-| OTP payment time ceiling | 20 minutes |
-| Redirect payment ceiling | 30 minutes |
-| QR and push ceiling | 15 minutes |
-| Late-confirmation grace (default) | 24 hours |
+| OTP payment time ceiling | 20 minutes (1200 s) |
+| Redirect or embedded ceiling | 30 minutes (1800 s) |
+| QR, push, pay-code and deep-link ceiling | 15 minutes (900 s) |
+| Hybrid ceiling | 20 minutes (1200 s) |
+| Manual transfer ceiling | 24 hours (86400 s) |
+| Late-confirmation grace (default) | 24 hours; stored but not enforced by the current expiry path |
 | Webhook timestamp tolerance | 5 minutes |
-| Webhook duplicate memory | 7 days |
-| Approval request lifetime | 7 days |
-| Emergency suspension ratification | 24 hours |
-| Join request inactive expiry | 30 days |
-| Join review deadline | 2 business days (`LOW`/`STANDARD`), 5 (`HIGH`) |
-| Beneficial owner threshold (default) | 25% |
-| AML case deadlines (default) | `CRITICAL` 4 h, `HIGH` 1 day, `MEDIUM` 3 days, `LOW` 5 days |
+| Webhook duplicate memory | Permanent unique `(channel, dedupeKey)`; not a 7-day window |
+| Approval request lifetime | 7 days for most subjects; 3 days for `JOIN_REQUEST`, `AML_CASE` and `OPERATOR_CASE` |
+| Emergency suspension ratification | 24 hours, then a 48-hour grace before automatic lift |
+| Join request `DRAFT` expiry | 30 days (DRAFT only) |
+| Join review deadline | 5 calendar days, flat |
+| Beneficial owner threshold (default) | 25% (`join_request.four_eyes_policy.ownerThresholdPercent`, alias OD-2) |
+| AML case deadlines (default) | `CRITICAL` 4 h, `HIGH` 24 h, `MEDIUM` 72 h, `LOW` 120 h (calendar hours) |
 | POS screen idle limit | 15 minutes |
-| Outbound call limits | 10 s (auth, status), 15 s (start, confirm, refund) |
+| Outbound call limit | 15 s for every call |
 | Maximum response size | 2 MB |
-| Retention (default) | 5 years after the relationship ends |
+| Retention (default) | 5 years, applied by row age; the retention worker is off by default and covers notifications, inbound events, step logs, audit rows, change logs and expired attempts, not AML or KYB evidence |
 | KYB refresh | `HIGH` yearly, `STANDARD` 2 years, `LOW` 3 years |
 | Document expiry notices | 30 and 7 days before |
 | Go-live gates | 12 |
-| Automatic sandbox scenarios | 15 |
-| Database tables | 64 |
+| Automatic sandbox scenarios | 15 (against the mock gateway) |
+| Database tables | 119 |
+| Context-help screens | 31 |
 | Edge cases catalogued | 140 |
 @@end
 
@@ -5955,7 +6010,7 @@ This is the *typical* pattern. Your account's own maker and checker switches and
 @@term slug=wallet term="Wallet" aliases="merchant wallet" ar="المحفظة" related=ledger :: A merchant's balance on our books. A number we owe the merchant, calculated from the ledger, not a bank account.
 @@term slug=payment-link term="Payment link" aliases="link" ar="رابط الدفع" related=slot,fee-bearer :: A request to pay one fixed amount, with a secret key. Single-use or multi-use.
 @@term slug=pos term="POS" aliases="point of sale;terminal" ar="نقطة البيع" related=payment-link :: The in-shop counter. A terminal is the place; a screen is a display paired to it.
-@@term slug=access-token term="Access token" aliases="API key;token;pg_live" ar="رمز الوصول" related=secret :: A secret string (starting `pg_live_`) that lets a merchant's software create links. Shown once.
+@@term slug=access-token term="Access token" aliases="API key;token;pg_live;pg_test" ar="رمز الوصول" related=secret :: A secret string that lets a merchant's software create links. Live tokens start `pg_live_`; sandbox tokens start `pg_test_`. Shown once.
 @@term slug=lyd term="LYD" aliases="Libyan dinar;dinar" ar="الدينار الليبي" related=dirham :: The Libyan dinar. 1 LYD = 1000 dirhams, so amounts have three decimals.
 @@term slug=dirham term="Dirham" aliases="dirhams" ar="درهم" related=lyd,scale :: One thousandth of a dinar.
 @@term slug=scale term="Amount scale" aliases="scale;minor units" ar="مقياس المبلغ" related=dirham,rounding :: The multiplier used to write an amount for a partner (1, 100 or 1000). A wrong scale makes an amount 1000 times wrong.
@@ -5991,7 +6046,7 @@ This is the *typical* pattern. Your account's own maker and checker switches and
 @@term slug=selector term="Selector" aliases="dot path" ar="المحدد" related=json :: A path such as `result.transaction_id` that picks one value out of an answer.
 @@term slug=sandbox term="Sandbox" aliases="SANDBOX;test environment" ar="بيئة تجريبية" related=live :: A separate practice plane with its own core service, database and test money; nothing real moves.
 @@term slug=live term="Live" aliases="LIVE;production" ar="البيئة الحية" related=sandbox :: The real world: real money, real customers.
-@@term slug=fake-rails term="Fake Rails" aliases="fake rails service" ar="" related=sandbox :: Our emulator of the payment companies. It answers every rail in the Sandbox plane; never in production.
+@@term slug=fake-rails term="Fake Rails" aliases="fake rails service" ar="سكك الدفع الوهمية" related=sandbox :: Our emulator of the payment companies. It answers every rail in the Sandbox plane; never in production.
 @@term slug=attempt term="Payment attempt" aliases="attempt" ar="محاولة دفع" related=payment-state,reference :: One try to pay a link, with its own state, references and pinned configuration.
 @@term slug=payment-state term="Payment state" aliases="status;state" ar="حالة الدفع" related=attempt :: One of 14 states of an attempt (for example `UNKNOWN`, `SUCCEEDED`).
 @@term slug=unknown term="UNKNOWN" aliases="unknown state" ar="غير معروف" related=inquiry,slot :: We do not know whether money moved. Never guess; use Inquire.
@@ -6025,8 +6080,8 @@ This is the *typical* pattern. Your account's own maker and checker switches and
 @@term slug=write-only term="Write-only" aliases="" ar="للكتابة فقط" related=secret :: A secret you can replace but never read back.
 @@term slug=mtls term="mTLS" aliases="mutual TLS" ar="التحقق المتبادل" related=certificate :: Both sides show a digital ID card. Used between our own services.
 @@term slug=certificate term="Certificate" aliases="cert" ar="شهادة رقمية" related=mtls :: A digital ID card issued by an authority we trust.
-@@term slug=rotation term="Rotation" aliases="key rotation" ar="تدوير المفاتيح" related=secret :: Changing a secret on schedule or after a leak, with an overlap period.
-@@term slug=ssrf term="SSRF" aliases="server-side request forgery" ar="" related=safeguard :: An attack that makes our server call addresses it should not. Blocked by the engine.
+@@term slug=rotation term="Rotation" aliases="key rotation" ar="تدوير المفاتيح" related=secret :: Changing a secret on schedule or after a leak. Overlap exists for merchant webhook signing secrets; a gateway credential set is replaced and re-verified instead.
+@@term slug=ssrf term="SSRF" aliases="server-side request forgery" ar="تزوير الطلبات من جهة الخادم" related=safeguard :: An attack that makes our server call addresses it should not. Blocked by the engine.
 @@term slug=safeguard term="Safeguard" aliases="engineering safeguard" ar="ضمانة" related=ssrf :: One of the engine protections against mistakes and attacks.
 @@term slug=gateway-version term="Gateway version" aliases="version" ar="إصدار البوابة" related=gateway :: An immutable snapshot of a gateway's configuration.
 @@term slug=go-live-gates term="Go-live gates" aliases="gates" ar="بوابات الإطلاق" related=gateway-version :: The twelve checks every version must pass before going live.
@@ -6158,7 +6213,7 @@ You are proposing a money movement: a refund, a chargeback, a manual credit or d
 - Never split one adjustment into several to avoid review.
 
 **If you made a mistake**
-If it is still pending, withdraw it. If it was executed, propose an offsetting adjustment with **Reverse**. Never edit an executed adjustment.
+If it is still pending, reject or withdraw it through the flow that supports it. If it was executed, propose an offsetting adjustment with a written reason; there is no **Reverse** button (the **Reverse commission** field only reverses commission). Never edit an executed adjustment.
 @@end
 
 @@card id=sg-reverse-adjustment title="Reverse an adjustment" screen=Adjustments risk=HIGH irreversible=true
@@ -6305,7 +6360,7 @@ You are refusing an application. The applicant gets a neutral reason code and ma
 - Never reject for a personal reason.
 
 **If you made a mistake**
-A wrongful rejection can be corrected by a new request linked to the old one. Tell your manager.
+A wrongful rejection can be corrected by a new request. The current code does not link the new request to the old one automatically, so record the old reference in the notes. Tell your manager.
 @@end
 
 @@card id=sg-suspend-merchant title="Suspend a merchant" screen=Merchants risk=CRITICAL irreversible=false
@@ -6531,7 +6586,7 @@ A backup cannot harm data, only load the system. If you started the wrong one, l
 
 @@card id=sg-run-restore-drill title="Run a restore drill" screen=SystemBackups risk=MEDIUM irreversible=false
 **What this does**
-You ask the daemon to restore the latest backup chain into an isolated scratch cluster, replay the archived WAL to a target time and run the three invariant checks. Production is not touched and the scratch cluster is destroyed afterwards.
+You ask the daemon to restore the latest backup chain into an isolated scratch cluster, replay the archived WAL to a target time and run the invariant checks (three on the ledger and audit, plus object storage when configured). Production is not touched and the scratch cluster is destroyed afterwards.
 
 **Check first**
 - [ ] **Daemon status** says **Reachable**.
@@ -6642,17 +6697,17 @@ Check the file, source and time zone. `MISSING_AT_GATEWAY` is the most serious. 
 
 @@situation id=s-ledger-drift title="The ledger invariant shows drift" screens=FinanceInvariant cases=97,110,140 articles=b08-05,b10-05
 ### What to do
-Treat as P1. Payouts stop automatically. Follow [[a:b10-05|RB-04 Reconciliation or ledger drift]]. Never edit numbers.
+Treat as P1. There is no automatic payout stop today; a person must pause cash-outs deliberately. Follow [[a:b10-05|RB-04 Reconciliation or ledger drift]]. Never edit numbers.
 @@end
 
 @@situation id=s-cashout-request title="A merchant asks for a payout" screens=Cashouts cases=111,48 articles=b08-07,b08-13
 ### What to do
-Check the snapshot of bank details, merchant state, balance and holds. Process with a checklist; a different Finance user approves the subtraction.
+Check the snapshot of bank details, merchant state, balance and holds. Process with a checklist; the merchant requester is a different principal and the decision is audited. There is no second Finance approval today.
 @@end
 
 @@situation id=s-chargeback-arrives title="A chargeback or dispute arrives" screens=Disputes,Adjustments cases=40,126,128 articles=b08-09,b08-08
 ### What to do
-Check the evidence deadline. The system drafts the adjustment; a human Finance checker must approve before any money moves.
+Check the evidence deadline. The system drafts the adjustment and may post the intake reserve; a human Finance checker must approve the final outcome.
 @@end
 
 @@situation id=s-negative-balance title="A refund or chargeback exceeds the merchant's balance" screens=Adjustments,Merchants cases=48 articles=b08-13
@@ -6687,7 +6742,7 @@ The merchant revokes it in its portal and creates a new one. Never ask for the t
 
 @@situation id=s-credential-failing title="A credential set turned FAILING" screens=Gateways cases=60,62 articles=b10-06,b06-09
 ### What to do
-Follow [[a:b10-06|RB-05 Credentials or tokens expired or failing]]: replace the secret through two-person approval and run the credential check.
+Follow [[a:b10-06|RB-05 Credentials or tokens expired or failing]]: replace the set's entries, run the live **Verify** action, and remember that a gateway credential set has no overlap window and no two-person approval today.
 @@end
 
 @@situation id=s-approval-refused title="A button is missing or an action was refused" screens=Approvals cases=75 articles=b03-07,b03-02
@@ -6894,7 +6949,7 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
   "predicates": [
     {"n":1,"id":"application-whitelist","fails":"The merchant's application does not allow this payment method."},
     {"n":2,"id":"link-whitelist","fails":"This payment link does not allow this payment method."},
-    {"n":3,"id":"commission-profile","fails":"No live commission profile covers this payment method at this amount."},
+    {"n":3,"id":"commission-profile","fails":"No effective commission profile covers this merchant and payment method."},
     {"n":4,"id":"route-active","fails":"No route for this payment method is active."},
     {"n":5,"id":"route-healthy","fails":"The route is not healthy (degraded or its circuit breaker is open)."},
     {"n":6,"id":"limits","fails":"The amount is outside the route's minimum or maximum, or it would pass the route's daily cap."},
@@ -7270,7 +7325,7 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
     "Adjustments"
    ],
    "pageDir": "pages/adjustments",
-   "summary": "Refunds, chargebacks, manual credits and debits and corrections. Always two people. An executed adjustment is never edited; it is offset by a new one.",
+   "summary": "Refunds, chargebacks, manual credits and debits and corrections. Most types need two people; the chargeback intake reserve is the exception. An executed adjustment is never edited; it is offset by a new one.",
    "articles": [
     "b08-08",
     "b08-13",
@@ -7292,7 +7347,7 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
     "CashOuts"
    ],
    "pageDir": "pages/cashouts",
-   "summary": "Merchant payout requests. Check the bank snapshot, process, make the real transfer, and a different Finance user approves the subtraction.",
+   "summary": "Merchant payout requests. Check the bank snapshot, process with a checklist and make the real transfer; the decision is audited and there is no second Finance approval today.",
    "articles": [
     "b08-07",
     "b08-13"
@@ -7584,7 +7639,7 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
     "SystemBackups"
    ],
    "pageDir": "pages/system/backups",
-   "summary": "Backup and disaster-recovery control: WAL archive lag, daemon and storage-target health, the backup schedule, scheduled backups and the latest restore drill with its three invariant checks. Viewing needs security:read or gateway:read; running a backup or a drill and proposing a policy change need security:write, and a policy change needs a second Security Admin.",
+   "summary": "Backup and disaster-recovery control: WAL archive lag, daemon and storage-target health, the backup schedule, scheduled backups and the latest restore drill with its ledger/audit checks (and object-storage parity when configured). Viewing needs security:read or gateway:read; running a backup or a drill and proposing a policy change need security:write, and a policy change needs a second Security Admin.",
    "articles": [
     "b12-07",
     "b12-09",
@@ -7764,7 +7819,7 @@ It catches honest mistakes, prevents one person acting alone, and creates a clea
 
 @@faq id=q-022 article=b04-03
 Q: How long does an approval request last?
-Seven days. After that it returns to draft and the maker must re-submit.
+Seven days for most subjects; join-request, AML-case and operator-case approvals last three days. After expiry the request is closed `EXPIRED` and cannot be approved; the maker must create a new request.
 @@end
 
 @@faq id=q-023 article=b03-07
@@ -7839,17 +7894,17 @@ Commission is what we charge the merchant. Gateway fee is what the payment compa
 
 @@faq id=q-037 article=b08-05
 Q: What does ledger drift mean?
-The two sides of the ledger equation differ. It must always be zero. Any drift is a priority-1 incident and automatic payouts stop.
+The two sides of the ledger equation differ. It must always be zero. Any drift is a priority-1 incident. The current code opens a case but does not stop payouts by itself; pause cash-outs deliberately.
 @@end
 
 @@faq id=q-038 article=b08-06
 Q: What is MISSING_AT_GATEWAY?
-We say a payment succeeded but the partner's statement does not show it. This is the most serious reconciliation result.
+A statement line has no matching local attempt. Check for a late payment, a duplicate or a partner error before crediting anything. The opposite result, `MISSING_LOCALLY`, means a local attempt is absent from the statement and is the more serious one for us.
 @@end
 
 @@faq id=q-039 article=b08-07
 Q: Who approves the subtraction of a cash-out?
-A different Finance user from the one who processed it.
+There is no second Finance approval today: one Finance user with `cashout:review` processes it, the merchant requester is a different principal, and the decision is audited.
 @@end
 
 @@faq id=q-040 article=b08-08
@@ -7909,12 +7964,12 @@ Use the table in the incident principles article: breaker for outages, RB-02 for
 
 @@faq id=q-051 article=b10-05
 Q: Why did payouts stop?
-The ledger equation shows drift. Automatic payouts stop until the cause is understood and the drift is zero.
+The ledger equation shows drift. The current code opens a P1 case but does not stop payouts by itself; a person must pause cash-outs. Keep them paused until the cause is understood and the drift is zero.
 @@end
 
 @@faq id=q-052 article=b10-07
 Q: I think my password leaked. What now?
-Tell the Security Admin immediately and change your password from a clean device. Do not wait to be sure.
+Tell the Security Admin immediately; there is no self-service change-password screen yet, so ask for a reset from a clean device. Do not wait to be sure.
 @@end
 
 @@faq id=q-053 article=b11-03
@@ -7964,12 +8019,12 @@ In a multi-node deployment, several `core-back` servers and a dedicated `backup-
 ### Shared multi-record locks (`storage_object_locks`)
 One file can be locked by more than one record at the same time. For example, a payment rail logo uploaded into the Asset Catalog (`CATALOG_ASSET`) and assigned to two payment rails (`RAIL_LOGO`) has three active locks.
 * Database trigger `storage_objects_guard_trg` forbids deleting rows from `storage_objects` and forbids transitioning an object to `PURGED` while **any** active lock (`released_at IS NULL`) exists, while `legal_hold = true`, or while `retain_until` is in the future.
-* When the last active lock is released, the object enters a 24-hour grace window (`gc_eligible_at`). After 24 hours (and after `retain_until` expires), the object-storage maintenance worker claims the row, moves the ciphertext file to `.trash/YYYY-MM-DD/` for 7 days, and only then marks it `PURGED`. A concurrent lock, legal hold or retention boundary cancels the claim before anything moves.
+* When the last active lock is released, the object enters a 24-hour grace window (`gc_eligible_at`). After 24 hours (and after `retain_until` expires), the object-storage maintenance worker claims the row, moves the ciphertext file to `.trash/YYYY-MM-DD/`, and **marks it `PURGED` immediately in the same step**. The trash copy is kept for 7 days and then deleted, so the row says `PURGED` while the bytes are still recoverable for that week. A concurrent lock, legal hold or retention boundary cancels the claim before anything moves.
 
 ### Two-stage retention and malware quarantine
 When a merchant or operator uploads a KYB document, dispute attachment or AML evidence file:
 1. It is staged and bound in `QUARANTINE_PENDING_AV` state with `retain_until = NULL`. While in quarantine, nobody can download it (`423 STORAGE_OBJECT_QUARANTINED`).
-2. `KybScanWorker` (KYB) or the object-storage maintenance worker (dispute/AML evidence) scans the file. If clean, it promotes the object to `ACTIVE` and stamps its compliance retention window **once** (`retain_until`). Re-binds and CLEAN re-scans do not extend that clock. If infected, it releases the lock and marks the object `QUARANTINE_REJECTED` so malware never receives a compliance lock.
+2. `KybScanWorker` (KYB) or the object-storage maintenance worker's `runAvScanBatch` (dispute/AML evidence) scans the file. If clean, it promotes the object to `ACTIVE` and stamps its compliance retention window **once** (`retain_until`). Re-binds and CLEAN re-scans do not extend that clock. If infected, it releases the lock and marks the object `QUARANTINE_REJECTED` so malware never receives a compliance lock.
 @@end
 
 @@article id=b12-13 book=12 order=13 title="Operating the Object & Asset Storage screen: legal holds, KEK rotation and maintenance jobs" roles=SECURITY_ADMIN,GATEWAY_ADMIN,COMPLIANCE minutes=3 ui=AVAILABLE related=b12-12,b12-10,b12-11
@@ -7984,10 +8039,10 @@ Use **Operations → Object & Asset Storage** (`/system/object-storage`) to insp
 * **Trigger maintenance jobs (`gc`, `sweep`, `scrub`, `reconcile-locks`, `rewrap`, `av-scan`):** `system:storage:admin`.
 
 ### Placing and lifting a Legal Hold
-During an investigation, dispute or audit, a Compliance or Security Admin can place a **Legal Hold** on any object with a mandatory written reason. While `legal_hold = true`, database trigger `storage_objects_guard_trg` and the maintenance worker refuse to purge the object even if all domain locks are released and `retain_until` has passed. Lifting a hold is a loosening action: the request goes to **Approvals** and a different authorized checker must approve it. Checklist: [[c:sg-place-legal-hold|Place or lift a storage legal hold]].
+During an investigation, dispute or audit, a Compliance or Security Admin can place a **Legal Hold** on any object with a mandatory written reason. While `legal_hold = true`, database trigger `storage_objects_guard_trg` and the maintenance worker refuse to purge the object even if all domain locks are released and `retain_until` has passed. Lifting a hold is a loosening action: the request goes to **Approvals** and a different authorized checker must approve it. The `sg-place-legal-hold` card exists, but the current dialog does not call `useSafeguard`; tick its boxes from the dialog's own checklist until the wiring is added.
 
 ### Zero-downtime KEK key rotation (Object Storage Maintenance Worker)
-When IT rotates `OBJECT_STORAGE_KEK_KEYRING` from `v1` to `v2`, the encrypted `.v1.enc` files on disk do not need to be rewritten. Running the **KEK Rewrap** job unwraps each object's 32-byte DEK with `v1` and re-wraps it with `v2` in `storage_objects`.
+`OBJECT_STORAGE_KEK_KEYRING` can hold several Key Encryption Key versions. The encryptor wraps new data with the **active** version named by `OBJECT_STORAGE_ACTIVE_KEK_VERSION`, not simply "the newest key added". Running the **KEK Rewrap** job unwraps each object's 32-byte DEK with the version that wrapped it and re-wraps it with the active version in `storage_objects`. The `.vN.enc` files on disk do not need to be rewritten, so rotation does not take the vault offline.
 @@end
 
 @@card id=sg-place-legal-hold title="Place or lift a storage legal hold" screen=SystemObjectStorage risk=HIGH irreversible=false

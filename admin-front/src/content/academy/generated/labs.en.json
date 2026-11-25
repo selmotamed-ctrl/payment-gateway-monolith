@@ -300,7 +300,7 @@
       "b04-06",
       "b00-03"
     ],
-    "briefing": "You are the checker. Four requests are waiting. For each, decide whether to **Approve** or **Reject** and choose the reason that would survive an audit. You are the second pair of eyes: if you do not understand a request, you do not approve it.",
+    "briefing": "You are the checker. Four requests are waiting. For each, decide whether to **Approve** or **Reject**. A rejection needs a written decision reason that would survive an audit; on an approval, note what you checked. You are the second pair of eyes: if you do not understand a request, you do not approve it.",
     "passPercent": 80,
     "tasks": [
       {
@@ -313,7 +313,7 @@
             "rows": [
               [
                 "Maker",
-                "Layla (OPERATOR)"
+                "Layla (merchant:write)"
               ],
               [
                 "You",
@@ -351,9 +351,9 @@
         "options": [
           {
             "id": "a",
-            "label": "**Approve**: the reason is specific and the holder matches",
+            "label": "**Approve**: the holder matches the legal name and the request is clear",
             "correct": true,
-            "feedback": "Correct. The reason says what was checked and the holder matches the legal name."
+            "feedback": "Correct. The maker's reason says what was checked, and you compared the old and new values."
           },
           {
             "id": "b",
@@ -882,7 +882,7 @@
               ],
               [
                 "Owners",
-                "2 declared, both with ID; articles confirm 60/40"
+                "3 declared, all with ID; articles confirm 20/20/10"
               ],
               [
                 "Screening",
@@ -912,13 +912,13 @@
         "options": [
           {
             "id": "a",
-            "label": "**Approve**",
+            "label": "**Approve the join request**",
             "correct": true,
             "feedback": "All seven checks pass and no second-person trigger fired."
           },
           {
             "id": "b",
-            "label": "**Reject** for safety",
+            "label": "**Reject the join request** for safety",
             "correct": false,
             "feedback": "There is no reason to reject."
           },
@@ -969,13 +969,13 @@
           },
           {
             "id": "b",
-            "label": "Approve; the names are similar",
+            "label": "Approve the join request; the names are similar",
             "correct": false,
             "feedback": "A payout account must belong to the business (or a documented related party)."
           },
           {
             "id": "c",
-            "label": "Reject and say screening found an issue",
+            "label": "Reject the join request and say screening found an issue",
             "correct": false,
             "feedback": "False and forbidden: never mention screening.",
             "critical": true
@@ -1027,7 +1027,7 @@
           },
           {
             "id": "c",
-            "label": "Approve; documents are just files",
+            "label": "Approve the join request; documents are just files",
             "correct": false,
             "feedback": "A duplicate is a serious warning sign."
           }
@@ -1056,7 +1056,7 @@
             ]
           }
         ],
-        "prompt": "You are an operator. What do you do?",
+        "prompt": "You hold `kyb:read` and `kyb:write`. What do you do?",
         "points": 10,
         "options": [
           {
@@ -1067,7 +1067,7 @@
           },
           {
             "id": "b",
-            "label": "Approve because it is probably a false positive",
+            "label": "Approve the join request because it is probably a false positive",
             "correct": false,
             "feedback": "Only Compliance decides matches.",
             "critical": true
@@ -1712,7 +1712,7 @@
           },
           {
             "id": "b",
-            "label": "Run Bulk Inquiry on the affected route and period using the checklist"
+            "label": "Run **Inquire selected** on the affected route and period using the checklist"
           },
           {
             "id": "c",
@@ -2044,7 +2044,7 @@
         "panels": [
           {
             "title": "Symptom",
-            "text": "The invariant screen shows drift of 12.5000 and automatic payouts have stopped."
+            "text": "The invariant screen shows drift of 12.5000 and a P1 ledger case has opened."
           }
         ],
         "prompt": "Which runbook?",
@@ -2092,11 +2092,11 @@
           },
           {
             "id": "c",
-            "label": "Add the new secret version or address with overlap (two people)"
+            "label": "Add the new gateway version or address; a Security Admin approves it"
           },
           {
             "id": "d",
-            "label": "Replay the stored messages"
+            "label": "Update the credential set with `credential:write` and run **Verify**"
           },
           {
             "id": "e",
@@ -2110,7 +2110,7 @@
           "d",
           "e"
         ],
-        "feedback": "Never accept unsigned messages; confirm; add with overlap; replay; record."
+        "feedback": "Never accept unsigned messages; confirm; get the version approved; update the credential set; record it."
       },
       {
         "id": "r4",
@@ -2136,7 +2136,7 @@
         "options": [
           {
             "id": "a",
-            "label": "Replace the secret through two-person approval and run the credential check",
+            "label": "Replace the secret with `credential:write` and run the credential check",
             "correct": true,
             "feedback": "Correct (RB-05)."
           },
@@ -2506,8 +2506,8 @@
                 "12.5000 LYD"
               ],
               [
-                "Payouts",
-                "stopped automatically"
+                "P1 ledger case",
+                "OPEN"
               ]
             ]
           }
@@ -2530,9 +2530,9 @@
           },
           {
             "id": "c",
-            "label": "Resume payouts",
+            "label": "Allow cash-outs again",
             "correct": false,
-            "feedback": "Only when zero.",
+            "feedback": "Only when the drift is zero and understood.",
             "critical": true
           }
         ]
@@ -2622,7 +2622,7 @@
           },
           {
             "id": "d",
-            "label": "The ledger drift is zero and payouts are not halted",
+            "label": "The ledger drift is zero",
             "shouldTick": true,
             "why": "Yes."
           },
@@ -2634,9 +2634,9 @@
           },
           {
             "id": "f",
-            "label": "I may also approve the final subtraction myself",
+            "label": "I may skip the bank snapshot because the merchant is in a hurry",
             "shouldTick": false,
-            "why": "A different Finance user must."
+            "why": "The snapshot is the payout instruction; never skip it."
           }
         ],
         "criticalWrong": [
@@ -2757,7 +2757,7 @@
         "options": [
           {
             "id": "a",
-            "label": "Propose an offsetting adjustment with **Reverse** and a reason; a different Finance user approves",
+            "label": "Propose an offsetting adjustment with a reason; a different Finance user approves",
             "correct": true,
             "feedback": "Correct."
           },
@@ -3219,7 +3219,7 @@
         "options": [
           {
             "id": "a",
-            "label": "**Disposition** FALSE_POSITIVE with the compared attributes as the rationale; suppression with an expiry date",
+            "label": "**Disposition** FALSE_POSITIVE with the compared attributes as the rationale; do not rely on suppression to stop a reopen",
             "correct": true,
             "feedback": "Correct. Date of birth and nationality differ."
           },

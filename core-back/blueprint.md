@@ -1039,7 +1039,7 @@ Dispute, adjustment and cash-out summaries return a `byCurrency` array in additi
 
 ## Core Engine
 
-> Status: `partial` · Last verified: 2026-11-13
+> Status: `partial` · Last verified: 2026-11-25
 
 ## 1. Purpose and scope
 
@@ -1682,9 +1682,14 @@ OD-10 and `resolveEnvironment(merchantStatus)` are removed. Checkout and merchan
 
 - **Attempt wallet snapshot (2026-11-24).** Each attempt records the link wallet and its GL account; refunds/chargebacks use that snapshot. New links reject a wallet/currency mismatch.
 
+## Accuracy remediation: OTP rendering and read-only inquiry (2026-11-25)
+
+- The checkout merges the gateway-specific OTP fields (`max_attempts`, `otp_length`, `resend_cooldown_seconds`, `expires_at`) from the fallback action when the declarative flow renders only `actionType`. A seeded OTP flow no longer shows hardcoded 3/60 limits instead of the gateway setting.
+- `StepExecutor` refuses a `MOVES_MONEY` step when the execution phase is `VERIFY` with `VERIFY_MONEY_STEP_FORBIDDEN`; the spec validator rejects such flows with the same code. Inquiry remains a status check even for a stored pre-validator flow.
+
 ## Double-Entry Ledger
 
-> Status: `partial` · Last verified: 2026-11-09
+> Status: `partial` · Last verified: 2026-11-25
 
 ## 1. Purpose and scope
 
@@ -2114,9 +2119,17 @@ Every currency-scoped account resolution requires a currency. `LedgerPostContext
 
 `payment_attempts.wallet_id` and `wallet_gl_account_id` snapshot the link settlement wallet at creation and are backfilled from the link. Confirmation, refund and chargeback wallet selection use the snapshot when present, so a later wallet of the same currency cannot silently receive the booking. New links reject `LINK_WALLET_CURRENCY_MISMATCH`; historical links are not rewritten.
 
+## 18. Accuracy remediation: refunds, disputes and settlement (2026-11-25)
+
+- **Refund ceiling.** `claimRefundAdjustment` now checks the merchant's `negativeBalanceCeiling` before the gateway refund call. A refund that would take the wallet below the ceiling is refused with `409 REFUND_NEGATIVE_BALANCE_CEILING_EXCEEDED`; nothing is sent to the partner and no ledger entry is posted.
+- **Dispute intake.** `openDisputeWithDraftedAdjustment` sets the attempt to `DISPUTED` for settled statuses. The intake reserve is posted only when it stays within the ceiling; otherwise a P1 `HELD` operator case is opened, `escrowed` stays false and the reservation is not booked. The later outcome path still checks the ceiling.
+- **Settlement sweeps.** `postSettlementSweeps` now sweeps only attempts whose confirmation used `GATEWAY_CLEARING`: payer-surcharge/split attempts and attempts whose route cost model has `accrue_fee_at_confirm=true`. Statement-only, merchant-direct, internal and fee-at-source attempts are skipped, because they never created a clearing balance. This also stops statement rows with no local attempt from being swept.
+- **Correction adjustments.** `CORRECTION` with a `MERCHANT_WALLET` target posts a deliberate treasury-to-wallet credit keyed by the adjustment. The legacy `GATEWAY_FEE_ACCRUAL` target still posts the fee true-up. Any other target is refused with `CORRECTION_TARGET_UNSUPPORTED`.
+- **Reconciliation label semantics.** The stored enum names are legacy and counter-intuitive: `MISSING_AT_GATEWAY` is a statement line with no local attempt, and `MISSING_LOCALLY` is a local attempt absent from the statement. The code and tests keep those values; the Guide now documents the real meaning instead of reversing it.
+
 ## Governance and Compliance
 
-> Status: `partial` · Last verified: 2026-11-24
+> Status: `partial` · Last verified: 2026-11-25
 
 ## 1. Purpose and scope
 
@@ -2530,9 +2543,20 @@ The Reporting Studio now covers the full authoring and filing lane in addition t
 
 `commissionReceivableCeiling` and `negativeBalanceCeiling` are evaluated per posting currency; a scalar never mixes LYD/USD/EUR. The admission guard passes the link currency, `merchantOpenCashoutTotal` is wallet-currency scoped, the receivable SQL filters all three branches (attempt, adjustment, merchant-level netting), and the netting worker evaluates each currency bucket separately with per-currency aged cases and notices. The generic approval dispatcher now enforces domain checker roles; `approval:check` alone is insufficient.
 
+## 20. Accuracy remediation: AML and approval confidentiality (2026-11-25)
+
+- **Manual `TRUE_MATCH` disposition.** `POST /aml/matches/:id/disposition` now requires a written rationale, allows suppression only for a `FALSE_POSITIVE` with a future expiry, and on `TRUE_MATCH` opens a confidential AML case, blocks onboarding readiness, marks a beneficial owner `CONFIRMED_MATCH`, and suspends an active merchant with the closed `AML` reason code. The operation is idempotent per screening. The disposition response returns the `amlCaseId`.
+- **Screening outcome confidentiality.** Onboarding confirmed matches now store `decisionReasonCode: "POLICY"`. The merchant-facing join-request view maps legacy screening-related codes (`AML_CONFIRMED_MATCH`, `SCREENING_CONCERN`, sanctions/PEP/watchlist/adverse-media) to `POLICY` at read time. Periodic screening suspends with `AML`, keeping the detailed trigger in the AML case and audit row.
+- **Approval detail.** `GET /approvals/:id` now requires the confidential AML authority when the subject is `AML_CASE`, so Finance cannot read AML case metadata through `approval:read`. The helper is `approvalSubjectRequiresConfidentialAmlAccess`.
+- **Regulatory report gate.** `submitRegulatoryReport` rejects a missing reporting rule and requires either a `CONFIRMED` rule or at least one required output format with `CONFIRMED` schemas. A report with no rule and no outputs can no longer be filed.
+- **Backup policy checker.** `executeBackupPolicyApproval` enforces the `SECURITY_ADMIN`/`FINANCE` domain role in addition to `approval:check`; the seeded `SECURITY_ADMIN` now has `approval:read/check/write`.
+- **Cash-out AML stop.** `executeCashout` refuses with `409 CASHOUT_AML_HOLD` while a merchant AML case is `OPEN`, `IN_REVIEW`, `PENDING_CHECKER`, `FROZEN` or `ESCALATED_STR`.
+- **AML case reads.** `GET /aml/cases/:id` writes an `AML_CASE_VIEWED` audit row.
+- **Default roles.** `COMPLIANCE` now has merchant/KYB read-write, `OPERATOR` has merchant/KYB read and KYB write, and `MLRO` has merchant/KYB read, matching the documented onboarding workflows.
+
 ## Background Workers and Outboxes
 
-> Status: `partial` · Last verified: 2026-11-16
+> Status: `partial` · Last verified: 2026-11-25
 
 ## 1. Purpose and scope
 
@@ -3019,6 +3043,11 @@ See `core.route-health`.
 ### 20.1 PSP-M currency grouping and historical audit (2026-11-24)
 
 PSP-M refunds, disputes opened/decided and cash-outs are grouped by currency and the XLSX sheets carry a Currency column. `bun run currency:mismatch-report` is read-only: it lists settlement/fee-variance/cash-out journal entries whose GL account currencies differ from the business object and never edits the append-only ledger. Corrections go through the approved adjustment workflow.
+
+## 21. Accuracy remediation: periodic screening and settlement (2026-11-25)
+
+- `PeriodicScreeningWorker` continues to open the confirmed-match AML case once and suspend an active merchant. The merchant-visible `suspensionReasonCode` is now `AML` (inside the closed code set and the exact-match redaction rule); the detailed `SCREENING_CONFIRMED_MATCH` trigger stays in the AML case and the `MERCHANT_SUSPENDED` audit row.
+- Settlement sweeps now run from `BackgroundJobHandlers` only for attempts that used `GATEWAY_CLEARING` (fee accrual or payer surcharge/split). See `core.ledger` section 18.
 
 ## Storage Engine
 

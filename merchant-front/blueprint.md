@@ -406,6 +406,12 @@ A "Sandbox Live Mirror" section reuses the Live pages under `/sandbox/mirror/*` 
 
 - **Dashboard currency (2026-11-24).** The overview accepts `?currency=` and renders volume, commission, net and wallet totals for the selected currency; `byCurrency` carries the per-currency breakdown. Wallet statements are filtered by the link wallet as well as currency.
 
+## Accuracy remediation: applications, links and onboarding (2026-11-25)
+
+- A Live application created by an already-`ACTIVE` merchant is created `ACTIVE`. Existing `PENDING` applications are activated when the join request is approved. Before this, every new Live application stayed `PENDING` with no activation route.
+- `POST /links` rejects `409 LINK_WALLET_MUST_MATCH_APPLICATION` when the requested wallet differs from the application's assigned wallet; the link always settles to the application wallet.
+- The onboarding profile `PUT` refuses sensitive legal/tax/registration edits after activation (`MERCHANT_PROFILE_REQUIRES_APPROVAL`) and while a join request is under review (`JOIN_REQUEST_UNDER_REVIEW`). A new merchant withdraw route returns the join request to `DRAFT`; the onboarding page exposes **Withdraw application** and the normal submit flow can run again.
+
 ## Merchant Guide and Developer API
 
 > Status: `partial` · Last verified: 2026-11-04

@@ -42,7 +42,7 @@
     "action": "Tell the customer to use another method."
   },
   {
-    "code": "LINK_NOT_AVAILABLE",
+    "code": "PAYMENT_LINK_NOT_AVAILABLE",
     "where": "Starting a payment",
     "meaning": "The link expired, was cancelled or has no free slot.",
     "action": "Merchant creates a new link, or wait if a payment is in progress."

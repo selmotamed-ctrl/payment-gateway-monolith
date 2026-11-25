@@ -281,7 +281,7 @@
         "Adjustments"
       ],
       "pageDir": "pages/adjustments",
-      "summary": "Refunds, chargebacks, manual credits and debits and corrections. Always two people. An executed adjustment is never edited; it is offset by a new one.",
+      "summary": "Refunds, chargebacks, manual credits and debits and corrections. Most types need two people; the chargeback intake reserve is the exception. An executed adjustment is never edited; it is offset by a new one.",
       "articles": [
         "b08-08",
         "b08-13",
@@ -303,7 +303,7 @@
         "CashOuts"
       ],
       "pageDir": "pages/cashouts",
-      "summary": "Merchant payout requests. Check the bank snapshot, process, make the real transfer, and a different Finance user approves the subtraction.",
+      "summary": "Merchant payout requests. Check the bank snapshot, process with a checklist and make the real transfer; the decision is audited and there is no second Finance approval today.",
       "articles": [
         "b08-07",
         "b08-13"
@@ -595,7 +595,7 @@
         "SystemBackups"
       ],
       "pageDir": "pages/system/backups",
-      "summary": "Backup and disaster-recovery control: WAL archive lag, daemon and storage-target health, the backup schedule, scheduled backups and the latest restore drill with its three invariant checks. Viewing needs security:read or gateway:read; running a backup or a drill and proposing a policy change need security:write, and a policy change needs a second Security Admin.",
+      "summary": "Backup and disaster-recovery control: WAL archive lag, daemon and storage-target health, the backup schedule, scheduled backups and the latest restore drill with its ledger/audit checks (and object-storage parity when configured). Viewing needs security:read or gateway:read; running a backup or a drill and proposing a policy change need security:write, and a policy change needs a second Security Admin.",
       "articles": [
         "b12-07",
         "b12-09",

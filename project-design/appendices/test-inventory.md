@@ -20,7 +20,7 @@
 | `core-back/test/admin-slice/report-engine-migration.test.ts` | 248 | 3 |
 | `core-back/test/aml-resolution-finalization.test.ts` | 303 | 7 |
 | `core-back/test/aml-window-stats-query.test.ts` | 141 | 6 |
-| `core-back/test/approval-queue.test.ts` | 86 | 4 |
+| `core-back/test/approval-queue.test.ts` | 94 | 5 |
 | `core-back/test/attempt-outcomes.test.ts` | 67 | 5 |
 | `core-back/test/attempt-repository-schema.test.ts` | 140 | 7 |
 | `core-back/test/automation/aml-event-rescreening.test.ts` | 182 | 4 |
@@ -284,7 +284,7 @@
 | `admin-back/test/setup.ts` | 12 | 0 |
 | `merchant-back/test/auth-account-limiters.test.ts` | 94 | 3 |
 | `merchant-back/test/core-contract.test.ts` | 569 | 29 |
-| `merchant-back/test/core-forwarding.test.ts` | 426 | 22 |
+| `merchant-back/test/core-forwarding.test.ts` | 435 | 23 |
 | `merchant-back/test/core-internal-client.test.ts` | 662 | 23 |
 | `merchant-back/test/env-isolation.test.ts` | 24 | 1 |
 | `merchant-back/test/helpers/core.ts` | 224 | 1 |
@@ -457,4 +457,4 @@
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
 - Total files: **451**
-- Total literal test declarations: **4446**
+- Total literal test declarations: **4448**

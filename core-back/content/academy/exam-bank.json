@@ -1,6 +1,6 @@
 {
   "contentVersion": "1.0.0",
-  "contentHash": "2e172e0a4bad2d9355bd98a7912e9633a9a733b95c517daf3d23406fe5ec5c67",
+  "contentHash": "32cae586b42e3a7615f004023665d3aee9dad938d02757ea3c19fd29dc452bb8",
   "blueprints": [
     {
       "id": "exam-foundation",
@@ -260,25 +260,25 @@
       "refs": [
         "b00-03"
       ],
-      "stem": "A senior colleague in a hurry asks you to approve her own request. What do you do?",
+      "stem": "A senior colleague in a hurry asks you to approve a request she made herself. You hold the checker authority. What do you do?",
       "options": [
         {
           "id": "o1",
-          "text": "Refuse and ask the proper second person.",
+          "text": "Review it as the checker; you are the different person the rule requires.",
           "correct": true
         },
         {
           "id": "o2",
-          "text": "Approve once because she is senior.",
+          "text": "Refuse and ask someone else, because she is senior.",
           "correct": false
         },
         {
           "id": "o3",
-          "text": "Approve and add a reason.",
+          "text": "Approve it unread because she is senior.",
           "correct": false
         }
       ],
-      "why": "Never approve your own work or help anyone around the two-person rule."
+      "why": "The maker cannot check her own request; a different authorised person must review it, and that can be you."
     },
     {
       "id": "q-m0-003",
@@ -872,7 +872,7 @@
       "options": [
         {
           "id": "o1",
-          "text": "calculated from ledger lines.",
+          "text": "stored per shard as a projection of the journal, which shard repair can rebuild.",
           "correct": true
         },
         {
@@ -886,7 +886,7 @@
           "correct": false
         }
       ],
-      "why": "This prevents it drifting from the books."
+      "why": "`gl_account_shards.current_balance` can drift; the scheduled check and shard repair keep it true to the journal."
     },
     {
       "id": "q-m3-001",
@@ -1014,7 +1014,7 @@
           "correct": false
         }
       ],
-      "why": "After that it returns to draft."
+      "why": "After seven days it becomes EXPIRED and cannot be approved; the maker starts a new request."
     },
     {
       "id": "q-m3-005",
@@ -1078,7 +1078,7 @@
           "correct": false
         }
       ],
-      "why": "By the MLRO or a different Compliance user."
+      "why": "By the MLRO or a different Compliance user; after 48 hours of grace an unratified suspension lifts automatically."
     },
     {
       "id": "q-m3-007",
@@ -1398,7 +1398,7 @@
           "correct": false
         }
       ],
-      "why": "Velocity rules by SECURITY_ADMIN or FINANCE."
+      "why": "AML rule changes go to the MLRO; velocity-rule deactivation goes to SECURITY_ADMIN or FINANCE."
     },
     {
       "id": "q-m4-001",
@@ -1700,7 +1700,7 @@
           "correct": false
         }
       ],
-      "why": "Support never sees token values."
+      "why": "Support sees only the masked last four characters, never the secret."
     },
     {
       "id": "q-m4-010",
@@ -1720,7 +1720,7 @@
       "options": [
         {
           "id": "o1",
-          "text": "prior approval by a different Compliance or MLRO user.",
+          "text": "a staff user with `merchant:write` and the maker switch to propose it, and a different Compliance, Finance or MLRO checker.",
           "correct": true
         },
         {
@@ -1754,7 +1754,7 @@
       "options": [
         {
           "id": "o1",
-          "text": "the balance is zero and no dispute is open.",
+          "text": "every wallet balance is zero, no dispute is open and no cash-out is open.",
           "correct": true
         },
         {
@@ -1768,7 +1768,7 @@
           "correct": false
         }
       ],
-      "why": "A negative balance blocks closure."
+      "why": "Any open balance, dispute or cash-out blocks closure."
     },
     {
       "id": "q-m4-012",
@@ -1784,7 +1784,7 @@
       "refs": [
         "b05-02"
       ],
-      "stem": "An applicant has been inactive for 30 days. The join request",
+      "stem": "An applicant has been inactive and the review SLA has passed while the request is INFO_REQUESTED. The join request",
       "options": [
         {
           "id": "o1",
@@ -1802,7 +1802,7 @@
           "correct": false
         }
       ],
-      "why": "INFO_REQUESTED pauses the deadline; inactivity expires it."
+      "why": "The current expiry worker does not honor the pause; an overdue request expires."
     },
     {
       "id": "q-m4-013",
@@ -1821,7 +1821,7 @@
       "options": [
         {
           "id": "o1",
-          "text": "suspended with reason KYB_EXPIRED unless two people extend it.",
+          "text": "suspended with reason KYB_EXPIRED.",
           "correct": true
         },
         {
@@ -1835,7 +1835,7 @@
           "correct": false
         }
       ],
-      "why": "Re-verification is periodic."
+      "why": "Re-verification is periodic; the expiry worker suspends after the grace."
     },
     {
       "id": "q-m4-014",
@@ -1918,7 +1918,7 @@
       "refs": [
         "b05-05"
       ],
-      "stem": "Screening at onboarding is not CLEAR. As an operator you",
+      "stem": "Screening at onboarding is not CLEAR. As a reviewer with `kyb:write` you",
       "options": [
         {
           "id": "o1",
@@ -1969,7 +1969,7 @@
           "correct": false
         }
       ],
-      "why": "If nobody reaches the threshold, the most senior manager is recorded as controller."
+      "why": "Readiness needs the active owners' shares to total at least 25%; a controller entry alone does not satisfy it."
     },
     {
       "id": "q-m4-018",
@@ -2423,7 +2423,7 @@
       "refs": [
         "b07-09"
       ],
-      "stem": "After an outage you run Bulk Inquiry for",
+      "stem": "After an outage you run **Inquire selected** for",
       "options": [
         {
           "id": "o1",
@@ -2460,7 +2460,7 @@
       "options": [
         {
           "id": "o1",
-          "text": "wait for the countdown and use resend once.",
+          "text": "wait for the cooldown to end, then use resend if needed.",
           "correct": true
         },
         {
@@ -2474,7 +2474,7 @@
           "correct": false
         }
       ],
-      "why": "Repeated resends are limited."
+      "why": "Resends have a cooldown; repeated requests are refused until it ends."
     },
     {
       "id": "q-m5-015",
@@ -2556,25 +2556,25 @@
       "refs": [
         "b07-06"
       ],
-      "stem": "The default grace window for late confirmations is",
+      "stem": "The platform records a default 24-hour grace value for late confirmations. Which statement is true?",
       "options": [
         {
           "id": "o1",
-          "text": "24 hours.",
+          "text": "It is recorded on the attempt, but the current engine does not enforce it as a listening window; a late confirmation is handled when it arrives.",
           "correct": true
         },
         {
           "id": "o2",
-          "text": "5 minutes.",
+          "text": "The attempt keeps listening for exactly 24 hours.",
           "correct": false
         },
         {
           "id": "o3",
-          "text": "30 days.",
+          "text": "The grace value is 5 minutes.",
           "correct": false
         }
       ],
-      "why": "Unlimited for partners that cannot be asked."
+      "why": "The grace value is informational; the slot decides whether a late success is posted or sent to SUSPENSE."
     },
     {
       "id": "q-m5-018",
@@ -2794,16 +2794,16 @@
       "refs": [
         "b07-05"
       ],
-      "stem": "A webhook arrives before the payment record is saved. The platform",
+      "stem": "A webhook arrives for a reference the platform has no attempt for. The platform",
       "options": [
         {
           "id": "o1",
-          "text": "retries finding the payment for about a minute.",
+          "text": "stores it with no attempt link; it has no state effect.",
           "correct": true
         },
         {
           "id": "o2",
-          "text": "deletes it.",
+          "text": "retries it for about a minute.",
           "correct": false
         },
         {
@@ -2812,7 +2812,7 @@
           "correct": false
         }
       ],
-      "why": "The raw message was stored first."
+      "why": "Only transient processing errors retry; an unknown reference is kept without touching a payment."
     },
     {
       "id": "q-m5-025",
@@ -2978,7 +2978,7 @@
           "correct": false
         }
       ],
-      "why": "A wallet is what we owe, calculated from lines."
+      "why": "A wallet is what we owe, kept as a shard projection of the journal lines."
     },
     {
       "id": "q-m6-004",
@@ -3044,7 +3044,7 @@
           "correct": false
         }
       ],
-      "why": "Automatic payouts stop and RB-04 applies."
+      "why": "Drift is P1 and RB-04 applies; do not cash out while it is unexplained."
     },
     {
       "id": "q-m6-006",
@@ -3400,14 +3400,14 @@
         },
         {
           "id": "o4",
-          "text": "Mark it complete"
+          "text": "Approve and execute the subtraction; the wallet is reduced"
         },
         {
           "id": "o5",
-          "text": "A different Finance user approves and executes the subtraction"
+          "text": "The request becomes COMPLETE"
         }
       ],
-      "why": "Two different people; the wallet is subtracted only at the end."
+      "why": "One Finance user with `cashout:review` handles it; the wallet is reduced at execution."
     },
     {
       "id": "q-m6-020",
@@ -3581,25 +3581,25 @@
       "refs": [
         "b08-09"
       ],
-      "stem": "The system drafts a chargeback adjustment. Money moves",
+      "stem": "A dispute is recorded within the merchant's ceiling and the system drafts the chargeback outcome. Which money has already moved before a checker approves?",
       "options": [
         {
           "id": "o1",
-          "text": "only after a human Finance checker approves.",
+          "text": "The merchant-share reserve, from the wallet and platform income into `CHARGEBACK_RESERVE`.",
           "correct": true
         },
         {
           "id": "o2",
-          "text": "at once.",
+          "text": "Nothing; the wallet is untouched.",
           "correct": false
         },
         {
           "id": "o3",
-          "text": "after 24 hours.",
+          "text": "The full disputed amount to the payer.",
           "correct": false
         }
       ],
-      "why": "The system can never approve or execute."
+      "why": "The intake reserve posts with the dispute; the outcome waits for a human Finance checker."
     },
     {
       "id": "q-m6-026",
@@ -3617,7 +3617,7 @@
       "options": [
         {
           "id": "o1",
-          "text": "becomes EXPIRED, treated as lost unless rules say otherwise.",
+          "text": "becomes EXPIRED, treated as lost.",
           "correct": true
         },
         {
@@ -3645,10 +3645,10 @@
       "refs": [
         "b08-13"
       ],
-      "stem": "Wallet holds 40; a 100 LYD chargeback with 3 LYD commission is approved and posts. Wallet after?",
+      "stem": "A dispute is opened on a 100 LYD payment (3 LYD commission) while the wallet holds 40. The ceiling is 100 and the intake reserve posts. Wallet after?",
       "options": [],
       "answer": "-57.0000",
-      "why": "Wallet minus the merchant share: 40 − 97 = −57 (allowed only within the ceiling)."
+      "why": "40 − 97 = −57, which is within the −100 ceiling."
     },
     {
       "id": "q-m6-028",
@@ -3662,16 +3662,16 @@
       "refs": [
         "b08-13"
       ],
-      "stem": "A new merchant's negative-balance ceiling is zero. A chargeback exceeds the wallet. The adjustment",
+      "stem": "A dispute's intake reserve would take the wallet below the merchant's negative-balance ceiling. The reserve",
       "options": [
         {
           "id": "o1",
-          "text": "does not execute; a P1 case opens.",
+          "text": "is not posted; a P1 case opens.",
           "correct": true
         },
         {
           "id": "o2",
-          "text": "posts.",
+          "text": "posts anyway.",
           "correct": false
         },
         {
@@ -3680,7 +3680,7 @@
           "correct": false
         }
       ],
-      "why": "Finance chooses to collect, net or suspend."
+      "why": "The intake reserve respects the ceiling; Finance chooses to collect, net or suspend."
     },
     {
       "id": "q-m6-029",
@@ -4016,7 +4016,7 @@
       "refs": [
         "b09-02"
       ],
-      "stem": "Which layer runs on the payment path using cheap local checks?",
+      "stem": "Which layer runs on the payment path and evaluates the active rules against a bounded recent-payment window?",
       "options": [
         {
           "id": "o1",
@@ -4034,7 +4034,7 @@
           "correct": false
         }
       ],
-      "why": "Payments have a strict speed budget."
+      "why": "The guard loads the rules and a bounded 24-hour window; it is not a local watch-list copy."
     },
     {
       "id": "q-m7-102",
@@ -4181,25 +4181,25 @@
       "refs": [
         "b09-04"
       ],
-      "stem": "A dry-run of a proposed rule shows",
+      "stem": "The current AML rule screen has no dry-run. What should you do before the MLRO approves a noisy rule?",
       "options": [
         {
           "id": "o1",
-          "text": "how many holds and cases it would have created.",
+          "text": "Review the parameters and expected impact manually.",
           "correct": true
         },
         {
           "id": "o2",
-          "text": "the merchant's name.",
+          "text": "Assume the rule will create no holds.",
           "correct": false
         },
         {
           "id": "o3",
-          "text": "nothing.",
+          "text": "Skip the MLRO approval because there is no dry-run.",
           "correct": false
         }
       ],
-      "why": "A noisy rule is caught first."
+      "why": "A dry-run is not implemented; human review is the control."
     },
     {
       "id": "q-m7-107",
@@ -4214,25 +4214,25 @@
       "refs": [
         "b09-03"
       ],
-      "stem": "You mark a possible match FALSE_POSITIVE and suppress future matches. You must also",
+      "stem": "You mark a possible match FALSE_POSITIVE and record a suppression. What is true?",
       "options": [
         {
           "id": "o1",
-          "text": "set an expiry date.",
+          "text": "The current screening path does not consult the stored suppression; the pair can reopen.",
           "correct": true
         },
         {
           "id": "o2",
-          "text": "delete the screening.",
+          "text": "The match will never reopen.",
           "correct": false
         },
         {
           "id": "o3",
-          "text": "tell the merchant.",
+          "text": "The suppression hides the match from every future screening.",
           "correct": false
         }
       ],
-      "why": "Suppression ends if identifying data changes."
+      "why": "The Guide and the current path agree: suppression is stored but not consulted. Write the rationale and keep watching."
     },
     {
       "id": "q-m7-108",
@@ -4397,7 +4397,7 @@
           "correct": false
         }
       ],
-      "why": "HIGH is 1 business day."
+      "why": "HIGH is 24 hours; MEDIUM 72 and LOW 120, all calendar hours."
     },
     {
       "id": "q-m7-113",
@@ -4515,12 +4515,12 @@
       "options": [
         {
           "id": "o1",
-          "text": "against the hold, not the wallet.",
+          "text": "against the merchant wallet and platform income, not the hold.",
           "correct": true
         },
         {
           "id": "o2",
-          "text": "against the wallet.",
+          "text": "against the `AML_HOLD`, not the wallet.",
           "correct": false
         },
         {
@@ -4529,7 +4529,7 @@
           "correct": false
         }
       ],
-      "why": "Void and return."
+      "why": "The hold is resolved only by the AML case; the chargeback posts its own reserve."
     },
     {
       "id": "q-m7-117",
@@ -4544,25 +4544,25 @@
       "refs": [
         "b09-06"
       ],
-      "stem": "If nobody ratifies an emergency suspension in 24 hours",
+      "stem": "Nobody ratifies an emergency suspension within 24 hours or its 48-hour grace. What happens?",
       "options": [
         {
           "id": "o1",
-          "text": "an alert fires and it stays in force.",
+          "text": "The platform lifts the suspension automatically and marks the approval EXPIRED.",
           "correct": true
         },
         {
           "id": "o2",
-          "text": "it lifts.",
+          "text": "It stays in force forever.",
           "correct": false
         },
         {
           "id": "o3",
-          "text": "the merchant is closed.",
+          "text": "The merchant is closed.",
           "correct": false
         }
       ],
-      "why": "Fail safe."
+      "why": "It stays restricted through the grace, then lifts; staff are told."
     },
     {
       "id": "q-m7-118",
@@ -4619,16 +4619,16 @@
         },
         {
           "id": "o2",
-          "text": "PERIODIC_RETURN",
+          "text": "INCIDENT",
           "correct": false
         },
         {
           "id": "o3",
-          "text": "LARGE_TRANSACTION",
+          "text": "PERIODIC_RETURN",
           "correct": false
         }
       ],
-      "why": "Triggered by a case."
+      "why": "Suspicious-activity reports come from a case and always need review; INCIDENT and PERIODIC_RETURN can be drafted automatically."
     },
     {
       "id": "q-m7-120",
@@ -4713,7 +4713,7 @@
       "options": [
         {
           "id": "o1",
-          "text": "COMPLIANCE, MLRO and, for audit, SECURITY_ADMIN.",
+          "text": "COMPLIANCE, MLRO, or an account with explicit aml:read/aml:write.",
           "correct": true
         },
         {
@@ -4727,7 +4727,7 @@
           "correct": false
         }
       ],
-      "why": "Every read is logged."
+      "why": "Security Admin is not automatically allowed; AML case detail reads are audited."
     },
     {
       "id": "q-m7-123",
@@ -5176,10 +5176,10 @@
       "refs": [
         "b06-03"
       ],
-      "stem": "How many engine phases are there?",
+      "stem": "How many engine phases run at runtime?",
       "options": [],
-      "answer": "10",
-      "why": "Ten: CREDENTIAL_CHECK, PRE_INITIATE, INITIATE, SUBMIT, VERIFY, CANCEL, REFUND, VOID, CAPTURE, SETTLEMENT_FETCH."
+      "answer": "7",
+      "why": "Seven: PRE_INITIATE, INITIATE, SUBMIT, VERIFY, CANCEL, REFUND, VOID. CAPTURE and SETTLEMENT_FETCH are spec values without an executor."
     },
     {
       "id": "q-m8-007",
@@ -5293,25 +5293,25 @@
       "refs": [
         "b06-08"
       ],
-      "stem": "Which error class counts toward the circuit breaker?",
+      "stem": "Which statement about the circuit breaker is true?",
       "options": [
         {
           "id": "o1",
-          "text": "GATEWAY_FAULT.",
+          "text": "An error counts when its error map marks `counts_toward_breaker`; customer errors and 429 never count.",
           "correct": true
         },
         {
           "id": "o2",
-          "text": "RETRYABLE_OTP.",
+          "text": "Only `GATEWAY_FAULT` can ever count.",
           "correct": false
         },
         {
           "id": "o3",
-          "text": "LIMIT_EXCEEDED.",
+          "text": "Every failed payment counts.",
           "correct": false
         }
       ],
-      "why": "Customer mistakes do not."
+      "why": "The decision is per error, not per class; customer mistakes are excluded."
     },
     {
       "id": "q-m8-011",
@@ -6361,7 +6361,7 @@
           "correct": false
         }
       ],
-      "why": "Then Bulk Inquiry the affected route."
+      "why": "Then use **Inquire selected** on the affected route."
     },
     {
       "id": "q-m9-106",
@@ -6431,7 +6431,7 @@
           "correct": false
         }
       ],
-      "why": "Resume payouts only when zero and your manager agrees."
+      "why": "Do not allow cash-outs again until the drift is zero and your manager agrees."
     },
     {
       "id": "q-m9-108",
@@ -6585,25 +6585,25 @@
       "refs": [
         "b10-03"
       ],
-      "stem": "After the new signing secret is approved, stored messages can be",
+      "stem": "After the new signing secret is approved, what happens to the stored messages?",
       "options": [
         {
           "id": "o1",
-          "text": "replayed without asking the partner to resend.",
+          "text": "They remain in the inbox as evidence; the partner is asked to resend, because the core has no replay button.",
           "correct": true
         },
         {
           "id": "o2",
-          "text": "deleted.",
+          "text": "They are replayed automatically.",
           "correct": false
         },
         {
           "id": "o3",
-          "text": "ignored.",
+          "text": "They are deleted.",
           "correct": false
         }
       ],
-      "why": "Raw bytes are kept."
+      "why": "The raw bytes are kept, but webhook replay is a Fake Rails drill control, not a core recovery action."
     },
     {
       "id": "q-m10-001",
@@ -6810,25 +6810,25 @@
       "refs": [
         "b12-01"
       ],
-      "stem": "Which host never shares an address with the core?",
+      "stem": "Which statement about hosts is true?",
       "options": [
         {
           "id": "o1",
-          "text": "The database host.",
+          "text": "The roles may share one host; separation is enforced by firewall rules, mutual TLS and keys.",
           "correct": true
         },
         {
           "id": "o2",
-          "text": "The checkout host.",
+          "text": "The database must always run on a different machine from the core.",
           "correct": false
         },
         {
           "id": "o3",
-          "text": "The admin host.",
+          "text": "Edge hosts hold the database key so they can read the books directly.",
           "correct": false
         }
       ],
-      "why": "A rule that never changes."
+      "why": "A single-box deployment runs every role on one machine without removing the protections."
     },
     {
       "id": "q-m10-102",
@@ -7008,7 +7008,7 @@
       "refs": [
         "b12-05"
       ],
-      "stem": "In the twelve-step deployment, the end-to-end check fails. The tool",
+      "stem": "In the 14-step deployment, the end-to-end check fails. The tool",
       "options": [
         {
           "id": "o1",
