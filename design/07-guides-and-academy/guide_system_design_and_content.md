@@ -641,19 +641,25 @@ A **certificate** is a digital ID card issued by an authority we trust. In ordin
 Changing a secret on a schedule, or immediately after a leak, is **rotation**. The system supports an overlap where old and new secrets both work briefly so that nothing breaks.
 @@end
 
-@@article id=b01-08 book=1 order=8 title="Sandbox versus Live: test money and real money" roles=ALL minutes=1 ui=AVAILABLE related=b06-10,b12-06
-Every payment company gives us two worlds:
-
-* **SANDBOX**: a practice world. Nothing real moves. Used to build and test.
-* **LIVE**: the real world. Real money, real customers, real consequences.
-
-The two worlds have **different** web addresses, **different** secrets and **different** webhook addresses. The platform keeps them completely separate: a sandbox payment can never be posted to the real books, and a sandbox webhook sent to the live address is rejected and raises an alert.
-
-:::warning Always check the badge
-Before you act on any payment, case or gateway screen, check whether it says `SANDBOX` or `LIVE`. Acting on live data believing it is practice (or the reverse) is a classic mistake. Never use real customer data in sandbox.
+@@article id=b01-08 book=1 order=8 title="Sandbox versus Live: test money and real money" roles=ALL minutes=2 ui=AVAILABLE related=b06-10,b12-06
+:::summary Big picture in 20 seconds
+Sandbox is a separate practice world with its own core service, database, test-money wallets, `sbx_` links and `pg_test_` API tokens. Live is the real world. Nothing created in one can post to the other.
 :::
 
-A merchant who has not yet been approved may use the sandbox only. A **Fake Rails** testing service exists for internal drills; it must never run in production (Book 12).
+The platform runs two worlds and keeps them apart:
+
+* **SANDBOX** — the practice world. It has its own core service and its own database, with test-money wallets, `sbx_` payment links and `pg_test_` API tokens. Every rail is answered by **Fake Rails**, our emulator of the payment companies, so no real partner is contacted.
+* **LIVE** — the real world: real money, real customers, real consequences, `pl_` payment links and `pg_live_` API tokens.
+
+A gateway's `SANDBOX` and `LIVE` environments are separate too. Each has its own addresses, allowed hosts, allowed sender IP addresses and credentials. A `pg_test_` token cannot call Live, an `sbx_` link cannot take a Live payment, and a webhook sent to the wrong environment is rejected. A sandbox payment never appears in Live reports, cash-outs or reconciliation, and a Live payment never appears in sandbox.
+
+:::warning Always check the badge
+Sandbox screens carry an amber `SANDBOX` badge or banner, and a sandbox checkout adds a test helper. Before you act on any payment, case or gateway screen, read the environment marker. Acting on live data believing it is practice (or the reverse) is a classic mistake. Never put real customer data or live credentials in sandbox.
+:::
+
+The merchant portal's **Sandbox Studio** lets a merchant or tester fund a test wallet, create test links and tokens, and practise refunds, disputes and cash-outs. Staff use the admin **Sandbox** screens to inspect that plane, reset one merchant's sandbox workspace and control the Fake Rails test customers and clearing pools. A merchant waiting for approval can train there, but Live payments stay locked until the merchant is approved.
+
+**Fake Rails** is for test and training only. A production deployment refuses to enable it, and it must never receive live credentials or real customer data (Book 12).
 @@end
 
 @@article id=b01-09 book=1 order=9 title="Why we write money down twice (a first look)" roles=ALL minutes=1 ui=AVAILABLE related=b08-01
@@ -1923,7 +1929,7 @@ The second table shows what each state allows. A **cash-out** is a request to mo
 
 | State | New payments | Payments already in progress | Cash-out | API keys and POS |
 | :--- | :--- | :--- | :--- | :--- |
-| `PENDING` | Blocked on `LIVE`; allowed on `SANDBOX` if the platform setting allows it (default: allowed). | None. | Blocked. | `SANDBOX` only. |
+| `PENDING` | Blocked on `LIVE`; allowed in the separate `SANDBOX` plane, where the merchant's sandbox copy is `ACTIVE`. | None. | Blocked. | `SANDBOX` only. |
 | `ACTIVE` | Allowed. | Normal. | Allowed. | Allowed. |
 | `SUSPENDED` | Blocked. | See the note below the table. | Blocked. | API keys return a generic error; POS screens show a neutral message. |
 | `REJECTED` | Blocked. | None. | None. | None. |
@@ -2905,9 +2911,9 @@ Each version has a `SANDBOX` environment for testing and a `LIVE` environment fo
 * **allowed hosts** (the only hosts the gateway may call),
 * **allowed sender IP addresses** (the addresses the partner's messages may come from),
 * secrets,
-* webhook secret path (the private part of the address where the partner sends its messages to us).
+* webhook address (the environment plus the channel's secret path).
 
-A webhook that arrives at the wrong environment's address is rejected and raises an alert. A sandbox payment can never create a live ledger entry.
+A webhook that arrives at the wrong environment's address is rejected, so it cannot change a payment. A sandbox payment can never create a live ledger entry.
 
 ### The path to live
 A version moves through these steps, in this order:
@@ -3629,7 +3635,7 @@ Read the first column as what you see, the second as what it means, and the thir
 | Message about a reference we do not know | Stored with no payment attached; nothing changes. | A spike may mean an attack or a partner mix-up; tell the Security Admin. |
 | Duplicate message | Absorbed; answer is OK again. | Nothing. |
 | Out-of-order messages | `SUCCEEDED` is never downgraded. | Nothing. |
-| Message from the sandbox arrives at the live address | Rejected; priority-2 security alert. | Tell the Gateway Admin and Security Admin. |
+| Message from the sandbox arrives at the live address | Rejected; nothing changes. | If it repeats, tell the Gateway Admin to correct the partner's sandbox settings. |
 | A spike of signature failures | The partner may have changed how it signs. | Runbook [[a:b10-03]]. |
 | A valid signature from an unlisted IP address | The partner may have changed servers. | Runbook [[a:b10-03]]. |
 | Weak channel (hint only) | The platform asks the partner before believing. | Nothing. |
@@ -5537,7 +5543,7 @@ Read the table in order. The left column is the step number, the middle is its s
 
 @@article id=b12-06 book=12 order=6 title="Test environments: sandbox and the Fake Rails service" roles=GATEWAY_ADMIN,SECURITY_ADMIN,OPERATOR minutes=1 ui=AVAILABLE related=b01-08,b06-10,b12-07
 :::summary Big picture in 20 seconds
-We test in two safe places: the partner's sandbox and our own Fake Rails service. Fake Rails must never run in production and never receives live credentials. No test environment may hold real customer data.
+We test in two safe places: the platform's separate Sandbox plane and the partner's sandbox environment. Both avoid real money, and inside our Sandbox the Fake Rails service answers every rail.
 :::
 
 Before real money moves, we need a place where mistakes cost nothing. There are two such places.
@@ -5545,17 +5551,17 @@ Before real money moves, we need a place where mistakes cost nothing. There are 
 ### Sandbox
 Every gateway has a sandbox environment on the partner's side. A gateway is our set-up for one payment company, and the partner is that payment company. The sandbox is the partner's practice environment. It is where building and testing happen. For the difference between sandbox and live, see [[a:b06-10|Sandbox, live, rollback and what changes for new versus running payments]].
 
+Our platform also runs its own **Sandbox** plane. It has a separate core service and database, reached from the merchant portal's **Sandbox Studio** and the admin **Sandbox** screens. Sandbox links start with `sbx_` and sandbox API tokens with `pg_test_`. Every rail call goes to Fake Rails, so no real partner is contacted. A merchant who is still waiting for approval can train there; Live stays locked until the merchant is approved.
+
 ### Fake Rails
-**Fake Rails** is our own internal testing service that **imitates payment companies**. It can be configured to behave badly on purpose, so we can practise and test how the platform reacts. The bad behaviours are:
+**Fake Rails** is our own testing service that **imitates payment companies**. It answers every rail inside the Sandbox plane. It can be configured to behave badly on purpose, so we can practise and test how the platform reacts. The bad behaviours are:
 * timeouts,
 * wrong codes,
 * duplicate or forged messages,
 * conflicting answers.
 
-The Employee Academy labs use it.
-
 ### Rules
-* Fake Rails must **never run in production**. It is protected by explicit switches and allowed-host lists; a production deployment must leave them off.
+* Fake Rails must **never run in a production deployment**. The deploy refuses it when `DEPLOY_ENV` is `production`; it runs only in a test or development stack with an explicit opt-in. It is protected by explicit switches and allowed-host lists.
 * Never point live credentials at it.
 * Never use real customer data in any test environment.
 * Always check the **SANDBOX/LIVE** badge before acting.
@@ -5983,9 +5989,9 @@ This is the *typical* pattern. Your account's own maker and checker switches and
 @@term slug=timeout term="Timeout" aliases="silence" ar="انتهاء المهلة" related=unknown :: No answer within the time limit. On a money step it makes a payment unknown.
 @@term slug=json term="JSON" aliases="" ar="جيسون" related=selector :: A text format for data, like `{"amount":"10.50"}`.
 @@term slug=selector term="Selector" aliases="dot path" ar="المحدد" related=json :: A path such as `result.transaction_id` that picks one value out of an answer.
-@@term slug=sandbox term="Sandbox" aliases="SANDBOX;test environment" ar="بيئة تجريبية" related=live :: A practice world where nothing real moves.
+@@term slug=sandbox term="Sandbox" aliases="SANDBOX;test environment" ar="بيئة تجريبية" related=live :: A separate practice plane with its own core service, database and test money; nothing real moves.
 @@term slug=live term="Live" aliases="LIVE;production" ar="البيئة الحية" related=sandbox :: The real world: real money, real customers.
-@@term slug=fake-rails term="Fake Rails" aliases="fake rails service" ar="" related=sandbox :: Our internal service that imitates payment companies for drills. Never in production.
+@@term slug=fake-rails term="Fake Rails" aliases="fake rails service" ar="" related=sandbox :: Our emulator of the payment companies. It answers every rail in the Sandbox plane; never in production.
 @@term slug=attempt term="Payment attempt" aliases="attempt" ar="محاولة دفع" related=payment-state,reference :: One try to pay a link, with its own state, references and pinned configuration.
 @@term slug=payment-state term="Payment state" aliases="status;state" ar="حالة الدفع" related=attempt :: One of 14 states of an attempt (for example `UNKNOWN`, `SUCCEEDED`).
 @@term slug=unknown term="UNKNOWN" aliases="unknown state" ar="غير معروف" related=inquiry,slot :: We do not know whether money moved. Never guess; use Inquire.
@@ -7923,12 +7929,12 @@ It is LAN-only by design. It is not reachable from the internet.
 
 @@faq id=q-055 article=b12-06
 Q: What is Fake Rails?
-Our internal service that imitates payment companies for drills. It must never run in production.
+Our emulator of the payment companies. It answers every rail in the Sandbox plane. It must never run in production.
 @@end
 
 @@faq id=q-056 article=b01-08
 Q: What is the difference between sandbox and live?
-Sandbox is a practice world; nothing real moves. Live is real money. Always check the badge before acting.
+Sandbox is a separate practice plane with its own core service, database and test money. Live is real money. Nothing created in one can post to the other; always check the badge before acting.
 @@end
 
 @@faq id=q-057 article=b13-04

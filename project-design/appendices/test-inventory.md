@@ -411,7 +411,7 @@
 | `tests/e2e/merchant/a11y.spec.ts` | 28 | 1 |
 | `tests/e2e/merchant/auth.spec.ts` | 47 | 2 |
 | `tests/e2e/merchant/landing.spec.ts` | 105 | 5 |
-| `tests/e2e/merchant/shell.spec.ts` | 121 | 9 |
+| `tests/e2e/merchant/shell.spec.ts` | 145 | 11 |
 | `tests/e2e/merchant/table-row-context-menu.spec.ts` | 124 | 3 |
 | `tests/e2e-live/live.spec.ts` | 153 | 6 |
 | `tests/unit/academy-content.test.ts` | 306 | 17 |
@@ -457,4 +457,4 @@
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
 - Total files: **451**
-- Total literal test declarations: **4444**
+- Total literal test declarations: **4446**

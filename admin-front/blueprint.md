@@ -956,7 +956,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 ## Admin Guide and Academy
 
-> Status: `partial` · Last verified: 2026-11-23
+> Status: `partial` · Last verified: 2026-11-25
 
 ## 1. Purpose and scope
 
@@ -1232,6 +1232,13 @@ regenerated.
 - **Exam briefing.** Starting an exam requires three acknowledgements (integrity, no outside help, time limit) and sends `checklist` keys `EXAM_INTEGRITY_ACCEPTED`, `EXAM_NO_OUTSIDE_HELP`, `EXAM_TIME_LIMIT_ACKNOWLEDGED`; core audits `ACADEMY_EXAM_STARTED_WITH_CHECKLIST`. The keys remain advisory server-side.
 - **Certificate.** The page fetches `GET /academy/certificates/:trackId/verification`, which returns the issuance `publicId` and short `displayId`. The public verification URL is `academyCertificateVerifyUrl` (deploy writes the checkout public origin plus `/verify/certificate`). The public page is `checkout-front /verify/certificate/:publicId`; checkout-back calls `GET /internal/checkout/academy/certificates/:publicId`. Issuance is a durable `academy_certificates` row with an opaque `publicId`, unique per user/track/earnedAt; verification reads the row and the holder's live badge and returns `valid`, `expired` or `revoked` plus holder/track/badge/dates/content version. No email, role or employment status is returned. A new badge supersedes the previous issuance; `SECURITY_ADMIN` can revoke via `POST /academy/certificates/:identifier/revoke` (opaque `publicId` or short `displayId`) from Team progress. Disabled/deleted users do not expose a valid credential. No HMAC token or user UUID appears in the URL.
 - **Team export.** `GET /academy/team/export` requires `SECURITY_ADMIN`, accepts the three team checklist keys, and audits `ACADEMY_TEAM_EXPORTED`. The page-level XLSX export uses the shared pipeline; the in-table CSV and the new “Copy team summary” remain client-side (the copy masks emails).
+
+## Sandbox and Live content accuracy (2026-11-25)
+
+- **Guide Book 1 `b01-08`.** Rewritten from the v38-v39 code instead of the older partner-only framing: Sandbox is a separate core service and database with test-money wallets, `sbx_` links, `pg_test_` tokens and Fake Rails; Live is separate; a pending merchant trains in the Sandbox plane; Fake Rails is refused in a production deployment. The claim that a sandbox webhook sent to Live "raises an alert" was removed: `core-back/api/internal/checkout.ts` rejects an inbound channel that is not bound to the requested environment, but no operator case or alert is opened.
+- **Aligned content.** `b05-01` now says a `PENDING` merchant uses the separate Sandbox envelope (no non-existent platform setting); `b06-10` says the wrong environment is rejected; `b07-05` says it is rejected with no priority-2 alert; `b12-06`, glossary terms `sandbox`/`fake-rails`, and quick answers `q-055`/`q-056` describe the Sandbox plane and Fake Rails accurately; Academy lesson `l-m5-5` and exam question `q-m1-009` use the corrected answer.
+- **Merchant shell.** The drawer badge follows `sandboxMode` (`SANDBOX` inside `/sandbox/*` and the mirror, `LIVE` elsewhere) so the shell no longer displays `LIVE` while the amber Sandbox banner is shown. This exposed a pre-existing route bug: portal routes are mounted under `/portal`, but `isSandboxPath()` matched only `/sandbox`, so `sandboxMode` never turned on and the mirror pages called Live API paths. `isSandboxPath()` now accepts both; `tests/e2e/merchant/shell.spec.ts` covers the badge and asserts that a mirror page requests only `/api/v1/merchant/sandbox/...`.
+- Counts and ids are unchanged (137 articles, 154 terms, 60 quick answers, 51 lessons, 224 exam-pool questions); the generated Guide/Academy and Companion snapshot were regenerated.
 
 ## Contextual Help
 

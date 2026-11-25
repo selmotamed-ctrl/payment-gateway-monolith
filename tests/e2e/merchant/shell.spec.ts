@@ -45,6 +45,30 @@ test.describe("merchant shell", () => {
     await expect(dashboard).toBeVisible();
   });
 
+  test("the drawer environment badge follows the sandbox route", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/portal/dashboard");
+    const badge = page.locator(".pg-drawer .pg-status-badge").first();
+    await expect(badge).toHaveText("LIVE");
+
+    await page.goto("/portal/sandbox/overview");
+    await expect(page.locator(".pg-drawer .pg-status-badge").first()).toHaveText("SANDBOX");
+  });
+
+  test("a sandbox mirror page calls only sandbox API paths", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const paths: string[] = [];
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (path.startsWith("/api/v1/merchant/")) paths.push(path);
+    });
+
+    await page.goto("/portal/sandbox/mirror/cashouts");
+    await expect(page.locator(".pg-page")).toBeVisible();
+    expect(paths.some((path) => path.startsWith("/api/v1/merchant/sandbox/"))).toBe(true);
+    expect(paths.filter((path) => path.match(/^\/api\/v1\/merchant\/(?!sandbox\/)/))).toEqual([]);
+  });
+
   test("the drawer navigation scrolls when its content exceeds the viewport", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 420 });
     await page.goto("/portal/dashboard");

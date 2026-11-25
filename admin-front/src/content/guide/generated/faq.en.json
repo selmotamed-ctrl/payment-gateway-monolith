@@ -327,13 +327,13 @@
     "id": "q-055",
     "article": "b12-06",
     "question": "What is Fake Rails?",
-    "answer": "Our internal service that imitates payment companies for drills. It must never run in production."
+    "answer": "Our emulator of the payment companies. It answers every rail in the Sandbox plane. It must never run in production."
   },
   {
     "id": "q-056",
     "article": "b01-08",
     "question": "What is the difference between sandbox and live?",
-    "answer": "Sandbox is a practice world; nothing real moves. Live is real money. Always check the badge before acting."
+    "answer": "Sandbox is a separate practice plane with its own core service, database and test money. Live is real money. Nothing created in one can post to the other; always check the badge before acting."
   },
   {
     "id": "q-057",

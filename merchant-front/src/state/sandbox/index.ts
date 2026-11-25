@@ -13,8 +13,16 @@ export const setSandboxMode = (value: boolean): void => {
 
 export const SANDBOX_PATH_PREFIX = "/sandbox";
 
+/**
+ * Portal routes are nested under the `/portal` parent, so a Vue Router path is
+ * `/portal/sandbox/...` in the running app. Accept both the bare path (used by
+ * tests and route definitions) and the mounted path, otherwise `sandboxMode`
+ * never turns on and the mirror pages call Live API paths.
+ */
+const SANDBOX_PATH_PREFIXES = [SANDBOX_PATH_PREFIX, `/portal${SANDBOX_PATH_PREFIX}`] as const;
+
 export const isSandboxPath = (path: string): boolean =>
-    path === SANDBOX_PATH_PREFIX || path.startsWith(`${SANDBOX_PATH_PREFIX}/`);
+    SANDBOX_PATH_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 
 /** Rewrites a relative merchant API path to the sandbox mirror namespace. */
 export const sandboxMirrorPath = (url: string): string => {

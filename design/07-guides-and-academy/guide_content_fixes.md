@@ -79,3 +79,17 @@ quick answer or question was added or removed; the 14 books / 128 articles / 151
 | `b06-11`, `b06-12` examples | Sadad has two routes | Sadad has one route (`sadad-direct`); the examples use an invented rail | seeded gateways |
 
 Facts that were **kept as written although code or another article disagrees** are listed in `guide_content_questions.md` for an owner decision.
+
+## Sandbox and Live accuracy pass (2026-11-25)
+
+Checked against the v38-v39 parallel execution plane and the inbound webhook code. The old text treated Sandbox as only the partner's practice environment and claimed a wrong-environment webhook raised an alert; the platform actually rejects it without creating an alert, and our own Sandbox is a separate core process and database. Counts, ids and related links are unchanged.
+
+| Item | Old claim | Corrected claim | Evidence |
+| :--- | :--- | :--- | :--- |
+| `b01-08` | Sandbox is the partner's practice world; the two worlds have different addresses and a sandbox webhook at the live address raises an alert. | Sandbox is a separate core service and database with `sbx_` links, `pg_test_` tokens, test-money wallets and Fake Rails; a wrong-environment webhook is rejected, not alerted. | `project-design/parts/00-platform/05-sandbox-execution-plane.md`, `core-back/lib/executionPlane.ts`, `core-back/api/internal/checkout.ts` (inbound environment binding) |
+| `b05-01` | A `PENDING` merchant may use sandbox "if the platform setting allows it". | No such setting exists: the separate sandbox envelope is created as `ACTIVE`, while Live stays blocked. | `core-back/lib/commerceStatus.ts`, `core-back/api/internal/sandboxControl.ts` |
+| `b06-10` | Each environment has its own webhook secret path; a wrong-environment webhook raises an alert. | The webhook address includes the environment and the channel's secret path; the wrong environment is rejected. | `core-back/api/internal/checkout.ts`, `core-back/prisma/schema.prisma` (`ConfirmationChannel`, `GatewayEnvironment`) |
+| `b07-05` | A sandbox message at the live address produces a priority-2 security alert. | It is rejected and nothing changes; a repeating case means the partner's sandbox URL is wrong. | `core-back/api/internal/checkout.ts` |
+| `b12-06`, glossary `sandbox`/`fake-rails`, `q-055`, `q-056` | Sandbox described only as the partner's environment; Fake Rails described as an internal drill service. | Our Sandbox plane and Fake Rails' role as its rail emulator are described; production refusal is stated accurately. | `project-design/parts/00-platform/05-sandbox-execution-plane.md`, `deploy/lib/configSchema.ts` |
+| `l-m5-5`, `q-m1-009` | A sandbox webhook at the live address "raises an alert". | It is rejected and cannot change a live payment. | `core-back/api/internal/checkout.ts` |
+| Merchant shell | The drawer showed `LIVE` inside `/sandbox/*`. | The route lives at `/portal/sandbox/*`, but `isSandboxPath()` only matched `/sandbox*`, so `sandboxMode` never turned on: the badge stayed `LIVE` and the Sandbox Live Mirror called Live API paths. `isSandboxPath()` now accepts both forms; the badge follows the route and mirror calls stay under `/api/v1/merchant/sandbox/...`. | `merchant-front/src/state/sandbox/index.ts`, `merchant-front/src/layouts/default.tsx`, `state/api/index.ts`, `tests/e2e/merchant/shell.spec.ts` |

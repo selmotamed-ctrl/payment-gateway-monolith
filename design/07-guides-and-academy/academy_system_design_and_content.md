@@ -1330,7 +1330,7 @@ Questions: c-l-m5-4-1, c-l-m5-4-2
 
 ### Key ideas
 - **A webhook is a message a partner sends us about a payment.** It arrives at a secret address that belongs to one gateway and one environment. The platform stores the raw message first, exactly as received, and answers the partner quickly. A background worker then checks the signature, the sender's IP address and the timestamp. Duplicates are ignored for seven days. An out-of-order message never downgrades `SUCCEEDED`.
-- **Few webhook situations need you to act.** If a message arrives before the payment record is saved, the worker retries for about 60 seconds. A spike of messages about unknown references may be an attack or a partner mix-up, so tell the Security Admin. A sandbox webhook that arrives at the live address is rejected and raises an alert.
+- **Few webhook situations need you to act.** If a message arrives before the payment record is saved, the worker retries for about 60 seconds. A spike of messages about unknown references may be an attack or a partner mix-up, so tell the Security Admin. A sandbox webhook that arrives at the live address is rejected, so it cannot change a live payment.
 - **A slot is reserved before an attempt starts.** The slot is the place on the link for one payment. It stops one invoice from being paid twice. While it is reserved, another customer sees "Payment in progress". `UNKNOWN` keeps the slot.
 - **An attempt expires at the smaller of two limits.** The limits are the partner's session time and the platform's ceiling for that mode. The platform then makes one last inquiry, if the partner can be asked, and moves the attempt to `EXPIRED`.
 - **The grace window accepts late confirmations.** After expiry, the platform keeps listening for 24 hours by default. The window is unlimited for partners that cannot be asked. If the slot is still free, the attempt becomes `SUCCEEDED` and a priority-2 alert is raised. If another attempt already paid the single-use link, the money goes to the `SUSPENSE` account and a refund is drafted. The merchant wallet is wrong because it would credit the invoice twice. `TREASURY` is wrong because it is our own money, and this money does not belong to anyone yet.
@@ -2538,10 +2538,10 @@ Why: Browser and return messages can be faked.
 
 @@q id=q-m1-009 module=m1 type=single difficulty=2 critical=false exam=true tracks=FOUNDATION refs=b01-08
 Stem: A sandbox webhook reaches the live address. What happens?
-- [x] It is rejected and raises an alert.
-- [ ] It is processed as live.
-- [ ] It is silently ignored.
-Why: Environments are kept completely separate.
+- [x] It is rejected and cannot change a live payment.
+- [ ] It is processed as a live payment.
+- [ ] It is stored as a successful live event.
+Why: Sandbox and Live are separate execution planes; the wrong environment is refused.
 @@end
 
 @@q id=q-m1-010 module=m1 type=single difficulty=2 critical=false exam=true tracks=FOUNDATION refs=b01-06

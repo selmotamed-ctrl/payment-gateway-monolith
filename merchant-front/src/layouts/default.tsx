@@ -19,6 +19,7 @@ import {
 import { useDisplay, useLocale } from "vuetify";
 import LogoSvg from "@/assets/images/logo.svg";
 import { logout, user } from "@/state/user";
+import { sandboxMode } from "@/state/sandbox";
 import { setLocale } from "@/plugins/localization";
 import { showSnackBar } from "@/utils/snackBar";
 import { useSections } from "./sections";
@@ -374,7 +375,11 @@ const DefaultLayout = dc(() => {
                         <span class="pg-drawer__title">{t("Payment Gateway")}</span>
                         <span class="pg-drawer__subtitle">{t("Merchant Portal")}</span>
                     </div>
-                    <StatusBadge status="LIVE" label="LIVE" toneOverride="success" showDot={false} />
+                    {sandboxMode.value ? (
+                        <StatusBadge status="SANDBOX" label="SANDBOX" toneOverride="warning" showDot={false} />
+                    ) : (
+                        <StatusBadge status="LIVE" label="LIVE" toneOverride="success" showDot={false} />
+                    )}
                 </div>
                 <div class="pg-drawer__search">
                     <button type="button" class="pg-search-pill" onClick={() => (guideSearchOpen.value = true)}>

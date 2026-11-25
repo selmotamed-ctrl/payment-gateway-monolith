@@ -533,7 +533,7 @@
     "related": [
       "live"
     ],
-    "short": "A practice world where nothing real moves.",
+    "short": "A separate practice plane with its own core service, database and test money; nothing real moves.",
     "ar": "بيئة تجريبية"
   },
   {
@@ -558,7 +558,7 @@
     "related": [
       "sandbox"
     ],
-    "short": "Our internal service that imitates payment companies for drills. Never in production."
+    "short": "Our emulator of the payment companies. It answers every rail in the Sandbox plane; never in production."
   },
   {
     "slug": "attempt",

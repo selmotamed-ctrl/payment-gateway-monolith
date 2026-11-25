@@ -1,6 +1,6 @@
 {
   "contentVersion": "1.0.0",
-  "contentHash": "668a29d06af8e3ae2cb0b068e5a2f62df6f2be709b1b167984ddd5f84ecad4ba",
+  "contentHash": "2e172e0a4bad2d9355bd98a7912e9633a9a733b95c517daf3d23406fe5ec5c67",
   "blueprints": [
     {
       "id": "exam-foundation",
@@ -616,21 +616,21 @@
       "options": [
         {
           "id": "o1",
-          "text": "It is rejected and raises an alert.",
+          "text": "It is rejected and cannot change a live payment.",
           "correct": true
         },
         {
           "id": "o2",
-          "text": "It is processed as live.",
+          "text": "It is processed as a live payment.",
           "correct": false
         },
         {
           "id": "o3",
-          "text": "It is silently ignored.",
+          "text": "It is stored as a successful live event.",
           "correct": false
         }
       ],
-      "why": "Environments are kept completely separate."
+      "why": "Sandbox and Live are separate execution planes; the wrong environment is refused."
     },
     {
       "id": "q-m1-010",
