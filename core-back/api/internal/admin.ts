@@ -17,6 +17,7 @@ import { adminReportEngineRouter } from "./adminReportEngine";
 import { objectStorageAdminRouter } from "./objectStorage";
 import { invalidateMerchantReportPolicyCache } from "../../engine/reportStudio/merchantReportEngine";
 import { RouteHealthProbeService } from "../../engine/routeHealth/RouteHealthProbeService";
+import { CONFIRMED_MATCH_SEVERITY, severitySlaHours } from "../../engine/guards/MerchantScreeningService";
 import { applyRouteHealthOverride, clearRouteHealthOverride, overrideExpiryDate, routeHealthRank } from "../../engine/routeHealth/override";
 import { invalidateRouteHealthPolicyCache, readRouteHealthPolicy } from "../../engine/routeHealth/policy";
 import { getExecutionPlane } from "../../lib/executionPlane";
@@ -40,6 +41,7 @@ import {
   approvalAgeHours,
   approvalSubjectTypeVariants,
   approvalDomain,
+  approvalSubjectRequiresConfidentialAmlAccess,
   approvalExpiresInHours,
   approvalIsExpired,
   approvalListRow,
@@ -567,7 +569,13 @@ export const submitRegulatoryReport = async (
     ?? (typeof payload.ruleId === "string" ? payload.ruleId : null);
   if (ruleId) {
     const rule = await db.reportingRule.findUnique({ where: { id: ruleId } });
-    if (rule && rule.status !== "CONFIRMED") {
+    if (!rule) {
+      throw new ApiError(409, "REPORTING_RULE_NOT_FOUND", "The reporting rule for this report does not exist", {
+        reportId: report.id,
+        ruleId,
+      });
+    }
+    if (rule.status !== "CONFIRMED") {
       throw new ApiError(
         409,
         "REPORTING_RULE_PROVISIONAL",
@@ -578,6 +586,17 @@ export const submitRegulatoryReport = async (
   }
 
   const requiredFormats = report.requiredOutputFormats ?? [];
+  // A manual record-only filing still needs a confirmed reporting rule. This
+  // closes the bypass where a report with no rule and no required outputs was
+  // accepted as a live filing.
+  if (requiredFormats.length === 0 && !ruleId) {
+    throw new ApiError(
+      409,
+      "REPORT_OUTPUTS_REQUIRED",
+      "A live filing needs a confirmed reporting rule or at least one confirmed output format",
+      { reportId: report.id },
+    );
+  }
   const outputErrors: Array<Record<string, unknown>> = [];
   for (const format of requiredFormats) {
     const output = report.outputs?.find((entry) => entry.format === format);
@@ -6969,6 +6988,9 @@ router.get("/approvals/:id", async (request: Request, response: Response) => {
   if (!approval) {
     throw new ApiError(404, "APPROVAL_REQUEST_NOT_FOUND", "The approval request does not exist");
   }
+  if (approvalSubjectRequiresConfidentialAmlAccess(approval.subjectType)) {
+    assertConfidential(request);
+  }
   const actor = principalOf(request);
   const [subjectContext, checkBlockedReason] = await Promise.all([
     approvalSubjectContext(approval.subjectType, approval.subjectId),
@@ -7742,6 +7764,117 @@ router.get("/aml/screenings/:id", async (request: Request, response: Response) =
   });
 });
 
+const AML_DISPOSITION_OPEN_CASE_STATUSES = ["OPEN", "IN_REVIEW", "PENDING_CHECKER", "FROZEN", "ESCALATED_STR"] as const;
+
+/**
+ * A reviewer can confirm a provider POTENTIAL_MATCH as a real match. That is a
+ * new compliance decision, not just a label on the screening row: it opens a
+ * confidential AML case, blocks onboarding through the readiness check, and
+ * suspends an active merchant. The operation is idempotent per screening.
+ */
+const applyManualTrueMatch = async (
+  tx: Prisma.TransactionClient,
+  input: {
+    match: {
+      id: string;
+      screeningId: string;
+      listType: string;
+      matchedName: string;
+      score: unknown;
+    };
+    screening: { subjectType: string; subjectId: string };
+    notes: string;
+    actor: { userId: string; role: string | null };
+    now: Date;
+  },
+): Promise<string> => {
+  const existing = await tx.amlCase.findFirst({
+    where: {
+      screeningId: input.match.screeningId,
+      status: { in: [...AML_DISPOSITION_OPEN_CASE_STATUSES] },
+    },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+
+  const listType = input.match.listType as keyof typeof CONFIRMED_MATCH_SEVERITY;
+  const severity = CONFIRMED_MATCH_SEVERITY[listType] ?? "HIGH";
+  const amlCase = await tx.amlCase.create({
+    data: {
+      subjectType: input.screening.subjectType as never,
+      subjectId: input.screening.subjectId,
+      triggerReason: `MANUAL_TRUE_MATCH:${input.match.listType}`,
+      severity,
+      severityInputsJson: {
+        matchId: input.match.id,
+        listType: input.match.listType,
+        matchedName: input.match.matchedName,
+        score: String(input.match.score),
+        dispositionNotes: input.notes,
+      },
+      screeningId: input.match.screeningId,
+      status: "OPEN",
+      slaDueAt: new Date(input.now.getTime() + severitySlaHours(severity) * 60 * 60 * 1000),
+      confidential: true,
+      reviewerNotes: input.notes,
+    },
+  });
+
+  if (input.screening.subjectType === "MERCHANT") {
+    const merchant = await tx.merchant.findUnique({
+      where: { id: input.screening.subjectId },
+      select: { id: true, status: true },
+    });
+    if (merchant?.status === "ACTIVE") {
+      await tx.merchant.update({
+        where: { id: merchant.id },
+        data: {
+          status: "SUSPENDED",
+          suspendedAt: input.now,
+          suspensionReasonCode: "AML",
+          suspensionNotes: "A manually confirmed watch-list match was recorded.",
+        },
+      });
+      await writeAudit(tx, {
+        data: {
+          actorId: input.actor.userId,
+          role: input.actor.role ?? "COMPLIANCE",
+          action: "MERCHANT_SUSPENDED",
+          entityType: "MERCHANT",
+          entityId: merchant.id,
+          beforeJson: { status: merchant.status },
+          afterJson: { status: "SUSPENDED", reasonCode: "AML", amlCaseId: amlCase.id },
+        },
+      });
+    }
+  } else if (input.screening.subjectType === "BENEFICIAL_OWNER") {
+    await tx.beneficialOwner.updateMany({
+      where: { id: input.screening.subjectId },
+      data: { screeningStatus: "CONFIRMED_MATCH" },
+    });
+  }
+
+  await writeAudit(tx, {
+    data: {
+      actorId: input.actor.userId,
+      role: input.actor.role ?? "COMPLIANCE",
+      action: "AML_TRUE_MATCH_CASE_OPENED",
+      entityType: "AML_CASE",
+      entityId: amlCase.id,
+      beforeJson: {},
+      afterJson: {
+        screeningId: input.match.screeningId,
+        matchId: input.match.id,
+        subjectType: input.screening.subjectType,
+        subjectId: input.screening.subjectId,
+        listType: input.match.listType,
+        severity,
+      },
+    },
+  });
+  return amlCase.id;
+};
+
 router.post("/aml/matches/:id/disposition", async (request: Request, response: Response) => {
   assertAmlWrite(request);
   const { id } = parseOrThrow(idSchema, request.params);
@@ -7762,22 +7895,58 @@ router.post("/aml/matches/:id/disposition", async (request: Request, response: R
       .strict(),
     request.body,
   );
+  const notes = body.notes?.trim() ?? "";
+  if (notes.length < 3) {
+    throw new ApiError(400, "AML_DISPOSITION_REASON_REQUIRED", "A written rationale is required for every disposition");
+  }
+  if (body.suppressFuture && body.disposition !== "FALSE_POSITIVE") {
+    throw new ApiError(400, "AML_SUPPRESSION_NOT_ALLOWED", "Only a false positive can be suppressed");
+  }
+  if (body.suppressFuture && !body.suppressUntil) {
+    throw new ApiError(400, "AML_SUPPRESSION_EXPIRY_REQUIRED", "A suppression must have an expiry date");
+  }
+  if (body.suppressUntil && new Date(`${body.suppressUntil}T23:59:59.999Z`).getTime() <= Date.now()) {
+    throw new ApiError(400, "AML_SUPPRESSION_EXPIRY_INVALID", "The suppression expiry must be in the future");
+  }
+
   const actor = actorFromRequest(request);
-  const match = await client.amlScreeningMatch.findUnique({ where: { id } });
-  if (!match) {
+  const match = await client.amlScreeningMatch.findUnique({
+    where: { id },
+    include: { screening: true },
+  });
+  if (!match || !match.screening) {
     throw new ApiError(404, "SCREENING_MATCH_NOT_FOUND", "The screening match does not exist");
   }
+  const now = new Date();
   const updated = await client.$transaction(async (tx) => {
     const row = await tx.amlScreeningMatch.update({
       where: { id },
       data: {
         disposition: body.disposition,
         dispositionById: actor.userId,
-        dispositionNotes: body.notes,
+        dispositionNotes: notes,
         suppressFuture: body.suppressFuture,
         suppressUntil: body.suppressUntil ? new Date(body.suppressUntil) : null,
       },
     });
+    const amlCaseId = body.disposition === "TRUE_MATCH"
+      ? await applyManualTrueMatch(tx, {
+          match: {
+            id: match.id,
+            screeningId: match.screeningId,
+            listType: match.listType,
+            matchedName: match.matchedName,
+            score: match.score,
+          },
+          screening: {
+            subjectType: match.screening.subjectType,
+            subjectId: match.screening.subjectId,
+          },
+          notes,
+          actor,
+          now,
+        })
+      : null;
     await writeAudit(tx, {
       data: {
         actorId: actor.userId,
@@ -7786,12 +7955,23 @@ router.post("/aml/matches/:id/disposition", async (request: Request, response: R
         entityType: "AML_SCREENING_MATCH",
         entityId: id,
         beforeJson: { disposition: match.disposition },
-        afterJson: { disposition: row.disposition, notes: body.notes ?? null, suppressFuture: body.suppressFuture, checklist: body.checklist ?? [] },
+        afterJson: {
+          disposition: row.disposition,
+          notes,
+          suppressFuture: body.suppressFuture,
+          suppressUntil: body.suppressUntil ?? null,
+          checklist: body.checklist ?? [],
+          amlCaseId,
+        },
       },
     });
-    return row;
+    return { row, amlCaseId };
   });
-  response.json({ id: updated.id, disposition: updated.disposition });
+  response.json({
+    id: updated.row.id,
+    disposition: updated.row.disposition,
+    amlCaseId: updated.amlCaseId,
+  });
 });
 
 const AML_OPEN_STATUSES = ["OPEN", "IN_REVIEW", "PENDING_CHECKER"] as const;

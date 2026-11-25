@@ -8,6 +8,7 @@ import {
   approvalExpiresInHours,
   approvalIsExpired,
   approvalListRow,
+  approvalSubjectRequiresConfidentialAmlAccess,
   approvalSubjectTypeVariants,
   normalizeApprovalSubjectType,
 } from "../lib/approvalQueue";
@@ -30,6 +31,13 @@ describe("approval queue helpers", () => {
     const all = Object.values(APPROVAL_DOMAIN_SUBJECT_TYPES).flat();
     expect(new Set(all).size).toBe(all.length);
     expect(APPROVAL_PENDING_STATES).toEqual(["DRAFT", "PENDING_REVIEW"]);
+  });
+
+  test("marks only AML case approvals as requiring the confidential AML gate", () => {
+    expect(approvalSubjectRequiresConfidentialAmlAccess("AML_CASE")).toBe(true);
+    expect(approvalSubjectRequiresConfidentialAmlAccess("AmlCase")).toBe(true);
+    expect(approvalSubjectRequiresConfidentialAmlAccess("MERCHANT")).toBe(false);
+    expect(approvalSubjectRequiresConfidentialAmlAccess(null)).toBe(false);
   });
 
   test("derives a readable change kind from JSON patches and payloads", () => {

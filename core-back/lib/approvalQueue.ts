@@ -61,6 +61,11 @@ export const approvalDomain = (subjectType: string | null | undefined): string =
   return "OTHER";
 };
 
+/** The approval detail route must not expose AML case metadata without the AML gate. */
+export const approvalSubjectRequiresConfidentialAmlAccess = (
+  subjectType: string | null | undefined,
+): boolean => normalizeApprovalSubjectType(subjectType) === "AML_CASE";
+
 export const approvalChangeKind = (approval: { subjectType: string; payloadDiffJson: unknown }): string => {
   const payload = approval.payloadDiffJson;
   if (Array.isArray(payload)) return "FIELD_EDIT";

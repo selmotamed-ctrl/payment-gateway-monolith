@@ -337,6 +337,7 @@ export class PeriodicScreeningWorker extends BaseWorker {
         amlCase.triggerReason.startsWith("SCREENING_CONFIRMED_MATCH"),
     );
 
+    let raisedTrigger = "SCREENING_CONFIRMED_MATCH";
     if (!alreadyRaised) {
       const service = new MerchantScreeningService({
         repositories: this.repositories,
@@ -348,6 +349,7 @@ export class PeriodicScreeningWorker extends BaseWorker {
         triggerReasonPrefix: "SCREENING_CONFIRMED_MATCH",
       });
       if (amlCase) {
+        raisedTrigger = amlCase.triggerReason;
         await this.repositories.governance.writeAuditLog(tx, {
           actorId: null,
           role: "SYSTEM",
@@ -368,7 +370,9 @@ export class PeriodicScreeningWorker extends BaseWorker {
       await this.repositories.merchants.updateMerchant(tx, merchant.id, {
         status: "SUSPENDED",
         suspendedAt: now,
-        suspensionReasonCode: "AML_CONFIRMED_MATCH",
+        // `AML` is the closed, merchant-visible reason code. The detailed
+        // trigger stays in the AML case and the audit row.
+        suspensionReasonCode: "AML",
       });
       await this.repositories.governance.writeAuditLog(tx, {
         actorId: null,
@@ -377,7 +381,8 @@ export class PeriodicScreeningWorker extends BaseWorker {
         entityType: "MERCHANT",
         entityId: merchant.id,
         afterJson: {
-          reason_code: "AML_CONFIRMED_MATCH",
+          reason_code: "AML",
+          trigger_reason: raisedTrigger,
           source: "PERIODIC_SCREENING",
           owners: owners.map((owner) => owner.id),
         },

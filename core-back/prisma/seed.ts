@@ -193,7 +193,7 @@ const adminUsers = [
   {
     email: "security-admin@payment-gateway.internal",
     role: "SECURITY_ADMIN",
-    authorities: ["security:read", "security:write", "credential:write", "system:storage:read", "system:storage:admin", "system:storage:legal-hold", "report_engine:run"],
+    authorities: ["security:read", "security:write", "credential:write", "system:storage:read", "system:storage:admin", "system:storage:legal-hold", "approval:read", "approval:check", "approval:write", "report_engine:run"],
     isMaker: true,
     isChecker: true,
   },

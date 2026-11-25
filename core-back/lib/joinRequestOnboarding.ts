@@ -292,12 +292,17 @@ export const computeJoinRequestReadiness = async (
   );
   const screeningResult = joinRequest.screening?.result ? String(joinRequest.screening.result) : null;
   const pendingMatches = joinRequest.screening?.matches.filter((match) => match.disposition === "UNREVIEWED") ?? [];
+  // A reviewer can dispose a potential match as TRUE_MATCH after the provider
+  // returned POTENTIAL_MATCH. That manual decision must keep the request blocked
+  // even though no UNREVIEWED match remains.
+  const trueMatches = joinRequest.screening?.matches.filter((match) => match.disposition === "TRUE_MATCH") ?? [];
   const openAmlCases = joinRequest.screening?.amlCases.filter(
     (amlCase) => !["RELEASED", "REJECTED_VOID"].includes(String(amlCase.status)),
   ) ?? [];
   const screeningBlocked = !screeningResult
     || screeningResult === "ERROR"
     || screeningResult === "CONFIRMED_MATCH"
+    || trueMatches.length > 0
     || (screeningResult === "POTENTIAL_MATCH" && pendingMatches.length > 0)
     || openAmlCases.length > 0
     || !ownersScreened;

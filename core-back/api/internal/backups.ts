@@ -432,6 +432,17 @@ export const executeBackupPolicyApproval = async (input: {
 }): Promise<BackupPolicyApprovalExecution> => {
   const { actor } = input;
   assertCheckerAuthority(actor);
+  // The governance dispatcher normally enforces the subject's domain checker
+  // role; BACKUP_POLICY is special-cased in the approval route, so enforce it
+  // here as well.
+  const checkerRole = String(actor.role ?? "").toUpperCase();
+  if (!["SECURITY_ADMIN", "FINANCE"].includes(checkerRole)) {
+    throw new ApiError(
+      403,
+      "BACKUP_POLICY_CHECKER_ROLE_REQUIRED",
+      "A backup policy must be checked by a Security Admin or Finance user",
+    );
+  }
   const approval = await client.approvalRequest.findUnique({ where: { id: input.approvalId } });
   if (!approval || normalizeApprovalSubjectType(approval.subjectType) !== "BACKUP_POLICY") {
     throw new ApiError(404, "APPROVAL_NOT_FOUND", "The backup policy approval does not exist");

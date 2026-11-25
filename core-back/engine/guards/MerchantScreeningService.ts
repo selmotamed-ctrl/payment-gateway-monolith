@@ -337,7 +337,9 @@ export class MerchantScreeningService {
     await this.repositories.onboarding.updateJoinRequest(tx, input.joinRequestId, {
       status: "REJECTED",
       decision: "REJECTED",
-      decisionReasonCode: "AML_CONFIRMED_MATCH",
+      // Never expose the screening outcome to the applicant (tipping-off).
+      // The internal reason is kept in the AML case and audit trail.
+      decisionReasonCode: "POLICY",
       decisionNotes: "The onboarding screening produced a confirmed watch list match.",
       screeningId,
     });

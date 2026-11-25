@@ -1126,6 +1126,15 @@ const MERCHANT_JOIN_REQUEST_SELECT = {
   },
 } as const;
 
+/**
+ * Screening-related reason codes are staff-only. Existing rows may still carry
+ * the old `AML_CONFIRMED_MATCH`/`SCREENING_CONCERN` values, so the public view
+ * maps all of them to the neutral `POLICY` code at read time.
+ */
+const SCREENING_DECISION_CODE = /(AML|SCREEN|SANCTION|WATCH|PEP|ADVERSE|MATCH)/i;
+const merchantVisibleDecisionReasonCode = (code: string | null): string | null =>
+  code && SCREENING_DECISION_CODE.test(code) ? "POLICY" : code;
+
 router.get("/onboarding/join-request", async (request: Request, response: Response) => {
   assertMerchantAuthority(principalOf(request), ["onboarding:write", "merchant:read", "merchant:write"]);
   const merchantId = merchantIdOf(request);
@@ -1134,7 +1143,11 @@ router.get("/onboarding/join-request", async (request: Request, response: Respon
     orderBy: { createdAt: "desc" },
     select: MERCHANT_JOIN_REQUEST_SELECT,
   });
-  response.json({ joinRequest });
+  response.json({
+    joinRequest: joinRequest
+      ? { ...joinRequest, decisionReasonCode: merchantVisibleDecisionReasonCode(joinRequest.decisionReasonCode) }
+      : null,
+  });
 });
 
 router.put("/onboarding/join-request", async (request: Request, response: Response) => {

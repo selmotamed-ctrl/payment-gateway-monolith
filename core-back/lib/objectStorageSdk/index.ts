@@ -273,6 +273,9 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
    * Pure-SQL bind(): runs INSIDE caller's prisma.$transaction(async (tx) => ...)
    */
   async function bindInTx(tx: DbTxClient, input: BindLockInput): Promise<void> {
+    // Serialize with the GC claim. Without this row lock, a lock could be
+    // inserted after the GC re-check and before the blob is moved to trash.
+    await tx.$queryRaw`SELECT "id" FROM "storage_objects" WHERE "id" = ${input.objectId}::uuid FOR UPDATE`
     const obj = await tx.storageObject.findUnique({ where: { id: input.objectId } })
     if (!obj) {
       throw new ObjectStorageError('STORAGE_OBJECT_NOT_FOUND', `StorageObject ${input.objectId} not found`, 404)
@@ -630,14 +633,28 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
     },
 
     async placeLegalHold(params: { objectId: string; adminId: string; reason: string }) {
-      const updated = await prisma.storageObject.update({
-        where: { id: params.objectId },
-        data: {
-          legalHold: true,
-          legalHoldReason: params.reason,
-          legalHoldByAdminId: params.adminId,
-          legalHoldPlacedAt: new Date(),
-        },
+      const updated = await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "storage_objects" WHERE "id" = ${params.objectId}::uuid FOR UPDATE`
+        const current = await tx.storageObject.findUnique({ where: { id: params.objectId } })
+        if (!current) {
+          throw new ObjectStorageError('STORAGE_OBJECT_NOT_FOUND', `Object ${params.objectId} not found`, 404)
+        }
+        if (current.gcClaimToken) {
+          throw new ObjectStorageError(
+            'STORAGE_OBJECT_GC_IN_PROGRESS',
+            `Object ${params.objectId} is being collected; place the hold before the next GC pass`,
+            409
+          )
+        }
+        return tx.storageObject.update({
+          where: { id: params.objectId },
+          data: {
+            legalHold: true,
+            legalHoldReason: params.reason,
+            legalHoldByAdminId: params.adminId,
+            legalHoldPlacedAt: new Date(),
+          },
+        })
       })
       await writeAccessLog({
         objectId: params.objectId,
@@ -818,18 +835,38 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
       for (const obj of candidates) {
         if (obj.locks.length > 0) continue
         const claim = randomUUID()
-        // Claim before any filesystem/network I/O. The trigger refuses this
-        // update if a lock, legal hold or retention won the race.
-        const claimed = await prisma.storageObject.updateMany({
-          where: {
-            id: obj.id,
-            status: obj.status,
-            gcClaimToken: null,
-            legalHold: false,
-          },
-          data: { gcClaimToken: claim, gcClaimedAt: now },
-        }).catch(() => ({ count: 0 }))
-        if (claimed.count !== 1) continue
+        // Re-read under a row lock. A lock or legal hold can be inserted after
+        // the candidate query; this is the last point where the race can be
+        // closed before the blob leaves the vault.
+        const claimed = await prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT "id" FROM "storage_objects" WHERE "id" = ${obj.id}::uuid FOR UPDATE`
+          const current = await tx.storageObject.findUnique({
+            where: { id: obj.id },
+            include: { locks: { where: { releasedAt: null } } },
+          })
+          if (!current || current.legalHold || current.gcClaimToken || current.locks.length > 0) return false
+          if (current.retainUntil && current.retainUntil.getTime() > now.getTime()) return false
+          const stagingExpired = current.stagingExpiresAt ? current.stagingExpiresAt.getTime() <= now.getTime() : false
+          const activeEligible =
+            current.status === 'ACTIVE'
+            && Boolean(current.gcEligibleAt)
+            && current.gcEligibleAt!.getTime() <= now.getTime()
+          const stagingEligible =
+            (current.status === 'STAGING' || current.status === 'QUARANTINE_PENDING_AV' || current.status === 'QUARANTINE_REJECTED')
+            && stagingExpired
+          if (!activeEligible && !stagingEligible) return false
+          const updated = await tx.storageObject.updateMany({
+            where: {
+              id: current.id,
+              status: current.status,
+              gcClaimToken: null,
+              legalHold: false,
+            },
+            data: { gcClaimToken: claim, gcClaimedAt: now },
+          })
+          return updated.count === 1
+        }).catch(() => false)
+        if (!claimed) continue
         try {
           await blobStore.moveToTrash(obj.bucket, obj.storageKey, now.toISOString().slice(0, 10))
           const purged = await prisma.storageObject.updateMany({
