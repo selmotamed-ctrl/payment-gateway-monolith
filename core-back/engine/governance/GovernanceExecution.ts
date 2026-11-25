@@ -2565,6 +2565,36 @@ const claimRefundAdjustment = async (
       return { kind: "in_flight" as const, result: refundInFlightResult(current) };
     }
     const merchantId = await resolveAdjustmentMerchantId(tx, adjustment);
+    const targetAccount = await modelOf(tx, "glAccount").findUnique({
+      where: { id: String(adjustment.targetGlAccountId) },
+      select: { accountType: true },
+    });
+    if (targetAccount?.accountType === "MERCHANT_WALLET") {
+      const commission = adjustment.reverseCommission === true
+        ? Decimal.min(toDecimal(lockedAttempt.platformCommissionAmount), amount)
+        : new Decimal(0);
+      const merchantAmount = amount.minus(commission);
+      const ceiling = await resolveNegativeBalanceCeiling(tx, merchantId);
+      const balance = await resolveMerchantWalletBalance(
+        tx,
+        merchantId,
+        String(lockedAttempt.currency),
+      );
+      const projected = balance.minus(merchantAmount);
+      if (projected.lt(ceiling.negated())) {
+        throw new ApiError(
+          409,
+          "REFUND_NEGATIVE_BALANCE_CEILING_EXCEEDED",
+          "The refund would take the merchant wallet below its negative-balance ceiling",
+          {
+            adjustmentId: String(adjustment.id),
+            balance: balance.toFixed(4),
+            ceiling: ceiling.toFixed(4),
+            projected: projected.toFixed(4),
+          },
+        );
+      }
+    }
     return { kind: "claimed" as const, adjustment, sourceAttempt: lockedAttempt, amount, merchantId };
   });
 };
@@ -3307,6 +3337,24 @@ export async function executeCashout(
   const merchant = await modelOf(tx, "merchant").findUnique({ where: { id: String(cashout.merchantId) } });
   if (!merchant || String(merchant.status) !== "ACTIVE") {
     throw new ApiError(409, "MERCHANT_NOT_ACTIVE", "Cash-outs can only be paid to an active merchant");
+  }
+  // An unresolved AML case is a payout stop: the merchant must not move money
+  // out while compliance is still reviewing the relationship.
+  const openAmlCase = await modelOf(tx, "amlCase").findFirst({
+    where: {
+      subjectType: "MERCHANT",
+      subjectId: String(cashout.merchantId),
+      status: { in: ["OPEN", "IN_REVIEW", "PENDING_CHECKER", "FROZEN", "ESCALATED_STR"] },
+    },
+    select: { id: true },
+  });
+  if (openAmlCase) {
+    throw new ApiError(
+      409,
+      "CASHOUT_AML_HOLD",
+      "Cash-outs are blocked while an AML case is open",
+      { cashoutId: String(cashout.id), amlCaseId: openAmlCase.id },
+    );
   }
 
   // Atomic conditional transition (UPDATE ... WHERE id = ? AND state IN (...)): two concurrent
