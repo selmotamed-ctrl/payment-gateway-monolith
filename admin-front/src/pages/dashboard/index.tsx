@@ -357,6 +357,14 @@ const DashboardPage = dc(() => {
                 badgeTone: (data?.unknownBacklog ?? 0) > 0 ? "warning" : "success",
                 subLabel: buildUnknownBacklogSubLabel(formatDuration(data?.unknownOldestAgeSeconds ?? 0), t),
             },
+            {
+                key: "webhook-lag",
+                label: t("Webhook Inbox Lag"),
+                value: formatDuration(data?.webhookInboxLagSeconds ?? 0),
+                badge: (data?.webhookInboxLagSeconds ?? 0) < 30 ? t("Healthy") : t("Watch"),
+                badgeTone: (data?.webhookInboxLagSeconds ?? 0) < 30 ? "success" : "warning",
+                subLabel: t("Target: under 30 seconds"),
+            },
         ];
     });
 

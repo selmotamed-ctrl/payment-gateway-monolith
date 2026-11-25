@@ -1,8 +1,8 @@
 import { dc } from "kt-dc";
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { VAlert, VAutocomplete, VBtn, VProgressCircular, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -408,6 +408,21 @@ const AdjustmentsPage = dc(() => {
         form.value.targetGlAccountId = "";
         void loadGlAccounts(form.value.merchantId);
     };
+
+    const route = useRoute();
+    onMounted(() => {
+        // The Transaction drawer opens this page with the payment already
+        // selected. Prefill the create form instead of opening an empty page.
+        const attemptId = typeof route.query.attemptId === "string" ? route.query.attemptId.trim() : "";
+        const merchantId = typeof route.query.merchantId === "string" ? route.query.merchantId.trim() : "";
+        if (!attemptId && !merchantId) return;
+        openCreate();
+        if (merchantId) {
+            form.value.merchantId = merchantId;
+            void loadGlAccounts(merchantId);
+        }
+        if (attemptId) form.value.sourceAttemptId = attemptId;
+    });
 
     const proposalChecklistComplete = computed(() => !showChecklists || ADJUSTMENT_CHECKS.every((check) => proposalChecklist.value[check.key] === true));
     const proposeSafeguard = useSafeguard("sg-propose-adjustment");

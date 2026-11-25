@@ -102,12 +102,16 @@ const buildJournalEntrySummary = async () => {
       since24h,
     ) as Promise<Array<{ currency: string; total: string }>>,
     client.$queryRawUnsafe(
-      `SELECT COUNT(*)::int AS count FROM (
-         SELECT entry_id FROM journal_lines
+      `SELECT COUNT(*)::int AS count
+       FROM journal_entries je
+       LEFT JOIN (
+         SELECT entry_id, SUM(CASE WHEN direction = 'DEBIT' THEN amount ELSE -amount END) AS diff
+         FROM journal_lines
          WHERE created_at >= $1
          GROUP BY entry_id
-         HAVING SUM(CASE WHEN direction = 'DEBIT' THEN amount ELSE -amount END) <> 0
-       ) unbalanced`,
+       ) l ON l.entry_id = je.id
+       WHERE je.created_at >= $1
+         AND (l.entry_id IS NULL OR l.diff <> 0)`,
       sinceWindow,
     ) as Promise<Array<{ count: number }>>,
   ]);

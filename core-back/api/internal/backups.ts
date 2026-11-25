@@ -62,7 +62,8 @@ const defaultPolicy: BackupPolicy = {
   drillCron: "0 4 * * 0",
   fullRetentionDays: 56,
   walRetentionDays: 14,
-  alertLagSeconds: 60,
+  // Keep the core fallback aligned with the daemon/config default (300 s).
+  alertLagSeconds: 300,
 };
 
 const emptyWal = {
