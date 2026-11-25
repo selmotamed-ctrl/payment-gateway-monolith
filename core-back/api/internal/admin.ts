@@ -8236,6 +8236,18 @@ router.get("/aml/cases/:id", async (request: Request, response: Response) => {
     },
   });
   if (!entry) throw new ApiError(404, "AML_CASE_NOT_FOUND", "The AML case does not exist");
+  const viewer = actorFromRequest(request);
+  await writeAudit(client, {
+    data: {
+      actorId: viewer.userId,
+      role: viewer.role ?? "UNKNOWN",
+      action: "AML_CASE_VIEWED",
+      entityType: "AML_CASE",
+      entityId: entry.id,
+      beforeJson: {},
+      afterJson: { status: entry.status, severity: entry.severity },
+    },
+  });
   const maps = await amlCaseSubjectMaps([{ subjectType: entry.subjectType, subjectId: entry.subjectId }]);
   const approval = await client.approvalRequest.findFirst({
     where: { subjectType: { in: approvalSubjectTypeVariants("AML_CASE") as never }, subjectId: entry.id },
@@ -15617,8 +15629,10 @@ const collectGoLiveEvidence = async (versionId: string): Promise<GoLiveEvidenceR
       mustInquire: channel.mustInquire,
     })) as ChannelVerificationEvidence[],
     rollbackVersionId: version.rollbackVersionId,
+    // A null maxAmount means "unlimited" and is a valid previewed limit. Only
+    // the minimum is required; the old check forced every route to have a cap.
     routeLimitsPreviewed:
-      routes.length > 0 && routes.every((route) => route.minAmount !== null && route.maxAmount !== null),
+      routes.length > 0 && routes.every((route) => route.minAmount !== null),
     commissionProfilePreviewed:
       railCodes.length > 0 && railCodes.every((code) => commissionProfiles.some((profile) => profile.railCode === code)),
     statementParserPreviewed: sources.some((source) => {

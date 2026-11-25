@@ -57,6 +57,7 @@ import {
   requireMerchantPrincipal,
   requireMerchantScope,
 } from "../middleware/authDoubleCheck";
+import { actorFromRequest } from "../middleware/makerCheckerGuard";
 import { publishRealtimePos, subscribeRealtimeAttempt, subscribeRealtimePos } from "../../lib/realtimeBus";
 import { writeAudit } from "../../lib/audit/writeAudit";
 import { getObjectStorageSdk } from "../../lib/objectStorageSdk/runtime";
@@ -1534,6 +1535,51 @@ router.delete("/onboarding/beneficial-owners/:id", async (request: Request, resp
   }
   await client.beneficialOwner.update({ where: { id }, data: { active: false } });
   response.json({ id, active: false });
+});
+
+router.post("/onboarding/join-request/withdraw", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["onboarding:write"]);
+  const merchantId = merchantIdOf(request);
+  const body = parseOrThrow(
+    z.object({ reason: z.string().trim().min(3).max(500).optional() }).strict(),
+    request.body ?? {},
+  );
+  const joinRequest = await client.joinRequest.findFirst({
+    where: { merchantId },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!joinRequest) {
+    throw new ApiError(404, "JOIN_REQUEST_NOT_FOUND", "No join request exists for this merchant");
+  }
+  if (["APPROVED", "REJECTED", "WITHDRAWN", "EXPIRED"].includes(joinRequest.status)) {
+    throw new ApiError(409, "JOIN_REQUEST_NOT_WITHDRAWABLE", "The join request is no longer open");
+  }
+  const actor = actorFromRequest(request);
+  await client.$transaction(async (tx) => {
+    if (joinRequest.approvalRequestId) {
+      await tx.approvalRequest.updateMany({
+        where: { id: joinRequest.approvalRequestId, state: { in: ["PENDING_REVIEW", "DRAFT"] } },
+        data: { state: "REJECTED", rejectionReason: "WITHDRAWN_BY_MERCHANT" },
+      });
+    }
+    await tx.joinRequest.update({
+      where: { id: joinRequest.id },
+      data: { status: "DRAFT", approvalRequestId: null },
+    });
+    await writeAudit(tx, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "MERCHANT",
+        action: "JOIN_REQUEST_WITHDRAWN_BY_MERCHANT",
+        entityType: "JOIN_REQUEST",
+        entityId: joinRequest.id,
+        beforeJson: { status: joinRequest.status },
+        afterJson: { status: "DRAFT", reason: body.reason ?? null },
+        merchantId,
+      },
+    });
+  });
+  response.json({ id: joinRequest.id, status: "DRAFT" });
 });
 
 router.post("/onboarding/submit", async (request: Request, response: Response) => {

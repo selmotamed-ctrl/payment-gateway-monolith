@@ -96,6 +96,12 @@ const submitSchema = z
   })
   .strict();
 
+const withdrawSchema = z
+  .object({
+    reason: z.string().trim().min(3).max(500).optional(),
+  })
+  .strict();
+
 router.get(
   "/join-request",
   coreForward({
@@ -162,6 +168,16 @@ router.delete(
     path: (context) =>
       `/internal/merchant/onboarding/beneficial-owners/${encodeURIComponent(context.params.id ?? "")}`,
     paramsSchema: beneficialOwnerParamsSchema,
+  }),
+);
+
+router.post(
+  "/join-request/withdraw",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/merchant/onboarding/join-request/withdraw",
+    schema: withdrawSchema,
+    coreSchema: withdrawSchema,
   }),
 );
 
