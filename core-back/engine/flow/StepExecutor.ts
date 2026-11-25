@@ -150,6 +150,8 @@ export interface FlowStep {
 }
 
 export interface StepExecutionContext {
+  /** The flow phase being executed; `VERIFY` is read-only. */
+  phase?: string;
   gatewayMeta?: Record<string, unknown>;
   routeMeta?: Record<string, unknown>;
   credentials?: Record<string, unknown>;
@@ -450,6 +452,15 @@ export class StepExecutor {
   async execute(step: FlowStep, context: StepExecutionContext = {}): Promise<StepExecutionResult> {
     const started = Date.now();
     try {
+      // Inquiry runs the VERIFY flow. A money-moving step there could charge
+      // the payer from a read-only status check, so refuse it at runtime even
+      // when a stored (pre-validator) flow contains one.
+      if (context.phase === "VERIFY" && step.side_effect === "MOVES_MONEY") {
+        throw executorError(
+          "VERIFY_MONEY_STEP_FORBIDDEN",
+          `Step '${step.id}' moves money inside the read-only VERIFY flow`,
+        );
+      }
       switch (step.type) {
         case "HTTP":
           return await this.executeHttp(step, context, started);

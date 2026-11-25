@@ -617,7 +617,7 @@ const merchantAttemptListSelect = {
   surchargeAmount: true,
   totalChargedAmount: true,
   settledAmount: true,
-  gatewayFeeAmount: true,
+  // Gateway cost is platform-confidential. Merchants see gross, commission and net only.
   platformCommissionAmount: true,
   netMerchantAmount: true,
   feeBearer: true,
@@ -1171,6 +1171,32 @@ router.put("/onboarding/join-request", async (request: Request, response: Respon
       .strict(),
     request.body,
   );
+  const [merchant, existing] = await Promise.all([
+    client.merchant.findUnique({ where: { id: merchantId }, select: { status: true } }),
+    client.joinRequest.findFirst({
+      where: { merchantId, status: { in: ["DRAFT", "SUBMITTED", "IN_REVIEW", "INFO_REQUESTED", "PENDING_CHECKER"] } },
+      orderBy: { createdAt: "desc" },
+    }),
+  ]);
+  if (!merchant) throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  // Legal name, registration and tax fields are sensitive. After activation
+  // they are changed through the admin maker-checker flow, not by the merchant
+  // writing them directly and resetting its own review state.
+  if (merchant.status !== "PENDING" && merchant.status !== "REJECTED") {
+    throw new ApiError(
+      409,
+      "MERCHANT_PROFILE_REQUIRES_APPROVAL",
+      "Legal, registration and tax fields of an active merchant must be changed through an approved profile update",
+    );
+  }
+  if (existing && existing.status !== "DRAFT") {
+    throw new ApiError(
+      409,
+      "JOIN_REQUEST_UNDER_REVIEW",
+      "The join request is under review; withdraw it before editing the profile",
+      { joinRequestId: existing.id, status: existing.status },
+    );
+  }
   await client.merchant.update({
     where: { id: merchantId },
     data: {
@@ -1184,16 +1210,6 @@ router.put("/onboarding/join-request", async (request: Request, response: Respon
       contactEmail: body.email,
     },
   });
-  const existing = await client.joinRequest.findFirst({
-    where: { merchantId, status: { in: ["DRAFT", "SUBMITTED", "IN_REVIEW", "INFO_REQUESTED", "PENDING_CHECKER"] } },
-    orderBy: { createdAt: "desc" },
-  });
-  if (existing) {
-    await client.joinRequest.update({
-      where: { id: existing.id },
-      data: { status: "DRAFT" },
-    });
-  }
   response.json({ updated: true, merchantId });
 });
 
@@ -1792,10 +1808,17 @@ router.post("/applications", async (request: Request, response: Response) => {
       .strict(),
     request.body,
   );
-  const wallet = await client.wallet.findFirst({ where: { id: body.assignedWalletId, merchantId } });
+  const [wallet, merchant] = await Promise.all([
+    client.wallet.findFirst({ where: { id: body.assignedWalletId, merchantId } }),
+    client.merchant.findUnique({ where: { id: merchantId }, select: { status: true } }),
+  ]);
   if (!wallet) {
     throw new ApiError(404, "WALLET_NOT_FOUND", "The assigned wallet does not exist");
   }
+  // A Live application created by an already-approved merchant is usable
+  // immediately. It used to be created PENDING and no route could activate it,
+  // so every new Live application was dead until a manual database edit.
+  const status = getExecutionPlane() === "SANDBOX" || merchant?.status === "ACTIVE" ? "ACTIVE" : "PENDING";
   const application = await client.application.create({
     data: {
       merchantId,
@@ -1805,7 +1828,7 @@ router.post("/applications", async (request: Request, response: Response) => {
       assignedWalletId: wallet.id,
       railWhitelist: jsonOptional(body.railWhitelist),
       redirectDomainAllowlist: jsonOptional(body.redirectDomainAllowlist),
-      status: getExecutionPlane() === "SANDBOX" ? "ACTIVE" : "PENDING",
+      status,
     },
   });
   response.status(201).json({ id: application.id, name: application.name, status: application.status });
@@ -1977,10 +2000,16 @@ const createLink = async (
   if (!application) {
     throw new ApiError(409, "APPLICATION_REQUIRED", "A merchant application is required before creating links");
   }
-  const wallet = body.walletId
-    ? await client.wallet.findFirst({ where: { id: body.walletId, merchantId } })
-    : await client.wallet.findUnique({ where: { id: application.assignedWalletId } });
-  if (!wallet) {
+  if (body.walletId && body.walletId !== application.assignedWalletId) {
+    throw new ApiError(
+      409,
+      "LINK_WALLET_MUST_MATCH_APPLICATION",
+      "A payment link settles to the wallet assigned to its application",
+      { applicationId: application.id, applicationWalletId: application.assignedWalletId, requestedWalletId: body.walletId },
+    );
+  }
+  const wallet = await client.wallet.findUnique({ where: { id: application.assignedWalletId } });
+  if (!wallet || wallet.merchantId !== merchantId) {
     throw new ApiError(404, "WALLET_NOT_FOUND", "The settlement wallet does not exist");
   }
   if (String(wallet.currency).trim().toUpperCase() !== body.currency.trim().toUpperCase()) {

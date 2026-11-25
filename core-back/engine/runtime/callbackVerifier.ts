@@ -5,7 +5,13 @@ import type {
   CallbackVerifier,
 } from "../flow/DynamicRailEngine";
 import type { AdapterEvidence } from "../flow/NativeAdapterRegistry";
-import { CryptoEngine, type HashOutputEncoding, type KeyEncoding } from "../crypto/CryptoEngine";
+import {
+  canonicalize,
+  CryptoEngine,
+  type CanonicalizationMode,
+  type HashOutputEncoding,
+  type KeyEncoding,
+} from "../crypto/CryptoEngine";
 import { Vault } from "../crypto/Vault";
 import { ApiError } from "../../lib/error";
 
@@ -262,7 +268,7 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
 
     try {
       if (algorithm === "RSA_SHA256") {
-        const canonical = this.canonicalString(canonicalization, payload, rawBody, timestamp);
+        const canonical = this.canonicalString(canonicalization, payload, rawBody, timestamp, profile);
         return this.crypto.rsaSha256Verify(
           secret.value,
           canonical,
@@ -270,7 +276,7 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
           outputEncoding === "BASE64" ? "BASE64" : "HEX_LOWER",
         );
       }
-      const canonical = this.canonicalString(canonicalization, payload, rawBody, timestamp);
+      const canonical = this.canonicalString(canonicalization, payload, rawBody, timestamp, profile);
       const expected = algorithm === "HMAC_SHA512"
         ? this.crypto.hmacSha512(secret.value, canonical, keyEncoding, outputEncoding)
         : this.crypto.hmacSha256(secret.value, canonical, keyEncoding, outputEncoding);
@@ -285,33 +291,23 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
     payload: unknown,
     rawBody: Buffer,
     timestamp: number | null,
+    profile: Record<string, unknown> | null,
   ): string {
     const fields = asRecord(payload);
-    switch (mode) {
-      case "TIMESTAMP_DOT_RAW_BODY":
-        return `${timestamp ?? ""}.${rawBody.toString("utf8")}`;
-      case "SORTED_VALUES_HASH": {
-        const values = Object.values(fields)
-          .filter((value) => typeof value !== "object" || value === null)
-          .map((value) => String(value))
-          .sort();
-        return values.join("");
-      }
-      case "SORTED_KEY_VALUE_AMP": {
-        const pairs = Object.keys(fields)
-          .filter((key) => key !== "hashed" && key !== "hash" && key !== "signature")
-          .sort()
-          .map((key) => `${key}=${String(fields[key])}`);
-        return pairs.join("&");
-      }
-      case "JSON_CANONICAL":
-        return JSON.stringify(fields, Object.keys(fields).sort());
-      case "TEMPLATE_STRING":
-        return rawBody.toString("utf8");
-      case "RAW_BODY":
-      default:
-        return rawBody.toString("utf8");
-    }
+    const stringList = (value: unknown): string[] | undefined =>
+      Array.isArray(value) ? value.map((entry) => String(entry)) : undefined;
+    // Use the same canonicalizer as the signer. The verifier previously sorted
+    // the values themselves for SORTED_VALUES_HASH and ignored
+    // templateString/template fields/exclusions, so a valid partner signature
+    // could be rejected.
+    return canonicalize(mode as CanonicalizationMode, {
+      fields,
+      rawBody,
+      timestamp: timestamp ?? undefined,
+      templateString: typeof profile?.templateString === "string" ? profile.templateString : undefined,
+      includedFields: stringList(profile?.includedFields),
+      excludedFields: stringList(profile?.excludedFields),
+    });
   }
 
   private async resolveSecrets(

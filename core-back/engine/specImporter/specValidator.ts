@@ -336,6 +336,16 @@ export const validateSpecSemantics = (spec: IntegrationSpec): SpecSemanticResult
         }
       }
 
+      // Inquiry runs the VERIFY flow. It must remain a status check.
+      if (flow.phase === "VERIFY" && step.side_effect === "MOVES_MONEY") {
+        fail(
+          `${path}.side_effect`,
+          "VERIFY_MONEY_STEP_FORBIDDEN",
+          "The VERIFY flow is used by inquiry and must not move money.",
+          "Move the money-moving step to SUBMIT (or CONFIRM) and keep VERIFY read-only.",
+        );
+      }
+
       // Money-moving steps: retry policy and idempotency.
       if (step.side_effect === "MOVES_MONEY") {
         sawMoney = true;

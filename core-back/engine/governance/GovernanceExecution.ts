@@ -716,6 +716,13 @@ export async function activateApprovedJoinRequest(
     });
   }
   await wallets.updateMany({ where: { merchantId }, data: { status: "ACTIVE" } });
+  // Applications created while the merchant was still PENDING become usable
+  // at approval. New Live applications are created ACTIVE by the merchant
+  // route; this covers the onboarding-time drafts.
+  await modelOf(tx, "application").updateMany({
+    where: { merchantId, status: "PENDING" },
+    data: { status: "ACTIVE" },
+  });
 
   await writeAudit(ctx, tx, {
     actorId: input.checkerUserId,
@@ -2185,6 +2192,15 @@ export async function openDisputeWithDraftedAdjustment(
       evidenceDueAt,
     },
   });
+  // A disputed payment must be readable as DISPUTED in the attempt list. The
+  // dispute row alone left the attempt on SUCCEEDED, so operators and the
+  // merchant portal could not see that the money was under challenge.
+  if (["SUCCEEDED", "PARTIALLY_REFUNDED", "REFUNDED"].includes(String(lockedAttempt.status))) {
+    await attempts.update({
+      where: { id: input.attemptId },
+      data: { status: "DISPUTED" },
+    });
+  }
   // The merchant webhook (AUTO-34), in the same transaction as the dispute.
   await enqueueOutboxEvent(tx as never, {
     topic: "dispute.opened",
@@ -2275,22 +2291,57 @@ export async function openDisputeWithDraftedAdjustment(
     if (merchantAmount.lt(0)) {
       throw new ApiError(409, "CHARGEBACK_AMOUNT_INCONSISTENT", "The platform commission exceeds the disputed amount");
     }
-    const journal = buildLedgerTemplate("CHARGEBACK_RESERVE_AND_LOST", {
-      amount: chargebackAmount,
-      commissionAmount: commission,
-      merchantAmount,
-      stage: "RESERVE",
-    });
-    // The reserve belongs to the dispute, the outcome leg belongs to the
-    // adjustment, so the two postings never collide on (refType, refId).
-    journal.refId = String(dispute.id);
-    const posted = await ctx.ledgerPoster.post(
-      journal,
-      await walletLedgerContext(tx, merchantId, undefined, undefined, lockedAttempt.currency),
-      tx as never,
+    // The intake reserve must respect the same negative-balance ceiling as the
+    // outcome leg. Posting it first and checking the ceiling later could take
+    // the wallet below zero without a review.
+    const ceiling = await resolveNegativeBalanceCeiling(tx, merchantId);
+    const balance = await resolveMerchantWalletBalance(
+      tx,
+      merchantId,
+      String(lockedAttempt.currency ?? currency),
     );
-    journalEntryId = posted.entry.id;
-    escrowed = true;
+    const projected = balance.minus(merchantAmount);
+    if (projected.lt(ceiling.negated())) {
+      const operatorCaseId = await openOperatorCase(ctx, tx, {
+        kind: "HELD",
+        priority: "P1",
+        attemptId: input.attemptId,
+        notes: `Dispute ${input.externalDisputeRef} reserve of ${merchantAmount.toFixed(4)} would take the wallet to ${projected.toFixed(4)}, below the ceiling of ${ceiling.toFixed(4)}. The reserve was not posted.`,
+        slaHours: 4,
+      });
+      await writeAudit(ctx, tx, {
+        actorId: input.actorUserId,
+        role: input.actorRole,
+        action: "DISPUTE_RESERVE_HELD_FOR_REVIEW",
+        entityType: "DISPUTE",
+        entityId: String(dispute.id),
+        afterJson: {
+          reason: "NEGATIVE_BALANCE_CEILING_EXCEEDED",
+          balance: balance.toFixed(4),
+          ceiling: ceiling.toFixed(4),
+          projected: projected.toFixed(4),
+          merchantAmount: merchantAmount.toFixed(4),
+          operatorCaseId,
+        },
+      });
+    } else {
+      const journal = buildLedgerTemplate("CHARGEBACK_RESERVE_AND_LOST", {
+        amount: chargebackAmount,
+        commissionAmount: commission,
+        merchantAmount,
+        stage: "RESERVE",
+      });
+      // The reserve belongs to the dispute, the outcome leg belongs to the
+      // adjustment, so the two postings never collide on (refType, refId).
+      journal.refId = String(dispute.id);
+      const posted = await ctx.ledgerPoster.post(
+        journal,
+        await walletLedgerContext(tx, merchantId, undefined, undefined, lockedAttempt.currency),
+        tx as never,
+      );
+      journalEntryId = posted.entry.id;
+      escrowed = true;
+    }
   }
 
   await disputes.update({ where: { id: String(dispute.id) }, data: { adjustmentId: String(adjustment.id) } });
@@ -3008,8 +3059,38 @@ export async function executeAdjustment(
       templateName = "CHARGEBACK_INSUFFICIENT";
     }
   } else if (type === "CORRECTION") {
-    journal = buildLedgerTemplate("FEE_VARIANCE_TRUE_UP", { amount, varianceAmount: amount });
-    templateName = "FEE_VARIANCE_TRUE_UP";
+    if (targetAccount?.accountType === "GATEWAY_FEE_ACCRUAL") {
+      // Legacy fee correction: true up a gateway fee accrual.
+      journal = buildLedgerTemplate("FEE_VARIANCE_TRUE_UP", { amount, varianceAmount: amount });
+      templateName = "FEE_VARIANCE_TRUE_UP";
+    } else if (targetAccount?.accountType === "MERCHANT_WALLET") {
+      // A wallet correction is a deliberate credit from treasury, not a fee
+      // true-up. The UI offers merchant-wallet targets for this action.
+      journal = {
+        refType: "ADJUSTMENT",
+        refId: String(adjustment.id),
+        description: "Correction adjustment",
+        lines: [
+          { direction: "DEBIT", amount, account: { accountType: "TREASURY" } },
+          {
+            direction: "CREDIT",
+            amount,
+            account: {
+              accountType: "MERCHANT_WALLET",
+              accountId: String(adjustment.targetGlAccountId),
+            },
+          },
+        ],
+      };
+      templateName = "CORRECTION";
+    } else {
+      throw new ApiError(
+        409,
+        "CORRECTION_TARGET_UNSUPPORTED",
+        "A correction must target a merchant wallet or the gateway fee accrual",
+        { adjustmentId: String(adjustment.id), targetAccountType: targetAccount?.accountType ?? null },
+      );
+    }
   } else if (type === "MANUAL_DEBIT" || type === "CASHOUT_SUBTRACTION") {
     journal = buildLedgerTemplate("CASHOUT", { amount });
     templateName = "CASHOUT";

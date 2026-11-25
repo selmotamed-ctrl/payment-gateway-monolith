@@ -1511,9 +1511,15 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
   );
 
   const attemptRow = await client.paymentAttempt.findUnique({ where: { id: attempt.id }, select: { status: true } });
-  const clientAction = engineResult.clientAction
+  const engineAction = engineResult.clientAction
     ? toClientActionPayload(engineResult.clientAction)
-    : fallbackAction;
+    : null;
+  // Declarative flows may render only `actionType` (the seeded OTP flow does).
+  // Keep the gateway-specific OTP length, attempt limit, cooldown and expiry
+  // from the fallback; the engine action still wins on a field it supplies.
+  const clientAction = engineAction?.kind === "SHOW_OTP_FORM"
+    ? { ...fallbackAction, ...engineAction }
+    : engineAction ?? fallbackAction;
 
   response.status(201).json({
     attemptId: attempt.id,

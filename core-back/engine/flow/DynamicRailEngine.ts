@@ -883,6 +883,7 @@ export class DynamicRailEngine {
         continue;
       }
       const context: StepExecutionContext = {
+        phase,
         attempt: attempt as unknown as Record<string, unknown>,
         customerFields,
         credentials,

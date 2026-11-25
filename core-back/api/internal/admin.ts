@@ -13206,12 +13206,19 @@ router.post("/gateways/:id/versions", async (request: Request, response: Respons
     orderBy: { versionNumber: "desc" },
   });
   const snapshot = JSON.stringify(body.snapshot);
+  const nextVersion = (latest?.versionNumber ?? 0) + 1;
+  // The content hash is globally unique, so it must bind the gateway and
+  // version identity. Hashing only the caller's snapshot made every new
+  // gateway's default `{version:1}` draft collide.
+  const contentHash = createHash("sha256")
+    .update(JSON.stringify({ gatewayId: id, versionNumber: nextVersion, snapshot: body.snapshot }))
+    .digest("hex");
   const version = await client.gatewayVersion.create({
     data: {
       gatewayId: id,
-      versionNumber: (latest?.versionNumber ?? 0) + 1,
+      versionNumber: nextVersion,
       snapshotCiphertext: snapshot,
-      contentHash: createHash("sha256").update(snapshot).digest("hex"),
+      contentHash,
       state: "DRAFT",
       createdById: actor.userId,
       changeNote: body.changeNote,

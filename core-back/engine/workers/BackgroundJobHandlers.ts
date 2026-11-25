@@ -143,6 +143,41 @@ const postSettlementSweeps = async (
     return 0;
   }
   const poster = deps.ledgerPoster ?? createLedgerPoster(deps.db as never);
+  // Only attempts whose confirmation used GATEWAY_CLEARING can be swept.
+  // Merchant-direct, internal, and fee-at-source confirmations never created a
+  // clearing balance; posting a settlement for them invents a ledger entry.
+  const attemptIds = [...new Set(candidates.map((item) => item.attemptId).filter((id): id is string => Boolean(id)))];
+  const attemptRows = attemptIds.length
+    ? await (deps.db as any).paymentAttempt.findMany({
+        where: { id: { in: attemptIds } },
+        select: {
+          id: true,
+          feeBearer: true,
+          settlementTarget: true,
+          route: { select: { costModel: true } },
+          gatewayVersion: { select: { gateway: { select: { kind: true } } } },
+        },
+      })
+    : [];
+  const sweepable = new Map<string, boolean>(
+    attemptRows.map((row: any) => {
+      if (row.gatewayVersion?.gateway?.kind === "INTERNAL" || row.settlementTarget === "MERCHANT_DIRECT") {
+        return [row.id, false];
+      }
+      if (row.feeBearer === "PAYER_SURCHARGE" || row.feeBearer === "SPLIT") {
+        return [row.id, true];
+      }
+      const model = row.route?.costModel;
+      const accrues = Boolean(
+        model
+        && typeof model === "object"
+        && ((model as Record<string, unknown>).accrue_fee_at_confirm === true
+          || (model as Record<string, unknown>).accrueFeeAtConfirm === true
+          || (model as Record<string, unknown>).accrue_fee_at_confirm === "true"),
+      );
+      return [row.id, accrues];
+    }),
+  );
   const groups = new Map<string, {
     refId: string;
     gross: ReturnType<typeof decimal>;
@@ -152,6 +187,9 @@ const postSettlementSweeps = async (
   }>();
   for (const item of candidates) {
     if (item.result === "DUPLICATE") {
+      continue;
+    }
+    if (!item.attemptId || sweepable.get(item.attemptId) !== true) {
       continue;
     }
     const gross = decimal(item.statementAmount as never);
