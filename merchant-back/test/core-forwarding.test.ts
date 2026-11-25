@@ -91,6 +91,15 @@ describe("merchant write routes are translated into the canonical core payload",
     });
   });
 
+  test("POST /onboarding/join-request/withdraw forwards the merchant withdraw", async () => {
+    const response = await postJson("/api/v1/merchant/onboarding/join-request/withdraw", {
+      reason: "Correcting the company details",
+    });
+    expect(response.status).toBe(200);
+    expect(forwarded()?.url).toBe("/internal/merchant/onboarding/join-request/withdraw");
+    expect(forwardedBody()).toEqual({ reason: "Correcting the company details" });
+  });
+
   test("POST /wallets", async () => {
     const response = await postJson("/api/v1/merchant/wallets", {
       applicationId: "app_1",

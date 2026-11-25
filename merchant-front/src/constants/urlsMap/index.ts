@@ -15,6 +15,7 @@ export const urlsMap = {
     onboardingKybRevalidations: "v1/merchant/onboarding/kyb-revalidations",
     onboardingBeneficialOwners: "v1/merchant/onboarding/beneficial-owners",
     onboardingSubmit: "v1/merchant/onboarding/submit",
+    onboardingWithdraw: "v1/merchant/onboarding/join-request/withdraw",
 
     walletsList: "v1/merchant/wallets",
     walletBalance: (id: string) => `v1/merchant/wallets/${id}/balance`,

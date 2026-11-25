@@ -245,6 +245,19 @@ const OnboardingPage = dc(() => {
         }
     };
 
+    const withdraw = async () => {
+        saving.value = true;
+        try {
+            await api.post(urlsMap.onboardingWithdraw, { reason: "Merchant withdrew the application to correct it" });
+            showSnackBar({ type: "success", message: t("Application withdrawn") });
+            await load();
+        } catch (e) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+        } finally {
+            saving.value = false;
+        }
+    };
+
     const totalOwnership = computed(() =>
         owners.value.reduce((total, owner) => total.plus(toDecimal(owner.ownershipPercent)), toDecimal(0)),
     );
@@ -716,9 +729,16 @@ const OnboardingPage = dc(() => {
                         {step.value === 5 && (
                             <SurfaceCard title={t("Submit Application")} bodyGap="12px">
                                 <DescriptionList items={reviewItems.value} columns={2} />
-                                <VBtn color="primary" loading={saving.value} onClick={() => void submit()}>
-                                    {t("Submit Application")}
-                                </VBtn>
+                                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                                    <VBtn color="primary" loading={saving.value} onClick={() => void submit()}>
+                                        {t("Submit Application")}
+                                    </VBtn>
+                                    {joinStatus.value && !["DRAFT", "APPROVED", "REJECTED", "WITHDRAWN"].includes(joinStatus.value) && (
+                                        <VBtn variant="tonal" color="warning" loading={saving.value} onClick={() => void withdraw()}>
+                                            {t("Withdraw application")}
+                                        </VBtn>
+                                    )}
+                                </div>
                             </SurfaceCard>
                         )}
 

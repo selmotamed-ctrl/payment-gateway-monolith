@@ -183,6 +183,8 @@ export const appCatalogue: Record<string, [string, string]> = {
     "Beneficial Owners": ["Beneficial Owners", "المستفيدون الحقيقيون"],
     "Documents": ["Documents", "المستندات"],
     "Submit Application": ["Submit Application", "إرسال الطلب"],
+    "Withdraw application": ["Withdraw application", "سحب الطلب"],
+    "Application withdrawn": ["Application withdrawn", "تم سحب الطلب"],
     "Wallet Balance": ["Wallet Balance", "رصيد المحفظة"],
     "Statements": ["Statements", "كشوف الحساب"],
     "Opening Balance": ["Opening Balance", "الرصيد الافتتاحي"],
