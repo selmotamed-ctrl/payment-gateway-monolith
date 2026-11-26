@@ -4,6 +4,7 @@ import { useRoute } from "vue-router";
 import { RouterLink, RouterView } from "vue-router/experimental/vapor";
 import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
 import {
+    VAlert,
     VAppBar,
     VAvatar,
     VBtn,
@@ -39,6 +40,7 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
+import { appInfo, loadAppStatus } from "@/state/app";
 
 const DefaultLayout = dc(() => {
     const { t, current: locale } = useLocale();
@@ -54,6 +56,8 @@ const DefaultLayout = dc(() => {
     const isMacPlatform = /Mac|iPhone|iPad/i.test(navigator.platform || "");
     const searchShortcutLabel = isMacPlatform ? "⌘ K" : "Ctrl K";
     const searchShortcutAria = isMacPlatform ? "⌘K" : "Ctrl+K";
+    const guideSearchShortcutLabel = isMacPlatform ? "⌘ ⇧ K" : "Ctrl Shift K";
+    const guideSearchShortcutAria = isMacPlatform ? "Meta+Shift+K" : "Control+Shift+K";
     const collapsedSections = ref<number[]>([]);
 
     const isSectionCollapsed = (index: number) => collapsedSections.value.includes(index);
@@ -142,6 +146,8 @@ const DefaultLayout = dc(() => {
     };
     const ledgerInvariant = ref<{ drift: string; currency: string; ok: boolean } | null>(null);
     let invariantTimer: ReturnType<typeof setInterval> | undefined;
+    const communicationMaintenance = computed(() => appInfo.value?.communication?.maintenance ?? null);
+    const canConfigureCommunication = computed(() => hasOneOfAuthorities(["settings:read"]));
 
     const loadLedgerInvariant = async () => {
         if (!canViewLedger.value) return;
@@ -179,7 +185,7 @@ const DefaultLayout = dc(() => {
     const onGlobalKeydown = (event: KeyboardEvent) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
             event.preventDefault();
-            if (String(route.name ?? "").startsWith("AdminGuide")) {
+            if (event.shiftKey) {
                 openGuideSearch();
             } else {
                 openGlobalSearch();
@@ -210,6 +216,7 @@ const DefaultLayout = dc(() => {
         clearGlobalSearchCache();
         window.addEventListener("keydown", onGlobalKeydown);
         void loadLedgerInvariant();
+        void loadAppStatus();
         invariantTimer = setInterval(() => void loadLedgerInvariant(), 60_000);
     });
     onBeforeUnmount(() => {
@@ -392,9 +399,16 @@ const DefaultLayout = dc(() => {
                     <StatusBadge status="LAN" label="LAN" toneOverride="neutral" showDot={false} />
                 </div>
                 <div class="pg-drawer__search">
-                    <button ref={guideSearchTrigger} type="button" class="pg-search-pill" onClick={openGuideSearch}>
+                    <button
+                        ref={guideSearchTrigger}
+                        type="button"
+                        class="pg-search-pill"
+                        aria-keyshortcuts={guideSearchShortcutAria}
+                        onClick={openGuideSearch}
+                    >
                         <VIcon icon="mdi-book-search-outline" size={16} />
                         <span class="pg-search-pill__label">{t("Search guide…")}</span>
+                        <span class="pg-search-pill__kbd">{guideSearchShortcutLabel}</span>
                     </button>
                 </div>
                 <VDivider />
@@ -486,6 +500,20 @@ const DefaultLayout = dc(() => {
                 class="pg-main"
                 {...{ id: "pg-main-content", tabindex: "-1", "aria-busy": routeLoading.value ? "true" : "false" }}
             >
+                {communicationMaintenance.value && canConfigureCommunication.value ? (
+                    <div style={{ padding: "12px 24px 0" }}>
+                        <VAlert type="warning" variant="tonal" density="compact">
+                            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                                <span style={{ flex: 1 }}>
+                                    {t("Email delivery is not configured. Merchant registration and sign-in are in maintenance.")}
+                                </span>
+                                <RouterLink to={{ name: "AdminPlatformSettings" }} style={{ fontWeight: 600 }}>
+                                    {t("Configure communication")}
+                                </RouterLink>
+                            </div>
+                        </VAlert>
+                    </div>
+                ) : null}
                 {route.meta.sandboxMirror ? (
                     <div style={{ padding: "16px 24px 0" }}>
                         <SandboxBanner subtitle="You are editing Sandbox data only. Live pages, money and reports are untouched." />

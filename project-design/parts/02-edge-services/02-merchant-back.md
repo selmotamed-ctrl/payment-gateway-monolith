@@ -351,3 +351,13 @@ The edge validates the catalog query shape and the public execute shape (`inputs
 ## v38-v39 sandbox namespace (2026-11-13)
 
 `/api/v1/merchant/sandbox/*` is a dedicated namespace forwarded only to `SANDBOX_CORE_BACK_URLS`. `/overview`, `/seed-demo`, `/seed-history`, `/reset`, `/wallets/:id/*`, `/payments/:id/*`, `/disputes/:id/resolve`, `/reconciliation/*`, `/fake-rails/*` and `/webhooks/test-ping` map to the sandbox control routes; list/create resources (`/wallets`, `/applications`, `/links`, `/payments`, `/tokens`) map to the sandbox core's `/internal/merchant/*` (same router, separate database). `/mirror/*` raw-forwards to `/internal/merchant/*` for Live-parity pages, including a dedicated multipart dispute-evidence route and the POS SSE stream. `/api/external/v1/*` accepts `pg_live_*` and `pg_test_*` and selects the Live or Sandbox pool from the prefix. The client keeps one pool per URL set, so failover cannot cross planes.
+
+## v46 merchant auth forwarding (2026-11-26)
+
+The public auth router adds `/auth/google/start`, `GET /auth/google/callback`
+(proxies the core result and redirects the browser to `redirectPath` or
+`errorPath`), `/auth/google/exchange`, `/auth/email/verify`,
+`/auth/email/resend`, `/auth/password/forgot`, `/auth/password/reset` and
+`/auth/mfa/resend`. The register body is email + password + full name; the
+legacy `/auth/google` path is an alias for the start endpoint. `/auth/me`
+continues to be public and now carries the maintenance/communication block.

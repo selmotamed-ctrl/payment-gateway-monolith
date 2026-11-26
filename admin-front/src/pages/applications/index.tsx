@@ -23,7 +23,7 @@ import { MonoRef } from "@/components/ui/MonoRef";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { ApplicationDetailDrawer } from "@/pages/merchants/components/ApplicationDetailDrawer";
+import { ApplicationDetailDrawer, type ApplicationTab } from "@/pages/merchants/components/ApplicationDetailDrawer";
 import ApplicationPolicyModal, { type PolicyApplication } from "@/pages/merchants/components/ApplicationPolicyModal";
 import ReasonModal from "@/pages/merchants/components/ReasonModal";
 import { FormChecklist } from "@/components/ui/FormChecklist";
@@ -43,6 +43,8 @@ import {
     paymentLinkActionsFor,
     posActionsFor,
     railWhitelistModeOf,
+    tokenActionsFor,
+    tokenAllowlistState,
     type EntityAction,
 } from "./applicationActions";
 
@@ -62,10 +64,44 @@ type ApplicationRow = {
     railWhitelistCount: number;
     redirectDomains: string[];
     accessTokenCount: number;
+    tokenActiveCount: number;
+    tokenRevokedCount: number;
+    tokenExpiredCount: number;
+    tokenIpRestrictedCount: number;
+    tokenCidrCount: number;
     paymentLinkCount: number;
     posTerminalCount: number;
     createdAt: string;
     redactedFields: string[];
+};
+
+type ApplicationTokenRow = {
+    id: string;
+    name: string;
+    lastFour: string;
+    scopes: string[];
+    env: "LIVE" | "SANDBOX";
+    ipWhitelistEnabled: boolean;
+    cidrs: string[];
+    ipCount: number;
+    merchantId: string;
+    applicationId: string;
+    application: { id: string; name: string } | null;
+    merchant: MerchantRef | null;
+    lastUsedAt: string | null;
+    expiresAt: string | null;
+    revokedAt: string | null;
+    status: "ACTIVE" | "REVOKED" | "EXPIRED";
+    createdAt: string;
+};
+
+type TokenSummary = {
+    total: number;
+    active: number;
+    revoked: number;
+    expired: number;
+    ipRestricted: number;
+    ipCidrs: number;
 };
 
 type PaymentLinkRow = {
@@ -99,10 +135,11 @@ type PosRow = {
 
 type ApplicationSummary = { total: number; active: number; suspended: number; pending: number; withoutWhitelist: number };
 
-type PageTab = "applications" | "links" | "pos";
+type PageTab = "applications" | "tokens" | "links" | "pos";
 
 type MutationTarget =
     | { kind: "application"; id: string; name: string; action: EntityAction }
+    | { kind: "token"; id: string; tokenId: string; applicationId: string; name: string; action: EntityAction }
     | { kind: "link"; id: string; name: string; action: EntityAction }
     | { kind: "pos"; id: string; name: string; action: EntityAction };
 
@@ -147,6 +184,7 @@ const ACCESS_ACTION_CHECKS = [
 
 const APPLIED_MESSAGE: Record<MutationTarget["kind"], string> = {
     application: "Application suspended",
+    token: "Access token revoked",
     link: "Payment link cancelled",
     pos: "POS terminal updated",
 };
@@ -157,10 +195,14 @@ const ApplicationsPage = dc(() => {
     const router = useRouter();
     const canWrite = computed(() => hasOneOfAuthorities(["merchant:write"]));
     const initialTab = String(route.query.tab ?? "");
-    const activeTab = ref<PageTab>(initialTab === "links" ? "links" : initialTab === "pos" ? "pos" : "applications");
+    const activeTab = ref<PageTab>(
+        initialTab === "tokens" ? "tokens" : initialTab === "links" ? "links" : initialTab === "pos" ? "pos" : "applications",
+    );
     const summary = ref<ApplicationSummary | null>(null);
+    const tokenSummary = ref<TokenSummary | null>(null);
 
     const appTable = createTableState();
+    const tokenTable = createTableState();
     const linkTable = createTableState();
     const posTable = createTableState();
     if (typeof route.query.search === "string" && route.query.search) {
@@ -169,7 +211,7 @@ const ApplicationsPage = dc(() => {
     watch(
         () => route.query.tab,
         (tab) => {
-            const next = tab === "links" ? "links" : tab === "pos" ? "pos" : "applications";
+            const next = tab === "tokens" ? "tokens" : tab === "links" ? "links" : tab === "pos" ? "pos" : "applications";
             if (next !== activeTab.value) activeTab.value = next;
         },
     );
@@ -184,6 +226,7 @@ const ApplicationsPage = dc(() => {
     );
 
     const openApplicationId = ref<string | null>(null);
+    const openApplicationTab = ref<ApplicationTab>("config");
     const policyApplication = ref<PolicyApplication | null>(null);
     const notice = ref<{ approvalRequestId: string | null } | null>(null);
     const target = ref<MutationTarget | null>(null);
@@ -201,7 +244,16 @@ const ApplicationsPage = dc(() => {
             summary.value = null;
         }
     };
+    const loadTokenSummary = async () => {
+        try {
+            const response = await api.get(urlsMap.accessTokensSummary);
+            tokenSummary.value = (response.data?.data ?? response.data ?? null) as TokenSummary | null;
+        } catch {
+            tokenSummary.value = null;
+        }
+    };
     void loadSummary();
+    void loadTokenSummary();
 
     const { clearOpenQueryParam } = useOpenQuery<{ id: string }>({
         alwaysFetchDetail: true,
@@ -211,9 +263,11 @@ const ApplicationsPage = dc(() => {
 
     const refreshAll = () => {
         appTable.hook.value?.refreshAsIs();
+        tokenTable.hook.value?.refreshAsIs();
         linkTable.hook.value?.refreshAsIs();
         posTable.hook.value?.refreshAsIs();
         void loadSummary();
+        void loadTokenSummary();
     };
 
     const submit = async (reason: string) => {
@@ -229,6 +283,7 @@ const ApplicationsPage = dc(() => {
             const checklist = ACCESS_ACTION_CHECKS.filter((check) => actionChecklist.value[check.key]).map((check) => check.key);
             const outcome = await runGoverned(() => {
                 if (current.kind === "application") return api.patch(urlsMap.applicationDetail(current.id), { status: current.action.target, reason, checklist });
+                if (current.kind === "token") return api.post(urlsMap.applicationRevokeToken(current.applicationId, current.tokenId), { reason, checklist });
                 if (current.kind === "link") return api.post(urlsMap.paymentLinkState(current.id), { state: "CANCELLED", reason, checklist });
                 return api.post(urlsMap.posTerminalStatus(current.id), { status: current.action.target, reason, checklist });
             });
@@ -284,6 +339,11 @@ const ApplicationsPage = dc(() => {
             railWhitelist: row.railWhitelist,
             redirectDomains: row.redactedFields.includes("redirectDomains") ? "[restricted]" : row.redirectDomains,
             accessTokenCount: row.accessTokenCount,
+            tokenActiveCount: row.tokenActiveCount,
+            tokenRevokedCount: row.tokenRevokedCount,
+            tokenExpiredCount: row.tokenExpiredCount,
+            tokenIpRestrictedCount: row.tokenIpRestrictedCount,
+            tokenCidrCount: row.tokenCidrCount,
             paymentLinkCount: row.paymentLinkCount,
             posTerminalCount: row.posTerminalCount,
             createdAt: row.createdAt,
@@ -356,7 +416,21 @@ const ApplicationsPage = dc(() => {
             Value: ({ row }: { row: ApplicationRow }) =>
                 isRestricted(row.redactedFields, "redirectDomains") ? <RestrictedValue /> : <ThemedText style={{ fontSize: "12px" }}>{row.redirectDomains.length}</ThemedText>,
         },
-        { key: "tokens", label: "API tokens", value: (row) => String(row.accessTokenCount) },
+        {
+            key: "tokens",
+            label: "API tokens",
+            value: (row) => String(row.accessTokenCount),
+            Value: ({ row }: { row: ApplicationRow }) => (
+                <ThemedView style={{ gap: "2px" }}>
+                    <ThemedText style={{ fontSize: "12px" }}>{row.accessTokenCount}</ThemedText>
+                    <ThemedText style={{ fontSize: "10.5px", opacity: 0.65 }}>
+                        {row.tokenIpRestrictedCount > 0
+                            ? `${row.tokenIpRestrictedCount} ${t("IP-restricted")} · ${row.tokenCidrCount} ${t("CIDRs")}`
+                            : t("No IP allowlist")}
+                    </ThemedText>
+                </ThemedView>
+            ),
+        },
         { key: "linksPos", label: "Links / POS", value: (row) => `${row.paymentLinkCount} / ${row.posTerminalCount}` },
         { key: "createdAt", label: "Created", sortKey: "createdAt", value: (row) => row.createdAt, Value: ({ row }: { row: ApplicationRow }) => dateCell(row.createdAt) },
         {
@@ -365,9 +439,25 @@ const ApplicationsPage = dc(() => {
             sortable: false,
             Value: ({ row }: { row: ApplicationRow }) => (
                 <TableRowActions
-                    primaryAction={{ label: t("Inspect"), icon: "mdi-application-outline", onClick: () => { openApplicationId.value = row.id; } }}
+                    primaryAction={{
+                        label: t("Inspect"),
+                        icon: "mdi-application-outline",
+                        onClick: () => {
+                            openApplicationTab.value = "config";
+                            openApplicationId.value = row.id;
+                        },
+                    }}
                     items={[
                         { key: "merchant", label: t("Open merchant"), icon: "mdi-storefront-outline", onClick: () => void router.push({ name: "MerchantDetail", params: { id: row.merchantId } }) },
+                        {
+                            key: "tokens",
+                            label: t("View API tokens"),
+                            icon: "mdi-key-outline",
+                            onClick: () => {
+                                openApplicationTab.value = "tokens";
+                                openApplicationId.value = row.id;
+                            },
+                        },
                         { key: "copy", label: t("Copy summary"), icon: "mdi-content-copy", onClick: () => void copyApplicationSummary(row) },
                         ...applicationActionsFor(row.status, { canWrite: canWrite.value }).map((action): RowActionItem => ({
                             key: action.key,
@@ -393,6 +483,107 @@ const ApplicationsPage = dc(() => {
                             },
                         })),
                     ]}
+                />
+            ),
+        },
+    ]);
+
+    const tokenHeaders = computed<TableHeader<ApplicationTokenRow>[]>(() => [
+        {
+            key: "name",
+            label: "Token",
+            sortKey: "name",
+            value: (row) => row.name,
+            Value: ({ row }: { row: ApplicationTokenRow }) => (
+                <ThemedView style={{ gap: "2px" }}>
+                    <ThemedText style={{ fontSize: "12.5px", fontWeight: 600 }}>{row.name}</ThemedText>
+                    <span dir="ltr" style={{ fontFamily: "var(--pg-font-mono)", fontSize: "11px", color: "var(--pg-ink-muted)" }}>{`****${row.lastFour}`}</span>
+                </ThemedView>
+            ),
+        },
+        {
+            key: "application",
+            label: "Application",
+            value: (row) => row.application?.name ?? "",
+            Value: ({ row }: { row: ApplicationTokenRow }) => (
+                <VBtn
+                    size="small"
+                    variant="text"
+                    style={{ paddingInline: "2px", textTransform: "none", justifyContent: "flex-start" }}
+                    onClick={() => {
+                        openApplicationTab.value = "config";
+                        openApplicationId.value = row.applicationId;
+                    }}
+                >
+                    {row.application?.name ?? row.applicationId}
+                </VBtn>
+            ),
+        },
+        {
+            key: "merchant",
+            label: "Merchant",
+            value: (row) => row.merchant?.tradeName ?? "",
+            Value: ({ row }: { row: ApplicationTokenRow }) => (row.merchant ? merchantCell(row.merchant) : <ThemedText style={{ fontSize: "12px" }}>—</ThemedText>),
+        },
+        {
+            key: "env",
+            label: "Environment",
+            value: (row) => row.env,
+            Value: ({ row }: { row: ApplicationTokenRow }) => (
+                <StatusBadge status={row.env} label={row.env} toneOverride={row.env === "SANDBOX" ? "info" : "neutral"} />
+            ),
+        },
+        { key: "scopes", label: "Scopes", value: (row) => row.scopes.join(" "), Value: ({ row }: { row: ApplicationTokenRow }) => <PillList items={row.scopes} max={3} emptyLabel="—" /> },
+        {
+            key: "ip",
+            label: "IP allowlist",
+            value: (row) => (row.ipWhitelistEnabled ? row.cidrs.join(" ") : ""),
+            Value: ({ row }: { row: ApplicationTokenRow }) => {
+                const state = tokenAllowlistState(row);
+                if (state === "ACTIVE") return <PillList items={row.cidrs} max={2} />;
+                if (state === "ACTIVE_EMPTY") return <StatusBadge status="ACTIVE" label={t("Enabled, no CIDR")} toneOverride="warning" />;
+                if (state === "STORED_OFF") {
+                    return (
+                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "4px", flexWrap: "wrap" }}>
+                            <StatusBadge status="INACTIVE" label={t("Off")} toneOverride="neutral" />
+                            <PillList items={row.cidrs} max={2} />
+                        </ThemedView>
+                    );
+                }
+                return <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{t("Not restricted")}</ThemedText>;
+            },
+        },
+        { key: "lastUsed", label: "Last used", sortKey: "lastUsedAt", value: (row) => row.lastUsedAt ?? "", Value: ({ row }: { row: ApplicationTokenRow }) => dateCell(row.lastUsedAt) },
+        { key: "expires", label: "Expires", sortKey: "expiresAt", value: (row) => row.expiresAt ?? "", Value: ({ row }: { row: ApplicationTokenRow }) => dateCell(row.expiresAt) },
+        {
+            key: "status",
+            label: "Status",
+            value: (row) => row.status,
+            Value: ({ row }: { row: ApplicationTokenRow }) => <StatusBadge status={row.status} toneOverride={toBadgeTone(row.status)} />,
+        },
+        { key: "createdAt", label: "Created", sortKey: "createdAt", value: (row) => row.createdAt, Value: ({ row }: { row: ApplicationTokenRow }) => dateCell(row.createdAt) },
+        {
+            key: "actions",
+            label: "Action",
+            sortable: false,
+            Value: ({ row }: { row: ApplicationTokenRow }) => (
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Open application"),
+                        icon: "mdi-application-outline",
+                        onClick: () => {
+                            openApplicationTab.value = "config";
+                            openApplicationId.value = row.applicationId;
+                        },
+                    }}
+                    items={actionItems(tokenActionsFor(row.status, canWrite.value), (action) => ({
+                        kind: "token",
+                        id: row.id,
+                        tokenId: row.id,
+                        applicationId: row.applicationId,
+                        name: `${row.name} ****${row.lastFour}`,
+                        action,
+                    }))}
                 />
             ),
         },
@@ -482,7 +673,7 @@ const ApplicationsPage = dc(() => {
         },
     ]);
 
-    const metrics = computed<MetricItem[]>(() => {
+    const applicationMetrics = computed<MetricItem[]>(() => {
         const data = summary.value;
         if (!data) return [];
         return [
@@ -506,6 +697,33 @@ const ApplicationsPage = dc(() => {
             },
         ];
     });
+
+    const tokenMetrics = computed<MetricItem[]>(() => {
+        const data = tokenSummary.value;
+        if (!data) return [];
+        return [
+            { key: "tokensTotal", label: t("API tokens"), value: String(data.total) },
+            { key: "tokensActive", label: t("Active"), value: String(data.active), badge: t("Active"), badgeTone: "success" },
+            {
+                key: "tokensRevoked",
+                label: t("Revoked tokens"),
+                value: String(data.revoked),
+                badge: data.revoked > 0 ? t("Review") : t("Clear"),
+                badgeTone: data.revoked > 0 ? "warning" : "success",
+            },
+            { key: "tokensExpired", label: t("Expired tokens"), value: String(data.expired), badge: data.expired > 0 ? t("Review") : t("Clear"), badgeTone: data.expired > 0 ? "warning" : "success" },
+            {
+                key: "tokensIp",
+                label: t("IP allowlists"),
+                value: String(data.ipRestricted),
+                subLabel: `${data.ipCidrs} ${t("CIDRs")}`,
+                badge: data.ipRestricted > 0 ? t("Restricted") : t("Open"),
+                badgeTone: data.ipRestricted > 0 ? "success" : "warning",
+            },
+        ];
+    });
+
+    const metrics = computed<MetricItem[]>(() => (activeTab.value === "tokens" ? tokenMetrics.value : applicationMetrics.value));
 
     const renderTable = <T,>(
         state: ReturnType<typeof createTableState>,
@@ -565,6 +783,7 @@ const ApplicationsPage = dc(() => {
     const targetDescription = () => {
         const current = target.value;
         if (!current) return "";
+        if (current.kind === "token") return t("A revoked token stops working at once and cannot be restored. The merchant must create a new one.");
         if (current.kind === "link") return t("A cancelled payment link can no longer be paid and cannot be reactivated.");
         if (current.action.mode === "approval") return t("Restoring access needs an independent checker.");
         return t("Restricting access takes effect immediately.");
@@ -584,6 +803,7 @@ const ApplicationsPage = dc(() => {
                     ariaLabel={t("Application views")}
                     tabs={[
                         { value: "applications", label: t("Applications") },
+                        { value: "tokens", label: t("API tokens"), count: tokenSummary.value?.total },
                         { value: "links", label: t("Payment links") },
                         { value: "pos", label: t("POS terminals") },
                     ]}
@@ -597,6 +817,14 @@ const ApplicationsPage = dc(() => {
                         url: urlsMap.applicationsList,
                         listKey: "applications",
                         headers: applicationHeaders.value,
+                    })}
+                {activeTab.value === "tokens" &&
+                    renderTable<ApplicationTokenRow>(tokenTable, {
+                        registryKey: "ApplicationTokens",
+                        title: t("API tokens"),
+                        url: urlsMap.accessTokensList,
+                        listKey: "accessTokens",
+                        headers: tokenHeaders.value,
                     })}
                 {activeTab.value === "links" &&
                     renderTable<PaymentLinkRow>(linkTable, {
@@ -618,8 +846,10 @@ const ApplicationsPage = dc(() => {
 
             <ApplicationDetailDrawer
                 applicationId={openApplicationId.value}
+                initialTab={openApplicationTab.value}
                 onClose={() => {
                     openApplicationId.value = null;
+                    openApplicationTab.value = "config";
                     void clearOpenQueryParam();
                 }}
                 onChanged={refreshAll}

@@ -27,6 +27,7 @@ const LoginPage = dc(() => {
     const { t, current } = useLocale();
     const route = useRoute();
     const mfaChallengeId = ref<string | null>(null);
+    const mfaChannels = ref<string[]>([]);
     const error = ref<string | null>(null);
     const capsLock = ref(false);
     const resending = ref(false);
@@ -117,6 +118,7 @@ const LoginPage = dc(() => {
                 const payload = response.data?.data ?? response.data;
                 if (payload?.mfaRequired && payload?.challengeId) {
                     mfaChallengeId.value = String(payload.challengeId);
+                    mfaChannels.value = Array.isArray(payload.deliveryChannels) ? payload.deliveryChannels.map(String) : [];
                     form.setValue("mfaCode", "");
                     startResendCooldown();
                     return;
@@ -141,6 +143,9 @@ const LoginPage = dc(() => {
                 throw new Error(t("The verification code could not be resent"));
             }
             mfaChallengeId.value = String(payload.challengeId);
+            mfaChannels.value = Array.isArray(payload.deliveryChannels)
+                ? payload.deliveryChannels.map(String)
+                : mfaChannels.value;
             form.setValue("mfaCode", "");
             showSnackBar({ message: t("A new verification code was sent"), type: "success" });
         } catch (caught) {
@@ -170,6 +175,7 @@ const LoginPage = dc(() => {
 
     const backToCredentials = () => {
         mfaChallengeId.value = null;
+        mfaChannels.value = [];
         form.setValue("mfaCode", "");
         error.value = null;
         resendWait.value = 0;
@@ -219,7 +225,11 @@ const LoginPage = dc(() => {
                     {mfaChallengeId.value ? (
                         <>
                             <Message variant="info">
-                                {t("Enter the six-digit code sent to your registered phone.")}
+                                {mfaChannels.value.includes("EMAIL") && mfaChannels.value.includes("SMS")
+                                    ? t("Enter the six-digit code sent to your email address and phone.")
+                                    : mfaChannels.value.includes("SMS")
+                                      ? t("Enter the six-digit code sent to your phone.")
+                                      : t("Enter the six-digit code sent to your email address.")}
                             </Message>
                             <Field
                                 label={t("MFA code")}
@@ -311,13 +321,22 @@ const LoginPage = dc(() => {
                     )}
 
                     {!mfaChallengeId.value && (
-                        <Button
-                            variant="text"
-                            size="sm"
-                            onClick={() => void router.push({ name: "AcceptInvitation" })}
-                        >
-                            {t("I have an invitation code")}
-                        </Button>
+                        <div class="d-flex flex-wrap ga-2 justify-space-between">
+                            <Button
+                                variant="text"
+                                size="sm"
+                                onClick={() => void router.push({ name: "AcceptInvitation" })}
+                            >
+                                {t("I have an invitation code")}
+                            </Button>
+                            <Button
+                                variant="text"
+                                size="sm"
+                                onClick={() => void router.push({ name: "ForgotPassword" })}
+                            >
+                                {t("Forgot password?")}
+                            </Button>
+                        </div>
                     )}
 
                     <div

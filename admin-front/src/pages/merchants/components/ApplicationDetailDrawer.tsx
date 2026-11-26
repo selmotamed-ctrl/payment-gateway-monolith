@@ -23,6 +23,7 @@ import {
     posActionsFor,
     railWhitelistModeOf,
     tokenActionsFor,
+    tokenAllowlistState,
     type EntityAction,
 } from "@/pages/applications/applicationActions";
 import { isRestricted, type GovernanceMode } from "../commerceGovernance";
@@ -46,8 +47,10 @@ export type ApplicationToken = {
     name: string;
     lastFour: string;
     scopes: string[];
+    env: "LIVE" | "SANDBOX";
     ipWhitelistEnabled: boolean;
     cidrs: string[];
+    ipCount: number;
     lastUsedAt: string | null;
     expiresAt: string | null;
     revokedAt: string | null;
@@ -94,6 +97,11 @@ export type ApplicationDetail = {
     railWhitelistCount: number;
     redirectDomains: string[];
     accessTokenCount: number;
+    tokenActiveCount: number;
+    tokenRevokedCount: number;
+    tokenExpiredCount: number;
+    tokenIpRestrictedCount: number;
+    tokenCidrCount: number;
     paymentLinkCount: number;
     posTerminalCount: number;
     createdAt: string;
@@ -105,7 +113,7 @@ export type ApplicationDetail = {
     pendingApprovals: PendingApprovalRow[];
 };
 
-type ApplicationTab = "config" | "tokens" | "links" | "pos";
+export type ApplicationTab = "config" | "tokens" | "links" | "pos";
 
 type PendingTarget =
     | { kind: "application"; action: EntityAction }
@@ -137,6 +145,7 @@ export const ApplicationDetailDrawer = defineComponent({
     name: "ApplicationDetailDrawer",
     props: {
         applicationId: { type: String as PropType<string | null>, default: null },
+        initialTab: { type: String as PropType<ApplicationTab>, default: "config" },
     },
     emits: ["close", "changed"],
     setup(props, { emit }) {
@@ -177,9 +186,9 @@ export const ApplicationDetailDrawer = defineComponent({
         };
 
         watch(
-            () => props.applicationId,
-            (id) => {
-                tab.value = "config";
+            () => [props.applicationId, props.initialTab] as const,
+            ([id, initialTab]) => {
+                tab.value = initialTab;
                 notice.value = null;
                 pendingTarget.value = null;
                 policyOpen.value = false;
@@ -364,12 +373,35 @@ export const ApplicationDetailDrawer = defineComponent({
                             </span>
                         ),
                     },
+                    {
+                        key: "env",
+                        label: t("Environment"),
+                        render: (row: ApplicationToken) => (
+                            <StatusBadge
+                                status={row.env}
+                                label={row.env}
+                                toneOverride={row.env === "SANDBOX" ? "info" : "neutral"}
+                            />
+                        ),
+                    },
                     { key: "scopes", label: t("Scopes"), render: (row: ApplicationToken) => <PillList items={row.scopes} max={3} emptyLabel="—" /> },
                     {
                         key: "ip",
                         label: t("IP allowlist"),
-                        render: (row: ApplicationToken) =>
-                            row.ipWhitelistEnabled ? <PillList items={row.cidrs} max={2} emptyLabel={t("Enabled, no CIDR")} /> : <span style={{ color: "var(--pg-ink-muted)" }}>{t("Not restricted")}</span>,
+                        render: (row: ApplicationToken) => {
+                            const state = tokenAllowlistState(row);
+                            if (state === "ACTIVE") return <PillList items={row.cidrs} max={2} />;
+                            if (state === "ACTIVE_EMPTY") return <StatusBadge status="ACTIVE" label={t("Enabled, no CIDR")} toneOverride="warning" />;
+                            if (state === "STORED_OFF") {
+                                return (
+                                    <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                                        <StatusBadge status="INACTIVE" label={t("Off")} toneOverride="neutral" />
+                                        <PillList items={row.cidrs} max={2} />
+                                    </span>
+                                );
+                            }
+                            return <span style={{ color: "var(--pg-ink-muted)" }}>{t("Not restricted")}</span>;
+                        },
                     },
                     { key: "lastUsed", label: t("Last used"), render: (row: ApplicationToken) => formatDateTime(row.lastUsedAt) },
                     { key: "expires", label: t("Expires"), render: (row: ApplicationToken) => formatDateTime(row.expiresAt) },

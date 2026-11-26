@@ -308,6 +308,14 @@ const resolveSessionPrincipal = async (token: string): Promise<Principal> => {
   if (user.status !== "ACTIVE") {
     throw new ApiError(403, "SESSION_USER_INACTIVE", "The session principal is not active");
   }
+  const invalidBefore = (user as { sessionsInvalidBefore?: Date | null }).sessionsInvalidBefore;
+  if (
+    invalidBefore &&
+    typeof claims.issuedAt === "number" &&
+    claims.issuedAt * 1000 < new Date(invalidBefore).getTime()
+  ) {
+    throw new ApiError(401, "SESSION_REVOKED", "The session was invalidated by a security action");
+  }
   const authorities = parseAuthorities(user.authoritiesMap);
   if (authorities.length === 0) {
     throw new ApiError(403, "SESSION_AUTHORITIES_EMPTY", "The session principal has no granted authorities");

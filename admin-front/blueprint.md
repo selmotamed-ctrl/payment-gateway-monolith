@@ -118,8 +118,8 @@ Additional exported primitives/extras are `SurfaceCardText`, `MetaPill`, `FormCh
 
 - A skip link targeting `#pg-main-content`.
 - A 56 px flat app bar with menu toggle, brand, breadcrumbs, live ledger invariant pill (for `profit.read` or `liquidity.read`), global search trigger (`Ctrl+K`/`Cmd+K`), help button, theme mode menu (System/Light/Dark), language menu, and user menu.
-- A 248 px `VNavigationDrawer`, permanent on desktop and temporary below the compact breakpoint. It contains brand/environment badge, guide search pill, collapsible navigation sections, and an operator card with role and maker/checker dots.
-- Route progress bar, focused `VMain`, global search palette, guide search modal, and contextual help drawer.
+- A 248 px `VNavigationDrawer`, permanent on desktop and temporary below the compact breakpoint. It contains brand/environment badge, guide search pill (`Ctrl+Shift+K`/`Cmd+Shift+K`), collapsible navigation sections, and an operator card with role and maker/checker dots.
+- Route progress bar, focused `VMain`, global search palette (`Ctrl+K` on every route, including the guide), guide search modal (`Ctrl+Shift+K` on every route), and contextual help drawer.
 - The `?` key opens help when the user is not typing in an input; `Escape` closes the topmost overlay.
 
 `admin-front/src/layouts/sections.tsx` owns the visible navigation groups and both `routesAuthorities` and `routesRoles`. The shell hides a section when every route in it is hidden, so an empty group header never renders.
@@ -294,7 +294,7 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 - **`JsonDiffViewer`** (rewritten) takes `diff: unknown`: an RFC-6902 array, `{operations}`, `{before, after}` or a plain payload (`DRAFT_AML_RULE`, `CREATE_ADJUSTMENT`...). The pure model `components/ui/jsonDiffModel.ts` humanises paths (`/payoutBankDetailsJson/iban` -> "Payout Bank Details · IBAN"), flattens nested objects to sub-rows, classifies money keys (`*Amount|*Ceiling|*Fee|*Balance|*Volume` -> `MoneyDisplay`), status strings (`StatusBadge`), lists (chips) and dates. `JsonValueCell`/`JsonValueList` render the same values as key/value rows. `components/JsonPatchDiff` is now a thin wrapper.
 - **`summarizeAuditChange(before, after)`** (`utils/auditSummary.ts`) returns the humanised labels of the changed top-level keys (ignoring identical values and timestamps); `components/AuditChangeChips.tsx` shows up to 3 chips plus "+N more" in the audit-log table, Merchant 360 and the case timeline.
-- **Builders** (`components/builders/**`, each with a pure model under `builders/model/` and unit tests): `CostModelBuilder` (+`formatCostModel`: `1.25% + 0.500 LYD (min…, max…)`), `RouteScopeBuilder` + `MismatchPolicyBuilder` (`tolerance_amount`, the only key the settlement engine reads), `MaintenanceWindowsBuilder` (absolute UTC `start`/`end`; a route is hidden while `start <= now < end`), `ParserConfigBuilder`/`ColumnMappingBadges` (statement sources), `AmlParamsBuilder`/summaries (7 rule types; `scope` is edited as a structured tree and the UI states that the engine does not evaluate it), `PlatformSettingTypedEditor` + `SettingValueView` (typed editors for the decision register OD-1..OD-11 and the policy keys; unknown keys fall back to a structured tree editor that preserves them), `LogoAssetPicker`, `ChipListInput`, `OptionChips`, `RepeatableRows`, `KeyValueSummary`, `StructuredValueEditor`. Every builder round-trips unknown keys losslessly.
+- **Builders** (`components/builders/**`, each with a pure model under `builders/model/` and unit tests): `CostModelBuilder` (+`formatCostModel`: `1.25% + 0.500 LYD (min…, max…)`), `RouteScopeBuilder` + `MismatchPolicyBuilder` (`tolerance_amount`, the only key the settlement engine reads), `MaintenanceWindowsBuilder` (absolute UTC `start`/`end`; a route is hidden while `start <= now < end`), `ParserConfigBuilder`/`ColumnMappingBadges` (statement sources), `AmlParamsBuilder`/summaries (7 rule types; `scope` is edited as a structured tree and the UI states that the engine does not evaluate it), `PlatformSettingTypedEditor` + `SettingValueView` (typed editors for the decision register OD-1..OD-11 and the policy keys; unknown keys fall back to a structured tree editor that preserves them), `LogoAssetPicker`, `ChipListInput`, `OptionChips`, `RepeatableRows`, `KeyValueSummary`, `StructuredValueEditor`. Every builder round-trips unknown keys losslessly. The Platform Settings workspace (`pages/settings/platform/**`) adds a pure catalog/search model (`builders/model/settingsCatalog.ts`, `settingsSearch.ts`): sections, lifecycle/status badges, reader/effect/risk metadata, effective/scheduled version selection, unconfigured and unregistered states, Arabic-aware search and a compact row + detail drawer. Every catalog field has a hint; unknown keys are shown as unregistered instead of being silently treated as understood.
 - **Commission tiers:** `CommissionTiersEditor` (`pages/finance/pricing/components`) edits `{ upTo, flat, percent }` (percent is a fraction) and is shown for TIERED only (the calculator ignores tiers for FLAT/PERCENTAGE/HYBRID). The create form also carries min/max fee, fee bearer, rounding mode and optional merchant/application scope.
 - **Shared drawers** (`components/ledger/JournalEntryDrawer`, `GlAccountDrawer`; `pages/merchants/components/WalletDetailDrawer`, `ApplicationDetailDrawer`) are opened by an id prop (`null` = closed) and emit `close`/`changed`. Governed actions share `ReasonModal` (>=10 characters) and a 202 handler that explains "submitted for approval" and links to `/approvals`.
 - **i18n slices:** `constants/i18n/{commerce,ledgerOps,forms,builders}.ts` are merged by `plugins/i18n.ts` after the main catalogue; each new string has an `[English, Arabic]` pair and unit tests assert EN/AR sync. Table filter configs live in `components/Table/registry/{commerce,ledgerOps,forms}.ts` and are spread into `tableRegistry`.
@@ -340,6 +340,18 @@ The four portals now run on the **vael-ui Vapor** UI layer. The branch `vael-ui-
 - **Verification:** admin Playwright 79 passed / 11 live skips, merchant 22 passed, checkout 7 passed; all four portals type-check and build; admin Vitest 48 and merchant content 23 pass. The admin suite covers shell geometry, RTL, themes, tables, inline filters, row context menus, wallet/GL drawers, approvals/safeguard checklists, guide context/reader, object storage and backups.
 
 Known residuals: the shim tag names still read as Vuetify in JSX; all forms are not yet on `vael-form`; and the native `select`/checkbox fallbacks trade vael-ui search/motion for deterministic form behavior while the field adapters are completed. These are tracked as `GAP-2026-11-26-UI-01` and `GAP-2026-11-26-UI-02`.
+
+### 18.1 Master integration (2026-11-26)
+
+`master` (email-primary communication, email/Google merchant auth, the human-readable Platform Settings workspace, and the Applications & Channels API-token surface) was merged into `vael-ui-migration` and every new surface was migrated to the vael/Vapor layer rather than reintroducing Vuetify:
+
+- **New pages/components:** the admin settings workspace (`pages/settings/platform/components/{CommunicationTab,NewSettingDrawer,SettingDetailDrawer,SettingRow,SettingsHealthStrip,SettingsSectionNav}.tsx`), admin forgot/reset-password pages, merchant forgot/reset-password, verify-email, Google-finish and `components/communication/MaintenanceScreen.tsx` now import `dc`/`defineComponent` from `@/utils/dc`, Vuetify-named components from `@/components/vael/VuetifyShim`, and `useLocale` from `@/utils/vael-compat`. No `vuetify` or `kt-dc` import remains in any portal.
+- **PageHeader slot:** the master `end={() => …}` prop is expressed as the vael `PageHeader` default slot; the removed `PageHeader.end` prop is not reintroduced.
+- **Shim `VTextField`:** now uses `inheritAttrs: false`, binds only real input attributes, keeps an explicit `aria-label` (falling back to `label`) so field names remain accessible, and renders a visible label/hint/error shell (`.pg-text-field`, `.pg-field-label`, `.pg-field-hint`) when those props are present. This restores labels on the new settings workspace and auth pages while `FormField` keeps owning labels in existing forms. The shim `VSwitch` keeps vael-ui's `role="switch"`; Playwright tests target `getByRole("switch")`.
+- **Shim link resolution:** `VBtn`/`VListItem` resolve `to` through `useRouter()`, falling back to the app router on the current instance when the component is created inside a drawer slot. Before this fix, a `VBtn to=…` rendered inside `SlideOverDrawer`'s `v-slots` silently dropped its link (a `TypeError` was swallowed by the slot render).
+- **Theme bridge:** `styles/vael-theme.css` now also defines the Vuetify-style RGB triplets (`--v-theme-primary`, `--v-theme-on-surface`, `--v-theme-background`, …) inherited styles still reference (`rgb(var(--v-theme-primary))`), in light and dark. Native `<option>` elements from the shim `VSelect` are visible to `getByText`, so tests scope environment text to the table.
+- **ECharts lazy chunk:** `merchant-front/src/components/EChart/lazy.tsx` was added (the merchant cards imported `@/components/EChart/lazy` without the module).
+- **Icons:** the generator now emits 244 admin icons (the new settings/section/auth `mdi-*` names) while merchant/checkout/Fake Rails stay at 138/52/35.
 
 ## Admin Route and Page Catalog
 
@@ -423,7 +435,7 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 | 37 | `/reports/chrome` | `ReportsChrome` | `reports.studio` (projected from `report_engine:author`) | none | Reusable header/footer registry and single global default per type. |
 | 38 | `/reports/merchant-reports` | `ReportsMerchantReports` | `report:review`/`report:approve`/`security:read`/`security:write` | none | Merchant-authored report registry, per-merchant execution history, Studio suspend/resume. |
 | 38 | `/academy` | `AdminAcademy` | none (intentional learning) | 1 / 1.1 | Employee Academy home (full-width hero with the single Continue action and progress rings, tracks, certificates list, Guide reading). Sub-routes `AdminAcademyTracks`, `AdminAcademyTrack`, `AdminAcademyModule`, `AdminAcademyLesson`, `AdminAcademyLab`, `AdminAcademyExam`, `AdminAcademyCertificate`, `AdminAcademyHelp` (none gated) and `AdminAcademyTeam` (role `SECURITY_ADMIN`); see `03-guide-and-academy.md` §7. |
-| 39 | `/settings/platform` | `AdminPlatformSettings` | none (backend `settings:read`/`settings:write`) | none | Versioned platform settings, backup export and restore preview. |
+| 39 | `/settings/platform` | `AdminPlatformSettings` | `settings:read` / `settings:write` (plus security fallback) | `/settings/platform?section=<id>&open=<key>` | Searchable, sectioned, versioned platform settings with a reader/effect/risk and field hints; backup export and restore preview. |
 | 40 | `/settings/checkout-help` | `AdminCheckoutHelp` | none (backend `settings:read`/`settings:write`) | 4 / 4.2 | Checkout support config, preview, version history and diff. |
 | 41 | `/system/backups` | `SystemBackups` | `security:read` or `gateway:read` | none | WAL/daemon/target health, backup history, drills and policy. |
 | 42 | `/guide/book/:bookId` | `AdminGuideBook` | none (learning surface) | 1 / 1.1 | One guide book with ordered articles and progress. |
@@ -500,8 +512,6 @@ Public admin routes are `/login` (`Login`, visitor-only) and the catch-all `NotF
 | `AdminUserDetail` | No entry; direct navigation is allowed. | `/users/:id` requires `user:read` or `security:read`. | Privilege gap. |
 | `PricingControls` | No entry; only the nav item is hidden without `profit.read`/`liquidity.read`. | Commission/velocity endpoints require finance/commission/velocity authorities. | Privilege gap. |
 | `GatewayAiImport` | No entry; it is reachable by URL even though it is not in the nav. | AI transcript/spec endpoints require `gateway:read`/`gateway:write`. | Privilege gap. |
-| `AdminPlatformSettings` | No entry; any authenticated admin can open the page. | Settings reads require `settings:read`; writes require `settings:write`. | Privilege gap. |
-| `AdminCheckoutHelp` | No entry; any authenticated admin can open the page. | Checkout-support reads require `settings:read`; writes require `settings:write`. | Privilege gap. |
 | `AdminGuide` | No entry. | No business-data authority required. | Intentional learning surface. |
 | `AdminAcademy*` | No entry (only `AdminAcademyTeam` has a role gate: `SECURITY_ADMIN`). | Progress and exams need only a back-office session; the team view requires the `SECURITY_ADMIN` role in admin-back and core-back. | Intentional learning surface; exams are server-graded. |
 
@@ -585,6 +595,8 @@ These suites require a running stack and are skipped without the live/edge servi
 
 ## Security hardening (2026-11-05)
 
+`AdminPlatformSettings` and `AdminCheckoutHelp` are gated by `settings:read`/`settings:write` (plus the security fallback); the backend still enforces the same authorities. The settings workspace deep links use `?section=` and `?open=`.
+
 The `VITE_AUTHORIZED` bypass was removed. The route authority table moved to `src/utils/routeAuthorities.ts` with a default-deny guard. `PUBLIC_FOR_AUTHENTICATED` covers Dashboard, every Guide reader route and every Academy route (the Team page keeps its own `SECURITY_ADMIN` check); `AUTHORITY_ALIASES` normalizes dotted and colon forms. AdminUsers/Detail accept `user:read`/`user:write`/`security:*`, AdminPlatformSettings accepts `settings:read`/`settings:write` (plus the security fallback), and PricingControls includes `liquidity.read`. These checks are advisory; core enforces authorities. Any route not in the table is denied to authenticated users unless it is in `PUBLIC_FOR_AUTHENTICATED`.
 
 ## Admin UI completion: six new routes (2026-11-06)
@@ -595,7 +607,7 @@ Six protected children were added to `admin-front/src/router/index.ts` (and the 
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `/wallets` | `Wallets` | Onboarding | `merchants.read` or `support.read_merchant` | `merchant:read` (freeze `merchant:write`) | Cross-merchant wallets: KPI strip, live/checkpoint balance ("Restricted" for non-financial roles), freeze (immediate) / unfreeze (approval) from the row menu. **Inspect** (or the wallet id) navigates to `WalletDetail`; `?open=<id>` redirects there. "Inspect GL account" still opens the GL drawer. |
 | `/wallets/:id` | `WalletDetail` (`meta.parentName: Wallets`) | Onboarding | same as `Wallets` | `merchant:read` (freeze `merchant:write`) | Wallet details page replacing the old wallet drawer: header with status badge, frozen banner, pending approvals, Freeze/Request unfreeze, Refresh; metric strip (live, checkpoint, posted since checkpoint, pending cash-outs). `?tab=` (`overview` default, `statement`, `links`, `activity`): Overview (details card, shard table with a padded **Total** row and a shards-vs-live-balance integrity badge), Statement (`AccountLinesTable`: server-paginated posting lines with side/reference-type/date filters, search, totals of the whole filtered set, links to the source record and to the journal entry drawer), Links and cash-outs (assigned applications, last 10 cash-outs), Status history (`/wallets/:id/audit-events`: when, action, change, reason, by, approval). Merchant 360 and the application drawer link here. |
-| `/applications` | `Applications` ("Applications & Channels") | Onboarding | same | `merchant:read` / `merchant:write` | Tabs Applications, Payment Links, POS Terminals; drawer with rail whitelist, redirect domains, API tokens (revoke), link cancel, terminal status; suspend immediate, reactivation and policy edits go to approval. `?tab=links\|pos`, `?open=<id>`. |
+| `/applications` | `Applications` ("Applications & Channels") | Onboarding | same | `merchant:read` / `merchant:write` | Tabs Applications, API Tokens, Payment Links, POS Terminals; the API-tokens tab lists every token with its environment, scopes and IP allowlist (stored CIDRs stay visible when the switch is off) and can revoke; Applications shows rail-whitelist pills plus token/IP-allowlist counts; drawer with rail whitelist, redirect domains, API tokens (revoke), link cancel, terminal status; suspend immediate, reactivation and policy edits go to approval. `?tab=tokens\|links\|pos`, `?open=<id>`. |
 | `/transactions` | `Transactions` ("Transactions & Webhooks") | Operations | `merchants.read`, `support.read_merchant` or `attempt:read` | `attempt:read` (+`merchant:read`/`finance:read`) | Tabs Payment Attempts and Inbound Webhooks (verified / unmatched filters); the attempt drawer shows summary, step logs, inbound events and the checkout retry group as structured rows. |
 | `/credential-sets` | `CredentialSets` | Gateways | `credentials.manage` or `gateways.edit` | `credential:read`/`gateway:read`, `credential:write` | Vault entries: create, rotate, verify, revoke (reason); secrets are write-only. `?highlight=<id>` (from search hits and Merchant 360). |
 | `/finance/journal-entries` | `JournalEntries` | Finance | `profit.read` or `liquidity.read` | `finance:read` | Double-entry explorer: balanced badge, T-account drawer, GL account drawer; `?glAccountId=`, `?open=`. |
@@ -683,6 +695,18 @@ The Dashboard Route health card shows forced and conflict counts. See
 - The Adjustments page consumes `?attemptId=` and `?merchantId=` and pre-fills the create form, so **Create refund/adjustment** from the Transaction drawer no longer opens an empty page.
 - The Jobs & Outbox type filter includes `REFUND_INQUIRY`.
 - The Journal Entries unbalanced tile includes entries with zero lines, not only entries whose lines do not sum to zero.
+
+## v46 authentication and communication settings routes (2026-11-26)
+
+Public admin routes `/forgot-password` and `/reset-password` complete the
+email-OTP reset flow. The login MFA copy uses the server's `deliveryChannels`,
+and the invitation page makes the phone optional. Platform Settings adds a
+**Communication** tab (`CommunicationTab`) with email/SMS/Google status,
+missing-field diagnostics, last test/delivery results and "send test" actions
+for `settings:write`; the shell shows a warning banner while merchant auth is in
+maintenance. Typed setting namespaces: `communication.email`,
+`communication.sms`, `communication.policy` and `auth.google`; secret fields are
+password controls with a stored placeholder and are never echoed by the API.
 
 ## Tables Filters and Exports
 
@@ -968,7 +992,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 ## Registry slices (2026-11-06)
 
-`components/Table/tableRegistry.ts` (keyed by ROUTE NAME) now spreads three area slices, `registry/commerce.ts`, `registry/ledgerOps.ts` and `registry/forms.ts`, so independent areas add filter configs without editing one shared literal. The approvals subject-type filter lists the new `WALLET` and `POS_TERMINAL` subjects. Pages with several tables (Applications: applications / payment links / POS terminals; Transactions: attempts / inbound events; Jobs & Outbox) pass their filters explicitly to `ApiTable`.
+`components/Table/tableRegistry.ts` (keyed by ROUTE NAME) now spreads three area slices, `registry/commerce.ts`, `registry/ledgerOps.ts` and `registry/forms.ts`, so independent areas add filter configs without editing one shared literal. The approvals subject-type filter lists the new `WALLET` and `POS_TERMINAL` subjects. Pages with several tables (Applications: applications / API tokens / payment links / POS terminals; Transactions: attempts / inbound events; Jobs & Outbox) pass their filters explicitly to `ApiTable`. The API-tokens registry filters by lifecycle status, environment, IP-allowlist state, merchant, application and creation date.
 
 ## Safeguard/export extension (2026-11-23)
 
@@ -1045,7 +1069,7 @@ The clarity renderer adds:
 
 `GuideSearch.ts` builds a lazy MiniSearch index over articles, terms, cards, situations, edge cases, quick answers and error codes. Both index and query normalisation lowercase text, strip Arabic diacritics/tatweel, unify alef/ya/ta-marbuta and convert Arabic-Indic digits. Searches use prefix matching, fuzzy 0.2 and `AND` with an `OR` fallback; results are grouped with at most eight per type.
 
-`GuideSearchPalette` is mounted in the default layout. Ctrl/Cmd+K opens the guide palette on `/guide/**` and the global record palette elsewhere; the app-bar trigger and drawer "Search guide…" button also open the guide palette. Recent documents are stored under `pg.guide.recent`.
+`GuideSearchPalette` is mounted in the default layout. Ctrl/Cmd+Shift+K opens the guide palette on every admin route; Ctrl/Cmd+K always opens the global record palette (which also searches guide entries). The app-bar trigger and drawer "Search guide…" button also open the guide palette. Recent documents are stored under `pg.guide.recent`.
 
 `PageHeader` automatically renders `ContextHelpButton`; a shared `ContextHelpDrawer` resolves the current route (parent-first) through `context-map.json`, shows the screen summary, safeguard cards, situations and articles, and never unmounts the page. `SafeguardDialog` is mounted globally and `useSafeguard(cardId).confirm()` blocks 22 risky actions until every required box is ticked; Cancel resolves `false` without sending a request.
 
@@ -1370,7 +1394,7 @@ The integration points are the 22 action areas named in the guide design: approv
 
 ## Backups Settings and Operations
 
-> Status: `partial` · Last verified: 2026-11-23
+> Status: `partial` · Last verified: 2026-11-26
 
 ## 1. Purpose and scope
 
@@ -1431,6 +1455,9 @@ The overview endpoint is `no-store`, syncs daemon catalog rows into `backupCatal
 ### 3.2 Platform settings (`/settings/platform`)
 
 Page: `admin-front/src/pages/settings/platform/index.tsx`.
+Catalog: `admin-front/src/components/builders/model/settingsCatalog.ts`.
+Search/merge/version model: `admin-front/src/components/builders/model/settingsSearch.ts`.
+Typed value definitions: `admin-front/src/components/builders/model/settingsSchemas.ts`.
 
 Endpoints:
 
@@ -1444,37 +1471,72 @@ Endpoints:
 | Restore apply | `POST v1/admin/settings/restore-apply` | `settings:write` |
 | Save setting | `PUT v1/admin/settings` | `settings:write` |
 
-The page groups all versions by setting key, newest first, and shows:
+The page is a searchable workspace, not a flat key list:
 
-- Key, latest version, scope, version count and effective date.
-- A JSON preview.
-- History and edit dialog.
+- **Sections**: All settings, Payments & routing, Merchants & onboarding, Risk &
+  screening, Reporting & compliance, Governance & approvals, Operations & data,
+  Checkout & support, Advanced & unregistered.
+- **Search** matches the title, key, section, summary, description, reader,
+  effect, field labels, field hints, option hints, keywords, current value and
+  Arabic text. Multi-word search is AND; the result count is announced.
+- **Status filters**: All, Live policies, Decision records, Using defaults and
+  Needs attention.
+- **Rows** show the human title, technical key, lifecycle/status badge, risk,
+  effective version, scheduled marker, summary, a one-line value preview and the
+  effect. Clicking a row opens a detail drawer.
+- **Detail drawer** tabs: Overview (description, reader, effect, risk reason,
+  default, related settings, Guide link, governance warning), Value (typed editor
+  grouped by field group with hints, units, option hints and a field filter) and
+  History (current/scheduled/superseded versions, diff, load into editor).
+- **Deep links**: `?section=risk&open=screening.fail_closed`.
+- **New setting** lists known runtime settings with no stored row and an advanced
+  custom-key path. A custom key is explicitly described as stored value only; the
+  platform will not read it until a core reader and catalog entry exist.
+
+Lifecycle semantics:
+
+| Status | Meaning |
+| :--- | :--- |
+| **Live policy** (`RUNTIME`) | Core reads the key at runtime. |
+| **Legacy fallback** (`FALLBACK`) | Read only when the canonical key is absent. |
+| **Recorded decision** (`DECISION`) | Decision-register record; no runtime effect. |
+| **Retired** (`DEPRECATED`) | No longer read; read-only. |
+| **Managed elsewhere** (`MANAGED`) | Another screen owns it; the drawer links there. |
+| **System-managed** (`SYSTEM`) | Seeder/deploy owns it; read-only. |
+| **Gateway evidence** (`DYNAMIC`) | `gateway.go_live.*` family created by the wizard. |
+| **Using default** (`UNCONFIGURED`) | Known runtime key with no stored row; defaults are shown. |
+| **Unregistered** (`UNREGISTERED`) | Key is not in the catalog; the screen warns instead of guessing. |
+
+The UI distinguishes **latest**, **effective** and **scheduled** versions:
+
+- Latest = highest version number.
+- Effective = highest version whose `effectiveFrom` has passed.
+- Scheduled = future-effective versions.
+
+The row shows the effective value. A scheduled version is flagged and the drawer
+warns that saving a new version now supersedes it. The edit form is prefilled
+from the latest version so a scheduled value is not silently replaced in the
+editor.
 
 A save:
 
 1. Validates the key against `^[A-Za-z0-9._:-]{2,120}$`.
-2. Requires a JSON object (not an array or scalar).
+2. Requires a JSON object (not an array or scalar) and the typed field checks.
 3. Requires the setting checklist when checklists are visible.
-4. Calls `PUT v1/admin/settings` with `settings: { [key]: parsed }` and the checked keys.
-5. The backend creates the next version with `scope: "PLATFORM"` and an effective date (now unless supplied) and writes a `PLATFORM_SETTINGS_UPDATED` audit entry.
+4. Requires a change note of at least three characters.
+5. Calls `PUT v1/admin/settings` with `settings: { [key]: parsed }`, the checked
+   keys and `reason`.
+6. Core writes the next immutable version, audit `PLATFORM_SETTINGS_UPDATED`
+   with the settings, checklist and reason, and invalidates the merchant-report
+   and route-health policy caches.
 
-This path is versioned and audited but is **not** a maker-checker approval. The form marks fields as sensitive/maker-checker, but the backend handler writes directly for an operator with `settings:write`.
+The settings page is **not maker-checker**. The UI does not show a false
+"Four-Eyes Required" badge; it states that the change is immediate and audited,
+and recommends a second reviewer for high-risk settings. Maker-checker for
+platform settings remains a separate future feature.
 
-The history dialog can compare an older version with the current version. The diff is computed by flattening both JSON objects and listing added/removed/changed paths. "Load into editor" copies a version's JSON into the editor; it does not write until the operator saves.
-
-Backup export downloads a JSON file containing the latest version per key with `exportedAt`, key/scope/version/value/effective/updated fields, and writes a `PLATFORM_SETTINGS_EXPORTED` audit entry.
-
-Restore is preview-first:
-
-- The operator selects a JSON file.
-- The backend validates entries, computes `ADDED`/`CHANGED`/`UNCHANGED`/`INVALID` and the missing-in-backup keys, and returns the preview. Preview requires only read authority and writes a preview audit entry.
-- Apply requires a reason of at least 3 characters, the restore checklist, `confirm: true`, and only sends entries that are added/changed and have a value.
-- The backend rejects invalid entries before apply and checks `expectedCurrentVersion` for each setting inside a transaction. A concurrent change returns `409 SETTING_VERSION_CONFLICT`.
-- Apply creates new versions and writes `PLATFORM_SETTINGS_RESTORED` with the reason and checklist.
-
-The summary card shows keys, versions, updates in the last 24 hours, future-effective count, and per-scope counts. The summary export is a CSV-to-XLSX workbook of those metrics.
-
-### 3.3 Checkout help settings (`/settings/checkout-help`)
+`checkout.support_config` is listed as **Managed elsewhere** and links to
+`/settings/checkout-help`.
 
 Page: `admin-front/src/pages/settings/checkout-help/index.tsx`.
 
@@ -1549,15 +1611,17 @@ The UI hides write controls where it knows the authority. The backend remains au
 ## 4. Contracts and invariants
 
 1. **Platform settings are append-only versions.** A save never mutates an existing row; the next version is `latest + 1`.
-2. **The effective version is the highest version whose effective date has passed.** Future-effective versions remain visible but are not yet effective.
-3. **Restore must preview first.** Apply requires explicit confirmation, a reason, the checklist, and matching `expectedCurrentVersion` values.
-4. **Invalid restore entries block apply.** The UI and backend both refuse to apply when `invalid > 0`.
-5. **Backup policy is maker-checker.** The maker submits; a different checker executes through approvals.
-6. **Backup trigger/drill are immediate writes under `security:write`.** They are not maker-checker approvals.
-7. **Checkout support save creates a new version and audit entries.** It is not a maker-checker execution.
-8. **The Academy team view requires the `SECURITY_ADMIN` role and writes an audit entry; exam grading is server-side.**
-9. **All spreadsheet exports use the shared XLSX pipeline.**
-10. **Runtime visibility flags override build-time flags.**
+2. **The effective version is the highest version whose effective date has passed.** The row shows the effective value; a future version is shown as scheduled and is never displayed as current.
+3. **The catalog is the explanation.** Every seeded key and every runtime key must have a catalog definition with a section, summary, description, reader, effect, risk, risk reason, defaults and hints for every field. An unknown key is shown as Unregistered, not silently edited as if it were understood.
+4. **Restore must preview first.** Apply requires explicit confirmation, a reason, the checklist, and matching `expectedCurrentVersion` values.
+5. **Invalid restore entries block apply.** The UI and backend both refuse to apply when `invalid > 0`.
+6. **Backup policy is maker-checker.** The maker submits; a different checker executes through approvals.
+7. **Backup trigger/drill are immediate writes under `security:write`.** They are not maker-checker approvals.
+8. **Checkout support save creates a new version and audit entries.** It is not a maker-checker execution.
+9. **Platform settings are immediate and audited, not maker-checker.** The UI states this and requires a change note; high-risk settings should be reviewed by a second person out of band.
+10. **The Academy team view requires the `SECURITY_ADMIN` role and writes an audit entry; exam grading is server-side.**
+11. **All spreadsheet exports use the shared XLSX pipeline.**
+12. **Runtime visibility flags override build-time flags.**
 
 ## 5. Data / API / config / deployment surface
 
@@ -1578,7 +1642,7 @@ The UI hides write controls where it knows the authority. The backend remains au
 - Review backups: start with WAL lag, daemon reachability, target health and the latest drill. A failed/absent drill is not a healthy backup posture.
 - Trigger a backup: choose a target and kind; `delta` is not a substitute for a full restore point.
 - Change backup policy: submit the form, then have a different checker execute the pending approval. The backup page will not execute it directly.
-- Change a platform setting: edit the JSON object, record the checklist, and save; verify the new version and effective date. Treat the form's maker-checker hint as advisory only.
+- Change a platform setting: search by name or key, open the row, read the reader/effect/risk and field hints, complete the checklist, write a change note and save. Verify the current and scheduled versions. The change is immediate and audited; ask a second person to review high-risk settings out of band.
 - Restore settings: preview, inspect invalid/missing/version conflicts, then apply with a real reason. Do not retry a version conflict without re-previewing.
 - Change checkout support: ensure contact channels and FAQ content are valid in both languages, preview the result, and save. This changes payer-visible help immediately for new fetches.
 - Academy team view not visible: it needs the `SECURITY_ADMIN` role.
@@ -1598,8 +1662,9 @@ The UI hides write controls where it knows the authority. The backend remains au
 
 - The backup page does not hand the operator into the specific pending approval after a policy save.
 - `BACKUP_POLICY` is missing from the shared approvals subject-type filter options, even though the backend supports it.
-- Platform settings and checkout support are versioned/audited but not maker-checker.
-- The route-level UI gates for platform settings and checkout help are absent (the Academy team route is role-gated).
+- Platform settings and checkout support are versioned/audited but not maker-checker. The settings page states this honestly and requires a change note.
+- The settings catalog is frontend metadata; a new core key without a catalog entry appears as Unregistered until the catalog, hints and translations are added.
+- Checkout support is managed on its own screen and appears read-only in the settings workspace.
 - Academy labs are browser-graded practice; certification is decided only by server-graded exams.
 
 ### Missing / deferred
@@ -1613,21 +1678,71 @@ The UI hides write controls where it knows the authority. The backend remains au
 
 - **Workflow gap:** a backup policy maker cannot continue directly to approval; the pending request must be found in the general approvals queue.
 - **Filter gap:** the approvals subject filter cannot select `BACKUP_POLICY`.
-- **Governance gap:** `sensitiveMakerChecker` hints on platform settings/checkout help fields do not produce a maker-checker approval.
-- **Authorization risk:** direct navigation to settings/checkout help is not blocked by the router; the page loads and then fails backend calls for unauthorized users.
+- **Governance gap:** platform settings/checkout help saves are immediate and audited, not maker-checker. High-risk settings rely on an out-of-band second review.
+- **Catalog drift risk:** a runtime key added without a catalog definition will display as Unregistered and cannot explain its effect.
 - **Export scope risk:** table exports are current-page only; do not treat them as full-result exports.
 - **Documentation gap:** historical design claims about weekly drills/hourly Redis/ready-to-run backup certificates are superseded by the storage/backup parts.
 
 ## 8. Verification and tests
 
+- `tests/e2e/admin/platform-settings.spec.ts` proves sections, search, status badges, the drawer, current vs scheduled versions, unconfigured/managed settings, the typed save body with change note and the phone layout.
+- `tests/unit/platform-settings.test.ts` proves seeded-key catalog coverage, field hints, section/status translation, defaults, effective/scheduled versions, unregistered keys, search (including Arabic) and go-live aspect editors.
 - `tests/e2e/admin/backups.spec.ts` mocks the backup overview and verifies the rendered health/schedule/drill state and the trigger request payload.
 - `core-back/test/backup-admin/backup-admin-routes.test.ts` covers backup route authority, trigger/drill/policy behavior and audit entries.
+- `core-back/test/automation/business-time.test.ts` covers the `calendar.holidays` object shape.
+- `admin-back/test/core-contract.test.ts` proves the change note (`reason`) is forwarded to core.
 - `tests/unit/academy-content.test.ts` covers the Academy content counts.
 - The XLSX pipeline has no dedicated unit test in this repository; coverage is through page-level usage and the shared UI compliance test.
 
 The backup E2E suite requires the live stack; the core backup test requires PostgreSQL/Redis.
 
-## 9. Source references
+## 9. Communication settings (2026-11-26)
+
+The settings catalog registers four runtime keys with typed editors:
+
+| Key | Section | Purpose |
+| :--- | :--- | :--- |
+| `communication.email` | Operations & data | Primary SMTP channel: host, port, security, credentials, sender and timeout. Merchant registration and sign-in stay in maintenance while it is not configured. |
+| `communication.sms` | Operations & data | Optional signed SMS aggregator webhook and sender ID. SMS is additive; email remains primary. |
+| `communication.policy` | Operations & data | Which templates may also use SMS (`OFF`, `AUTH_ONLY`, `CRITICAL_ONLY`, `ALL`) and whether staff may fall back to SMS when email is missing. |
+| `auth.google` | Merchants & onboarding | Server-side Google OAuth 2.0 client ID, secret, redirect URI and optional hosted domain for merchant sign-in and registration. |
+
+All four use `showWhenUnconfigured`, so they appear as **Using default** before the first save and can be created from the detail drawer. Secrets (`smtpPassword`, `webhookSecret`, `clientSecret`) use the `secret` field kind: the API returns a mask, a blank input keeps the stored value, and the value is stored encrypted in `platform_setting_secrets`.
+
+The **Communication** tab sits beside **Platform settings** and **Notification templates**. It shows email, SMS and Google readiness (configured, source, missing fields, last test, last delivery, consecutive failures), the merchant maintenance banner and test-send actions. Each card opens the matching typed setting in the same detail drawer. The tab does not save values itself, so the change-note, checklist and immutable-version rules are identical to every other setting.
+
+`tests/unit/platform-settings.test.ts` requires every definition string and field hint to have an Arabic entry; the communication strings live in `constants/i18n/settings.ts`. `tests/e2e/admin/platform-settings.spec.ts` covers the tab, the maintenance banner and opening the typed email editor.
+
+## 10. Adding or changing a platform setting
+
+The full developer checklist is in `docs/developer/platform-settings.md`. The
+canonical rule is:
+
+1. Decide whether it is a platform setting, deploy/env config, a domain column or
+   static UI text. Never store secrets, personal data or AML-confidential
+   evidence in a setting.
+2. Choose an immutable `domain.name` key and a JSON object value with safe
+   defaults.
+3. Add the default to `core-back/prisma/platformSettingsSeed.ts` when every
+   environment should have it.
+4. Add the core reader with defensive parsing, a safe fallback and cache
+   invalidation after a settings save.
+5. Add the catalog definition in `settingsCatalog.ts`: section, summary,
+   description, readBy, effect, risk, riskReason, defaults, keywords, edit/create
+   flags and a hint for every field.
+6. Add the typed namespace in `settingsSchemas.ts`; every field needs a label,
+   hint, type and optional unit/default/options.
+7. Add English and Arabic text in `admin-front/src/constants/i18n/settings.ts`.
+8. Add or update unit, core, edge and Playwright tests.
+9. Update this part, the route/test catalogues, `TRACKER.md`, the Guide article
+   and the Companion snapshot when the operator-facing behavior changes.
+10. Run `bun scripts/project-design/build.ts --check`, `git diff --check` and the
+    relevant workspace gates.
+
+Lifecycle status must be honest: if nothing reads the key at runtime, mark it
+`DECISION` and say so. Do not present a recorded decision as a live switch.
+
+## 11. Source references
 
 ### Old design sections
 
@@ -1639,7 +1754,10 @@ The backup E2E suite requires the live stack; the core backup test requires Post
 
 - `admin-front/src/pages/system/backups/index.tsx`
 - `admin-front/src/pages/settings/platform/index.tsx`
+- `admin-front/src/pages/settings/platform/components/**`
+- `admin-front/src/components/builders/model/{settingsSchemas,settingsCatalog,settingsSearch}.ts`
 - `admin-front/src/pages/settings/checkout-help/index.tsx`
+- `docs/developer/platform-settings.md`
 - `admin-front/src/pages/academy/*.tsx`
 - `admin-front/src/utils/xlsx/**`
 - `admin-front/src/components/ui/SummaryExportCard.tsx`
@@ -1654,7 +1772,7 @@ The backup E2E suite requires the live stack; the core backup test requires Post
 - `project-design/appendices/env-and-config-matrix.md`
 - `project-design/appendices/test-inventory.md`
 
-## 10. Change history
+## 12. Change history
 
 - 2026-11-03 — Initial canonical operations part. Records backup/target/drill/policy behavior, settings versioning/restore, checkout-support history/diff, academy reporting, export/checklist behavior, and the authority/workflow gaps.
 

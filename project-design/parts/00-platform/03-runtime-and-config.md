@@ -12,6 +12,9 @@ code:
   - core-back/prisma/client/index.ts
   - core-back/lib/storageEngine/index.ts
   - core-back/engine/workers/productionRuntime.ts
+  - core-back/lib/communication/settings.ts
+  - core-back/lib/communication/bootstrap.ts
+  - core-back/engine/notifications/CommunicationTransport.ts
   - core-back/lib/invalidationBus/index.ts
   - core-back/lib/requestLogger/index.ts
   - core-back/lib/rawBody/index.ts
@@ -567,3 +570,40 @@ New core keys: `EXECUTION_PLANE` (`LIVE`|`SANDBOX`, default `LIVE`), `PLANE_FENC
 
 - `BASE_CURRENCY` (default `LYD`) is the reporting/display default; ledger books remain per-currency and no FX conversion is implied.
 - `LEDGER_STRICT_CONTEXT=true` is written by the deploy engine so a currency-scoped account lookup without a currency fails with `MISSING_LEDGER_CURRENCY` instead of falling back to the first currency.
+
+## v46 communication configuration (2026-11-26)
+
+Email is the primary channel and SMS is an optional second channel for critical
+authentication messages. The configuration lives in the Platform Settings keys
+`communication.email`, `communication.sms`, `communication.policy` and
+`auth.google`; the environment is the first-run bootstrap and a per-field
+fallback for blank values. An explicit `enabled: false` saved by an administrator
+wins and is never overridden.
+
+Core keys: `COMMUNICATION_BOOTSTRAP_ENABLED` (default true),
+`COMMUNICATION_EMAIL_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY`
+(`TLS`|`STARTTLS`|`NONE`), `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`,
+`SMTP_FROM_NAME`, `SMTP_REPLY_TO`, `SMTP_TIMEOUT_MS`, `SMTP_ALLOW_INSECURE`,
+`COMMUNICATION_SMS_ENABLED`, `SMS_WEBHOOK_URL`, `SMS_WEBHOOK_SECRET`,
+`SMS_SENDER_ID`, `SMS_TIMEOUT_MS`, `GOOGLE_AUTH_ENABLED`, `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `GOOGLE_HOSTED_DOMAIN`,
+`PLATFORM_ALERT_EMAIL` and `PLATFORM_ALERT_SMS`. Secrets are sealed in
+`platform_setting_secrets` by the Vault; they are never returned by the settings
+API or included in a settings export.
+
+On startup `lib/communication/bootstrap.ts` copies the environment into version 1
+of the three settings (under an advisory lock) when no administrator has saved
+them. It updates only an `ENV_BOOTSTRAP` row; an `ADMIN` row is authoritative.
+Operators can run `bun run communication:bootstrap` and use
+`bun run mail:dev` (Maildev SMTP `127.0.0.1:1025`, web `127.0.0.1:1080`) for a
+local inbox.
+
+When email is not configured, merchant registration and sign-in return
+`503 AUTH_MAINTENANCE_EMAIL_NOT_CONFIGURED`; the public `GET
+/internal/merchant/auth/me` advertises the maintenance state, and the admin
+shell shows the security/administrator warning. The platform monitor opens
+`COMMUNICATION_UNCONFIGURED`, notifies authorised staff in-app and by SMS when
+SMS is configured, and clears the case automatically when email becomes ready.
+The deploy engine validates `SMTP_FROM_EMAIL`/`SMTP_HOST` when email is enabled,
+refuses `SMTP_SECURITY=NONE` and `SMTP_ALLOW_INSECURE=true` in production, and
+requires the SMS/Google fields when those channels are enabled.

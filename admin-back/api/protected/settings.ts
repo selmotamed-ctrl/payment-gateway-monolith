@@ -116,6 +116,32 @@ router.get(
   }),
 );
 
+router.get(
+  "/communication/status",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/settings/communication/status",
+  }),
+);
+
+router.post(
+  "/communication/test-email",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/admin/settings/communication/test-email",
+    schema: z.object({ to: z.string().email() }).strict(),
+  }),
+);
+
+router.post(
+  "/communication/test-sms",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/admin/settings/communication/test-sms",
+    schema: z.object({ to: z.string().min(6).max(32) }).strict(),
+  }),
+);
+
 router.put(
   "/",
   coreForward({

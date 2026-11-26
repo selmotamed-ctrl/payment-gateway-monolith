@@ -119,6 +119,13 @@ import { hashPassword, signSession, verifyPasswordOrDummy } from "../../lib/auth
 import { hashInvitationToken, issueStaffInvitation } from "../../lib/staffInvitation";
 import { revokePrincipalSession } from "../middleware/authDoubleCheck";
 import { issueMfaChallenge, verifyMfaChallenge } from "../../lib/auth/mfaChallenges";
+import { communicationStatus, getCommunicationConfiguration, hasRealEmail, invalidateCommunicationSettingsCache, publicCommunicationStatus } from "../../lib/communication/settings";
+import { extractSettingSecrets, listPlatformSettingsForApi, persistSettingSecrets, redactSettingSecretsForExport, SECRET_MASK } from "../../lib/communication/settingsWrite";
+import { sendTestEmail, sendTestSms } from "../../lib/communication/testDelivery";
+import { resolveOtpDelivery } from "../../lib/communication/policy";
+import { ensureCommunicationTemplates } from "../../lib/communication/templates";
+import { markEmailVerified } from "../../lib/auth/emailVerification";
+import { requestPasswordReset, resetPasswordWithCode } from "../../lib/auth/passwordReset";
 import {
   assertLoginAllowed,
   assertNotThrottled,
@@ -860,6 +867,43 @@ export const proposeReportingRulePromotion = async (
   });
 };
 
+const issueAdminLoginChallenge = async (
+  user: { id: string; email: string | null; phone: string | null; role: string; merchantId: string | null },
+  ip: string | null,
+  db: typeof client | Tx = client,
+): Promise<{ challengeId: string; channels: Array<"EMAIL" | "SMS">; destinationMasked: Record<string, string> }> => {
+  await ensureCommunicationTemplates(db as never);
+  const config = await getCommunicationConfiguration(client as never);
+  const delivery = resolveOtpDelivery(
+    config,
+    { email: user.email, phone: user.phone },
+    { channel: "ADMIN", purpose: "LOGIN_MFA" },
+  );
+  if (delivery.channels.length === 0) {
+    throw new ApiError(
+      503,
+      "NO_DELIVERY_CHANNEL",
+      "No configured channel can deliver a verification code. Configure email or SMS in Platform Settings",
+    );
+  }
+  return issueMfaChallenge(db as never, {
+    userId: user.id,
+    channel: "ADMIN",
+    email: delivery.email,
+    phone: delivery.phone,
+    phoneLast4: delivery.phone?.slice(-4),
+    deliveries: delivery.channels.map((deliveryChannel) => ({
+      channel: deliveryChannel,
+      address: deliveryChannel === "EMAIL" ? delivery.email! : delivery.phone!,
+      masked:
+        deliveryChannel === "EMAIL"
+          ? delivery.destinationMasked.email!
+          : delivery.destinationMasked.phone!,
+    })),
+    ip,
+  });
+};
+
 router.post("/auth/login", async (request: Request, response: Response) => {
   const body = parseOrThrow(
     z.object({ identifier: z.string().min(3).max(128), password: z.string().min(1).max(128) }).strict(),
@@ -890,16 +934,13 @@ router.post("/auth/login", async (request: Request, response: Response) => {
   }
   await recordLoginSuccess(identifier, ip);
   if (staffUser.mfaRequired) {
-    const { challengeId } = await client.$transaction((tx) =>
-      issueMfaChallenge(tx as never, {
-        userId: staffUser.id,
-        channel: "ADMIN",
-        phone: staffUser.phone,
-        phoneLast4: (staffUser.phone ?? "").slice(-4),
-        ip,
-      }),
-    );
-    response.json({ mfaRequired: true, challengeId });
+    const issued = await issueAdminLoginChallenge(staffUser, ip);
+    response.json({
+      mfaRequired: true,
+      challengeId: issued.challengeId,
+      deliveryChannels: issued.channels,
+      destinationMasked: issued.destinationMasked,
+    });
     return;
   }
   const authorities = Array.isArray(staffUser.authoritiesMap)
@@ -935,6 +976,7 @@ router.post("/auth/mfa", async (request: Request, response: Response) => {
       challengeId: body.challengeId,
       code: body.code,
       channel: "ADMIN",
+      purpose: "LOGIN_MFA",
     });
   } catch (error) {
     await recordMfaFailure(ip);
@@ -972,11 +1014,12 @@ router.post("/auth/mfa/resend", async (request: Request, response: Response) => 
   await assertMfaAllowed(ip);
   const challenge = await client.mfaChallenge.findUnique({
     where: { id: body.challengeId },
-    select: { id: true, userId: true, channel: true, consumedAt: true, expiresAt: true },
+    select: { id: true, userId: true, channel: true, purpose: true, consumedAt: true, expiresAt: true },
   });
   if (
     !challenge
     || challenge.channel !== "ADMIN"
+    || String(challenge.purpose ?? "LOGIN_MFA") !== "LOGIN_MFA"
     || challenge.consumedAt
     || challenge.expiresAt.getTime() <= Date.now()
   ) {
@@ -985,7 +1028,7 @@ router.post("/auth/mfa/resend", async (request: Request, response: Response) => 
   }
   const user = await client.user.findUnique({
     where: { id: challenge.userId },
-    select: { id: true, phone: true, mfaRequired: true, status: true, merchantId: true, role: true },
+    select: { id: true, email: true, phone: true, mfaRequired: true, status: true, merchantId: true, role: true },
   });
   if (
     !user
@@ -997,17 +1040,11 @@ router.post("/auth/mfa/resend", async (request: Request, response: Response) => 
     await recordMfaFailure(ip);
     throw new ApiError(400, "MFA_CHALLENGE_INVALID", "The verification challenge is no longer valid. Sign in again");
   }
-  const { challengeId } = await client.$transaction(async (tx) => {
+  const issued = await client.$transaction(async (tx) => {
     // Serialise issuance per user: two concurrent resends must not both pass
     // the per-window issue check and leave two live challenges.
     await tx.$queryRawUnsafe("SELECT id FROM users WHERE id = $1::uuid FOR UPDATE", user.id);
-    const issued = await issueMfaChallenge(tx as never, {
-      userId: user.id,
-      channel: "ADMIN",
-      phone: user.phone,
-      phoneLast4: (user.phone ?? "").slice(-4),
-      ip,
-    });
+    const result = await issueAdminLoginChallenge(user, ip, tx as never);
     await writeAudit(tx, {
       data: {
         actorId: user.id,
@@ -1016,19 +1053,66 @@ router.post("/auth/mfa/resend", async (request: Request, response: Response) => 
         entityType: "USER",
         entityId: user.id,
         beforeJson: { challengeId: challenge.id },
-        afterJson: { challengeId: issued.challengeId, ip },
+        afterJson: { challengeId: result.challengeId, ip },
       },
     });
-    return issued;
+    return result;
   });
-  response.json({ mfaRequired: true, challengeId });
+  response.json({
+    mfaRequired: true,
+    challengeId: issued.challengeId,
+    deliveryChannels: issued.channels,
+    destinationMasked: issued.destinationMasked,
+  });
 });
 
-router.get("/auth/me", (_request: Request, response: Response) => {
+router.post("/auth/password/forgot", async (request: Request, response: Response) => {
+  const body = parseOrThrow(z.object({ email: z.string().email() }).strict(), request.body);
+  await requestPasswordReset(client as never, { email: body.email, channel: "ADMIN", ip: clientIp(request) });
+  response.status(202).json({ accepted: true });
+});
+
+router.post("/auth/password/reset", async (request: Request, response: Response) => {
+  const body = parseOrThrow(
+    z.object({
+      email: z.string().email(),
+      code: z.string().regex(/^\d{6}$/),
+      newPassword: z.string().min(12).max(128),
+    }).strict(),
+    request.body,
+  );
+  const result = await resetPasswordWithCode(client as never, {
+    email: body.email,
+    code: body.code,
+    newPassword: body.newPassword,
+    channel: "ADMIN",
+  });
+  await writeAudit(client, {
+    data: {
+      actorId: result.userId,
+      role: "GATEWAY_ADMIN",
+      action: "ADMIN_PASSWORD_RESET",
+      entityType: "USER",
+      entityId: result.userId,
+      beforeJson: {},
+      afterJson: { sessionsInvalidated: true },
+    },
+  });
+  response.json({ reset: true, loginRequired: true });
+});
+
+router.get("/auth/me", async (_request: Request, response: Response) => {
+  let communication;
+  try {
+    communication = publicCommunicationStatus(await communicationStatus(client as never));
+  } catch {
+    communication = null;
+  }
   response.json({
     platformName: "Payment Gateway",
     version: process.env.GIT_COMMIT?.slice(0, 12) ?? "dev",
     suspended: false,
+    communication,
   });
 });
 
@@ -1044,7 +1128,8 @@ router.post("/auth/accept-invitation", async (request: Request, response: Respon
     z.object({
       token: z.string().min(16).max(256),
       password: z.string().min(12).max(128),
-      phone: z.string().trim().regex(/^\+?[0-9 ()-]{6,20}$/),
+      /** Optional: e-mail is the primary MFA channel; a phone adds SMS as a secondary channel. */
+      phone: z.string().trim().regex(/^\+?[0-9 ()-]{6,20}$/).optional(),
     }).strict(),
     request.body,
   );
@@ -1058,10 +1143,12 @@ router.post("/auth/accept-invitation", async (request: Request, response: Respon
     await recordFailure("staff-invite-ip", ip, STAFF_INVITE_IP_POLICY);
     throw new ApiError(400, "INVITATION_INVALID", "The invitation is invalid or has expired");
   }
-  const phone = body.phone.replace(/[\s()-]/g, "");
-  const phoneTaken = await client.user.findFirst({ where: { phone, NOT: { id: user.id } }, select: { id: true } });
-  if (phoneTaken) {
-    throw new ApiError(409, "PHONE_UNAVAILABLE", "This phone number cannot be used for sign-in codes");
+  const phone = body.phone ? body.phone.replace(/[\s()-]/g, "") : null;
+  if (phone) {
+    const phoneTaken = await client.user.findFirst({ where: { phone, NOT: { id: user.id } }, select: { id: true } });
+    if (phoneTaken) {
+      throw new ApiError(409, "PHONE_UNAVAILABLE", "This phone number cannot be used for sign-in codes");
+    }
   }
   const passwordHash = await hashPassword(body.password);
   await client.$transaction(async (tx) => {
@@ -1073,6 +1160,18 @@ router.post("/auth/accept-invitation", async (request: Request, response: Respon
     if (consumed.count !== 1) {
       throw new ApiError(400, "INVITATION_INVALID", "The invitation is invalid or has expired");
     }
+    if (phone) {
+      const identity = await tx.userIdentity.findFirst({
+        where: { userId: user.id, kind: "PHONE", identifierNormalized: phone },
+        select: { id: true },
+      });
+      if (!identity) {
+        await tx.userIdentity.create({
+          data: { userId: user.id, kind: "PHONE", identifierNormalized: phone, verifiedAt: new Date(), isPrimary: false },
+        });
+      }
+    }
+    await markEmailVerified(tx as never, user.id, user.email);
     await writeAudit(tx, {
       data: {
         actorId: user.id,
@@ -1081,7 +1180,7 @@ router.post("/auth/accept-invitation", async (request: Request, response: Respon
         entityType: "USER",
         entityId: user.id,
         beforeJson: { credentialsSet: false },
-        afterJson: { credentialsSet: true, phoneLast4: phone.slice(-4) },
+        afterJson: { credentialsSet: true, emailVerified: true, phoneLast4: phone ? phone.slice(-4) : null },
       },
     });
   });
@@ -1957,13 +2056,13 @@ const requiresUserApproval = (body: {
   || body.isChecker !== undefined
   || body.status === "ACTIVE";
 
-/** Activation needs the invitee's own password and MFA phone (set by accepting the invitation). */
-const assertStaffInvitationCompleted = (user: { passwordHash?: string | null; phone?: string | null; mfaRequired?: boolean }): void => {
-  if (!user.passwordHash || (user.mfaRequired !== false && !user.phone)) {
+/** Activation needs the invitee's own password and a deliverable e-mail (the primary MFA channel). */
+const assertStaffInvitationCompleted = (user: { passwordHash?: string | null; email?: string | null; mfaRequired?: boolean }): void => {
+  if (!user.passwordHash || (user.mfaRequired !== false && !hasRealEmail(user.email))) {
     throw new ApiError(
       409,
       "USER_INVITATION_PENDING",
-      "The invitee has not accepted the invitation yet (no password or MFA phone set by the user)",
+      "The invitee has not accepted the invitation yet (no password or deliverable e-mail set by the user)",
     );
   }
 };
@@ -20121,8 +20220,76 @@ router.get("/audit-logs/:id", async (request: Request, response: Response) => {
 
 router.get("/settings", async (request: Request, response: Response) => {
   requireAuthorities(request, ["settings:read"]);
-  const settings = await client.platformSetting.findMany({ orderBy: [{ key: "asc" }, { version: "desc" }] });
+  const settings = await listPlatformSettingsForApi(client);
   response.json({ settings });
+});
+
+router.get("/settings/communication/status", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["settings:read"]);
+  const status = await communicationStatus(client as never, { force: true });
+  const configuration = await getCommunicationConfiguration(client as never, { force: true });
+  response.json({
+    status,
+    configuration: {
+      email: {
+        ...configuration.email,
+        smtpPassword: configuration.email.smtpPassword ? SECRET_MASK : "",
+      },
+      sms: {
+        ...configuration.sms,
+        webhookSecret: configuration.sms.webhookSecret ? SECRET_MASK : "",
+      },
+      google: {
+        ...configuration.google,
+        clientSecret: configuration.google.clientSecret ? SECRET_MASK : "",
+      },
+      policy: configuration.policy,
+    },
+  });
+});
+
+router.post("/settings/communication/test-email", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["settings:write"]);
+  const body = parseOrThrow(z.object({ to: z.string().email() }).strict(), request.body ?? {});
+  const result = await sendTestEmail(client as never, { to: body.to });
+  const actor = actorFromRequest(request);
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "COMMUNICATION_EMAIL_TESTED",
+      entityType: "PLATFORM_SETTING",
+      entityId: "communication.email",
+      beforeJson: {},
+      afterJson: { ok: result.ok, toMasked: body.to.replace(/^(.{2}).*(@.*)$/, "$1***$2") },
+    },
+  });
+  if (!result.ok) {
+    throw new ApiError(422, "COMMUNICATION_TEST_FAILED", result.error ?? "The test email could not be sent");
+  }
+  response.json(result);
+});
+
+router.post("/settings/communication/test-sms", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["settings:write"]);
+  const body = parseOrThrow(z.object({ to: z.string().min(6).max(32) }).strict(), request.body ?? {});
+  const result = await sendTestSms(client as never, { to: body.to });
+  const actor = actorFromRequest(request);
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "COMMUNICATION_SMS_TESTED",
+      entityType: "PLATFORM_SETTING",
+      entityId: "communication.sms",
+      beforeJson: {},
+      afterJson: { ok: result.ok, toMasked: `*******${body.to.slice(-4)}` },
+    },
+  });
+  if (!result.ok) {
+    throw new ApiError(422, "COMMUNICATION_TEST_FAILED", result.error ?? "The test SMS could not be sent");
+  }
+  response.json(result);
 });
 
 router.post("/settings/restore-preview", async (request: Request, response: Response) => {
@@ -20268,14 +20435,23 @@ router.post("/settings/restore-apply", async (request: Request, response: Respon
           scope,
         });
       }
+      const extracted = extractSettingSecrets(key, entry.valueJson);
       const created = await tx.platformSetting.create({
         data: {
           key,
           scope,
           version: actualVersion + 1,
-          valueJson: json(entry.valueJson),
+          valueJson: json(extracted.valueJson),
+          source: "ADMIN",
           effectiveFrom,
         },
+      });
+      await persistSettingSecrets(tx as never, {
+        key,
+        scope,
+        version: created.version,
+        previousVersion: current?.version ?? null,
+        extracted,
       });
       written.push({ key, scope, version: created.version });
     }
@@ -20294,6 +20470,7 @@ router.post("/settings/restore-apply", async (request: Request, response: Respon
   });
   invalidateMerchantReportPolicyCache();
   invalidateRouteHealthPolicyCache();
+  invalidateCommunicationSettingsCache();
   response.json({ applied: applied.length, settings: applied });
 });
 
@@ -20328,7 +20505,7 @@ router.get("/settings/export", async (request: Request, response: Response) => {
     exportedAt,
     keys: latest.size,
     versions: rows.length,
-    settings: [...latest.values()].map((row) => ({
+    settings: [...latest.values()].map((row) => redactSettingSecretsForExport({
       key: row.key,
       scope: row.scope,
       version: row.version,
@@ -20425,29 +20602,41 @@ router.put("/settings", async (request: Request, response: Response) => {
           "EFFECTIVE_DATE_REVIEWED",
           "IMMUTABLE_VERSION_ACKNOWLEDGED",
         ])).max(10).optional(),
+        reason: z.string().trim().min(3).max(500).optional(),
       })
       .strict(),
     request.body,
   );
   const actor = actorFromRequest(request);
-  const written = [];
-  for (const setting of body.settings) {
-    const latest = await client.platformSetting.findFirst({
-      where: { key: setting.key },
-      orderBy: { version: "desc" },
-    });
-    const version = (latest?.version ?? 0) + 1;
-    const created = await client.platformSetting.create({
-      data: {
+  const written: Array<{ key: string; version: number }> = [];
+  await client.$transaction(async (tx) => {
+    for (const setting of body.settings) {
+      const latest = await tx.platformSetting.findFirst({
+        where: { key: setting.key, scope: "PLATFORM" },
+        orderBy: { version: "desc" },
+      });
+      const version = (latest?.version ?? 0) + 1;
+      const extracted = extractSettingSecrets(setting.key, setting.valueJson);
+      const created = await tx.platformSetting.create({
+        data: {
+          key: setting.key,
+          scope: "PLATFORM",
+          valueJson: json(extracted.valueJson),
+          version,
+          source: "ADMIN",
+          effectiveFrom: setting.effectiveFrom ? new Date(setting.effectiveFrom) : new Date(),
+        },
+      });
+      await persistSettingSecrets(tx as never, {
         key: setting.key,
         scope: "PLATFORM",
-        valueJson: json(setting.valueJson),
         version,
-        effectiveFrom: setting.effectiveFrom ? new Date(setting.effectiveFrom) : new Date(),
-      },
-    });
-    written.push({ key: created.key, version: created.version });
-  }
+        previousVersion: latest?.version ?? null,
+        extracted,
+      });
+      written.push({ key: created.key, version: created.version });
+    }
+  });
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -20456,11 +20645,12 @@ router.put("/settings", async (request: Request, response: Response) => {
       entityType: "PLATFORM_SETTING",
       entityId: written[0]?.key ?? "settings",
       beforeJson: {},
-      afterJson: { settings: written, checklist: body.checklist ?? [] },
+      afterJson: { settings: written, checklist: body.checklist ?? [], reason: body.reason ?? null },
     },
   });
   invalidateMerchantReportPolicyCache();
   invalidateRouteHealthPolicyCache();
+  invalidateCommunicationSettingsCache();
   response.json({ settings: written });
 });
 

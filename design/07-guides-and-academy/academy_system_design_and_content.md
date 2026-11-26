@@ -691,7 +691,7 @@ Questions: c-l-m1-4-1, c-l-m1-4-2
 - Say what a signature proves and what it does not prove.
 
 ### Key ideas
-- **A password proves you know something. MFA adds a second proof.** MFA means multi-factor authentication. It is usually a six-digit code sent by SMS to the phone number on your account. Both are required for every admin. Never share the code.
+- **A password proves you know something. MFA adds a second proof.** MFA means multi-factor authentication. The code is sent to your email address first; if the platform has SMS configured and your account has a phone, the same code also arrives by SMS. Both factors are required for every staff sign-in. Never share the code.
 - **A token or API key is a password for software.** It is a long secret string that lets a program prove who it is. Anyone who has it can act as that program. Ours start with `pg_live_` and are shown once.
 - **Encryption locks data. A hash is a fingerprint.** Encryption means only someone with the key can read the data, and everything secret that we store is encrypted. A hash is a one-way fingerprint: the same data always gives the same fingerprint, a tiny change gives a completely different one, and you cannot go back from the fingerprint to the data.
 - **A signature proves who sent a message and that nobody changed it.** Think of a wax seal. In the digital version both sides know a shared secret. The sender computes a seal over the message, and the receiver computes it again and compares. A signature does not hide the message. Encryption does that, which is a different job.

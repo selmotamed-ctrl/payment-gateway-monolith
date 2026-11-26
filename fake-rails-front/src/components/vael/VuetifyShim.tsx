@@ -5,7 +5,7 @@
  * existing JSX names (`<VBtn>`, `<VTextField>`, …) working while the rendered
  * implementation is vael-ui (Vapor). No Vuetify module is imported here.
  */
-import { computed, onMounted, ref, useId } from "vue";
+import { computed, getCurrentInstance, onMounted, ref, useId } from "vue";
 import { useRouter } from "vue-router";
 import {
     Avatar,
@@ -122,12 +122,24 @@ const TEXT_ATTRS = [
     "step",
     "pattern",
     "autofocus",
+    "dir",
+    "title",
+    "tabindex",
+    "onClick",
+    "onChange",
+    "onPaste",
+    "onKeypress",
+    "onKeyPress",
     "onKeydown",
     "onKeyup",
     "onInput",
     "onBlur",
     "onFocus",
+    "autocapitalize",
+    "enterkeyhint",
+    "spellcheck",
     "aria-label",
+    "aria-labelledby",
     "aria-describedby",
     "aria-invalid",
     "aria-required",
@@ -137,6 +149,19 @@ const TEXT_ATTRS = [
 
 export const VBtn = dc((_p, _e, { attrs, slots }: any) => {
     const router = useRouter();
+    const instance = getCurrentInstance();
+    const resolveHref = (to: any): string => {
+        if (!to) return "";
+        const active = router ?? (instance?.appContext?.config?.globalProperties as any)?.$router;
+        if (active) {
+            try {
+                return active.resolve(to).href;
+            } catch {
+                /* fall through to a literal string target */
+            }
+        }
+        return typeof to === "string" ? to : "";
+    };
     const isIcon = Boolean(attrs.icon);
     const leading = icon(attrs.prependIcon);
     const trailing = icon(attrs.appendIcon);
@@ -167,9 +192,7 @@ export const VBtn = dc((_p, _e, { attrs, slots }: any) => {
         };
         const target = typeof attrs.href === "string" && attrs.href
             ? attrs.href
-            : attrs.to
-              ? router.resolve(attrs.to).href
-              : "";
+            : resolveHref(attrs.to);
         return (
             <Button
                 {...pick(attrs, ["class", "style", "disabled", "loading", "block", "type", "onClick", "aria-label", "title"])}
@@ -243,15 +266,55 @@ export const VAlert = dc((_p, _e, { attrs, slots }: any) => () => {
 });
 
 export const VTextField = dc((_p, _e, { attrs }: any) => {
-    return () => (
-        <input
-            {...pick(attrs, TEXT_ATTRS)}
-            class="pg-input v-field"
-            value={attrs.modelValue ?? ""}
-            onInput={(event: Event) => emitModel(attrs, (event.target as HTMLInputElement).value)}
-        />
-    );
-});
+    const localError = ref("");
+    const validate = (next: any = attrs.modelValue ?? "") => {
+        localError.value = runRules(attrs, next);
+    };
+    return () => {
+        const error = shownError(attrs, localError.value);
+        const control = (
+            <input
+                {...pick(attrs, TEXT_ATTRS)}
+                class={["pg-input", "v-field", attrs.class].filter(Boolean).join(" ")}
+                style={attrs.style}
+                value={attrs.modelValue ?? ""}
+                aria-label={attrs["aria-label"] ?? attrs.label ?? undefined}
+                aria-invalid={Boolean(error) || undefined}
+                onInput={(event: Event) => {
+                    const next = (event.target as HTMLInputElement).value;
+                    emitModel(attrs, next);
+                    validate(next);
+                }}
+                onBlur={(event: FocusEvent) => {
+                    attrs.onBlur?.(event);
+                    validate();
+                }}
+            />
+        );
+        if (!attrs.label && !attrs.hint && !error) return control;
+        return (
+            <div class="pg-text-field">
+                {attrs.label && (
+                    <span class="pg-field-label">
+                        {attrs.label}
+                        {attrs.required && (
+                            <span class="pg-field-required" aria-hidden="true">
+                                *
+                            </span>
+                        )}
+                    </span>
+                )}
+                {control}
+                {attrs.hint && !error && <span class="pg-field-hint">{attrs.hint}</span>}
+                {error && (
+                    <span class="pg-field-error" role="alert">
+                        {error}
+                    </span>
+                )}
+            </div>
+        );
+    };
+}, { inheritAttrs: false });
 
 
 export const VTextarea = dc((_p, _e, { attrs }: any) => {
@@ -812,6 +875,8 @@ export const VList = layoutDc((_p, _e, { attrs, slots }: any) => () => (
 
 export const VListItem = layoutDc((_p, _e, { attrs, slots }: any) => {
     const router = useRouter();
+    const instance = getCurrentInstance();
+    const activeRouter = () => router ?? (instance?.appContext?.config?.globalProperties as any)?.$router;
     return () => {
         const content = (
             <>
@@ -824,7 +889,7 @@ export const VListItem = layoutDc((_p, _e, { attrs, slots }: any) => {
             </>
         );
         if (attrs.to) {
-            const href = typeof attrs.to === "string" ? attrs.to : router.resolve(attrs.to).href;
+            const href = typeof attrs.to === "string" ? attrs.to : (activeRouter()?.resolve(attrs.to).href ?? "");
             return (
                 <li class={["pg-list-item", attrs.class].filter(Boolean).join(" ")}>
                     <a
@@ -833,8 +898,8 @@ export const VListItem = layoutDc((_p, _e, { attrs, slots }: any) => {
                         onClick={(event: MouseEvent) => {
                             event.preventDefault();
                             attrs.onClick?.(event);
-                            if (typeof attrs.to === "string") void router.push(attrs.to);
-                            else void router.push(attrs.to);
+                            const target = activeRouter();
+                            if (target) void target.push(attrs.to);
                         }}
                     >
                         {content}

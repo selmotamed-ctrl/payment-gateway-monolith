@@ -13,6 +13,7 @@ import {
   type RenderedNotification,
 } from "../engine/notifications/NotificationTransport";
 import { resolveNotificationTransport } from "../engine/workers/productionRuntime";
+import { RuntimeCommunicationTransport } from "../engine/notifications/CommunicationTransport";
 import { OutboxNotificationWorker } from "../engine/workers/OutboxNotificationWorker";
 import { createFakeDb, createFakeRepositories } from "./helpers/fakeRepositories";
 import { envSchema } from "../lib/env";
@@ -394,22 +395,15 @@ describe("the notification transport of the production runtime", () => {
     }
   };
 
-  test("without a configured endpoint the platform keeps the log transport", () => {
-    withEnvironment({ NOTIFICATION_WEBHOOK_URL: undefined }, () => {
-      const transport = resolveNotificationTransport({ db: {} as PrismaLike });
-      expect(transport).toBeInstanceOf(CompositeNotificationTransport);
-      expect((transport as CompositeNotificationTransport).provider).toBeInstanceOf(
-        LogNotificationTransport,
-      );
-    });
+  test("uses the settings-aware communication transport (email + SMS selected at delivery time)", () => {
+    const transport = resolveNotificationTransport({ db: {} as PrismaLike });
+    expect(transport).toBeInstanceOf(RuntimeCommunicationTransport);
   });
 
-  test("a configured endpoint makes the platform talk to the provider", () => {
+  test("a configured legacy endpoint does not replace the settings-aware transport", () => {
     withEnvironment({ NOTIFICATION_WEBHOOK_URL: "https://notifications.example.ly/send" }, () => {
       const transport = resolveNotificationTransport({ db: {} as PrismaLike });
-      expect((transport as CompositeNotificationTransport).provider).toBeInstanceOf(
-        WebhookNotificationTransport,
-      );
+      expect(transport).toBeInstanceOf(RuntimeCommunicationTransport);
     });
   });
 });

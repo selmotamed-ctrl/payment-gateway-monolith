@@ -416,6 +416,20 @@ A "Sandbox Live Mirror" section reuses the Live pages under `/sandbox/mirror/*` 
 
 Sandbox menu entries are filtered with `canOpenRoute`; the route table now allows `gateways.edit`/`security:read` for the Sandbox Overview, Sandbox Merchants and Fake Rails screens, so the Gateway Admin and Security Admin roles named by the Guide can open them. The Sandbox Live Mirror is described as the same Live screens backed by sandbox data, not as read-only, because the proxy forwards the same methods.
 
+## v46 email/Google merchant authentication (2026-11-26)
+
+The landing page loads `GET /auth/me` and shows a maintenance banner when email
+delivery is not configured; `/login` and `/register` render a maintenance screen
+instead of their forms in that state. Registration asks for full name, email and
+password only (no phone) or Google; after registration the user verifies the
+six-digit email code on `/verify-email`. Login shows the channel copy from
+`deliveryChannels` (email, SMS when configured, or both), supports resend and
+links to `/forgot-password` and `/reset-password`. Google uses the server
+authorization-code + PKCE flow: the button receives `authorizationUrl`, the edge
+callback redirects to `/auth/google/finish?ticket=...`, and the page exchanges
+the one-time ticket for the normal session. All new pages are EN/AR and follow
+the existing AuthLayout/SurfaceCard/FormField system.
+
 ## Merchant Guide and Developer API
 
 > Status: `partial` · Last verified: 2026-11-04

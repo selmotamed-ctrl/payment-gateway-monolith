@@ -1,5 +1,14 @@
 type Any = Record<string, any>;
 
+import { Vault } from "../engine/crypto/Vault";
+
+const noticeVault = new Vault();
+const hasRealAddress = (value: string | null | undefined): value is string =>
+  typeof value === "string" &&
+  value.includes("@") &&
+  !value.endsWith("@pending.payment-gateway.local") &&
+  !value.endsWith("@invited.payment-gateway.local");
+
 /**
  * Notices sent by the background automations (AUTO-xx): join request expiry, expiring tokens and credentials, approval
  * expiry, dispute reminders and the like.
@@ -13,7 +22,7 @@ type Any = Record<string, any>;
  * never sent through here.
  */
 
-export type NoticeChannel = "IN_APP" | "EMAIL";
+export type NoticeChannel = "IN_APP" | "EMAIL" | "SMS";
 export type NoticeLang = "EN" | "AR";
 export type NoticeAudience = "MERCHANT" | "INTERNAL";
 
@@ -104,10 +113,14 @@ export const queueNotice = async (db: Any, input: QueueNoticeInput): Promise<num
     });
   }
   if (!user && !merchant) return 0;
-  const address = user?.email ?? user?.phone ?? merchant?.contactEmail ?? merchant?.contactPhone ?? null;
+  const email = hasRealAddress(user?.email) ? user.email : hasRealAddress(merchant?.contactEmail) ? merchant.contactEmail : null;
+  const phone = user?.phone ?? merchant?.contactPhone ?? null;
   const channels = input.channels ?? (["IN_APP", "EMAIL"] as const);
-  const created = await db.notification.createMany({
-    data: channels.map((channel) => ({
+  const rows: Array<Record<string, unknown>> = [];
+  for (const channel of channels) {
+    if (channel === "EMAIL" && !email) continue;
+    const address = channel === "EMAIL" ? email : channel === "SMS" ? phone : null;
+    rows.push({
       eventId: `notice:${input.eventKey}:${channel}`.slice(0, 191),
       recipientUserId: user?.id ?? null,
       recipientMerchantId: merchant?.id ?? null,
@@ -115,11 +128,15 @@ export const queueNotice = async (db: Any, input: QueueNoticeInput): Promise<num
       channel,
       lang: input.lang ?? "EN",
       payloadJson: input.payload as never,
-      addressMasked: maskNoticeAddress(address),
-      addressCiphertext: "",
+      addressMasked: channel === "IN_APP" ? "in-app" : maskNoticeAddress(address),
+      addressCiphertext: address ? await noticeVault.encryptSecret(address, "notification-address") : "",
       status: "QUEUED",
       attempts: 0,
-    })),
+    });
+  }
+  if (rows.length === 0) return 0;
+  const created = await db.notification.createMany({
+    data: rows,
     skipDuplicates: true,
   });
   return Number(created?.count ?? 0);

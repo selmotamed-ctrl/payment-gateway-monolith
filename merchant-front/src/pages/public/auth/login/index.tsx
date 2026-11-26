@@ -2,7 +2,7 @@ import { GOOGLE_REDIRECT_PATHS, isAllowedIdentityRedirect, parseIdentityHosts } 
 import { dc } from "@/utils/dc";
 import { VAlert, VBtn, VTextField } from "@/components/vael/VuetifyShim";
 import { useLocale } from "@/utils/vael-compat";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { setUserState, type UserState } from "@/state/user";
@@ -11,19 +11,39 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { setLocale } from "@/plugins/localization";
 import router from "@/router";
 import { RouterLink } from "vue-router/experimental/vapor";
+import { useRoute } from "vue-router";
 import AuthLayout from "@/layouts/auth";
 import { FormField } from "@/components/ui/FormField";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import MaintenanceScreen from "@/components/communication/MaintenanceScreen";
+import { appInfo, loadAppStatus } from "@/state/app";
 
 const LoginPage = dc(() => {
     const { t } = useLocale();
+    const route = useRoute();
     const identity = ref("");
     const password = ref("");
     const mfaCode = ref("");
     const challengeId = ref<string | null>(null);
+    const deliveryChannels = ref<string[]>([]);
     const loading = ref(false);
     const error = ref<string | null>(null);
+    const notice = ref<string | null>(null);
+    if (typeof route.query.error === "string") {
+        error.value = t("Google sign-in failed. Please try again or use your email and password.");
+    }
     const showPassword = ref(false);
+    const statusLoading = ref(false);
+
+    const maintenance = computed(() => appInfo.value?.communication?.maintenance ?? null);
+    const googleEnabled = computed(() => appInfo.value?.communication?.googleEnabled === true);
+
+    const loadStatus = async () => {
+        statusLoading.value = true;
+        await loadAppStatus();
+        statusLoading.value = false;
+    };
+    void loadStatus();
 
     const buildSession = (payload: any): UserState => ({
         token: tokenFromLoginPayload(payload) as string,
@@ -49,21 +69,19 @@ const LoginPage = dc(() => {
         error.value = null;
         loading.value = true;
         try {
-            const response = await api.post(urlsMap.authGoogle, { redirectUri: GOOGLE_REDIRECT_PATHS.login });
+            const response = await api.post(urlsMap.authGoogleStart, {
+                mode: "login",
+                returnPath: GOOGLE_REDIRECT_PATHS.login,
+            });
             const payload = response.data?.data ?? response.data ?? {};
-            if (payload?.redirectUrl) {
-                if (!isAllowedIdentityRedirect(payload.redirectUrl, parseIdentityHosts(import.meta.env.VITE_IDENTITY_HOSTS))) {
-                    throw new Error("untrusted redirect");
-                }
-                window.location.assign(payload.redirectUrl);
-                return;
+            const authorizationUrl = payload?.authorizationUrl ?? payload?.redirectUrl;
+            if (!authorizationUrl) {
+                throw new Error("missing Google authorization URL");
             }
-            const session = buildSession(payload);
-            if (!session.token) {
-                throw new Error("missing token");
+            if (!isAllowedIdentityRedirect(authorizationUrl, parseIdentityHosts(import.meta.env.VITE_IDENTITY_HOSTS))) {
+                throw new Error("untrusted redirect");
             }
-            setUserState(session);
-            await router.push({ name: "Dashboard" });
+            window.location.assign(authorizationUrl);
         } catch (e) {
             error.value = extractApiErrorMessage(e);
         } finally {
@@ -71,11 +89,19 @@ const LoginPage = dc(() => {
         }
     };
 
-    const submit = async () => {
-        if (loading.value) {
-            return;
+    const applySession = async (payload: any) => {
+        const session = buildSession(payload);
+        if (!session.token) {
+            throw new Error("missing token");
         }
+        setUserState(session);
+        await router.push({ name: "Dashboard" });
+    };
+
+    const submit = async () => {
+        if (loading.value) return;
         error.value = null;
+        notice.value = null;
         loading.value = true;
         try {
             if (challengeId.value) {
@@ -83,12 +109,7 @@ const LoginPage = dc(() => {
                     challengeId: challengeId.value,
                     code: mfaCode.value.trim(),
                 });
-                const session = buildSession(response.data?.data ?? response.data ?? {});
-                if (!session.token) {
-                    throw new Error("missing token");
-                }
-                setUserState(session);
-                await router.push({ name: "Dashboard" });
+                await applySession(response.data?.data ?? response.data ?? {});
                 return;
             }
             const response = await api.post(urlsMap.authLogin, {
@@ -98,14 +119,10 @@ const LoginPage = dc(() => {
             const payload = response.data?.data ?? response.data ?? {};
             if (payload?.mfaRequired && payload?.challengeId) {
                 challengeId.value = String(payload.challengeId);
+                deliveryChannels.value = Array.isArray(payload.deliveryChannels) ? payload.deliveryChannels.map(String) : [];
                 return;
             }
-            const session = buildSession(payload);
-            if (!session.token) {
-                throw new Error("missing token");
-            }
-            setUserState(session);
-            await router.push({ name: "Dashboard" });
+            await applySession(payload);
         } catch (e) {
             error.value = extractApiErrorMessage(e);
         } finally {
@@ -113,136 +130,177 @@ const LoginPage = dc(() => {
         }
     };
 
+    const resend = async () => {
+        if (!challengeId.value || loading.value) return;
+        error.value = null;
+        notice.value = null;
+        loading.value = true;
+        try {
+            const response = await api.post(urlsMap.authMfaResend, { challengeId: challengeId.value });
+            const payload = response.data?.data ?? response.data ?? {};
+            if (payload?.challengeId) challengeId.value = String(payload.challengeId);
+            deliveryChannels.value = Array.isArray(payload.deliveryChannels) ? payload.deliveryChannels.map(String) : deliveryChannels.value;
+            notice.value = t("A new code was sent.");
+        } catch (e) {
+            error.value = extractApiErrorMessage(e);
+        } finally {
+            loading.value = false;
+        }
+    };
+
+    const mfaMessage = computed(() => {
+        const email = deliveryChannels.value.includes("EMAIL");
+        const sms = deliveryChannels.value.includes("SMS");
+        if (email && sms) return t("Enter the six-digit code sent to your email and phone.");
+        if (sms) return t("Enter the six-digit code sent to your phone.");
+        return t("Enter the six-digit code sent to your email.");
+    });
+
     return () => (
         <AuthLayout>
-            <SurfaceCard title={t("Merchant Portal")} subtitle={t("Sign in to continue")}>
-                <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                    {error.value && (
-                        <VAlert type="error" variant="tonal" density="compact">
-                            {error.value}
-                        </VAlert>
-                    )}
-
-                    {challengeId.value ? (
-                        <>
-                            <VAlert type="info" variant="tonal" density="compact">
-                                {t("Enter the six-digit code sent to your registered phone.")}
+            {maintenance.value ? (
+                <MaintenanceScreen maintenance={maintenance.value} loading={statusLoading.value} onRefresh={() => void loadStatus()} />
+            ) : (
+                <SurfaceCard title={t("Merchant Portal")} subtitle={t("Sign in to continue")}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                        {error.value && (
+                            <VAlert type="error" variant="tonal" density="compact">
+                                {error.value}
                             </VAlert>
-                            <FormField label={t("Verification Code")} required>
-                                <VTextField
-                                    aria-label={t("Verification Code")}
-                                    prependInnerIcon="mdi-shield-key-outline"
-                                    autocomplete="one-time-code"
-                                    {...{ inputmode: "numeric", maxlength: "6", autofocus: true }}
-                                    modelValue={mfaCode.value}
-                                    onUpdate:modelValue={(v: string) => (mfaCode.value = v)}
-                                    hideDetails
-                                />
-                            </FormField>
-                            <VBtn
-                                block
-                                size="large"
-                                loading={loading.value}
-                                disabled={mfaCode.value.trim().length !== 6}
-                                onClick={() => void submit()}
-                                style={{ height: "38px" }}
-                            >
-                                {t("Verify")}
-                            </VBtn>
-                            <VBtn
-                                variant="text"
-                                size="small"
-                                onClick={() => {
-                                    challengeId.value = null;
-                                    mfaCode.value = "";
-                                    error.value = null;
-                                }}
-                            >
-                                {t("Back")}
-                            </VBtn>
-                        </>
-                    ) : (
-                        <>
-                            <FormField label={t("Phone Or Email")} required>
-                                <VTextField
-                                    aria-label={t("Phone Or Email")}
-                                    prependInnerIcon="mdi-account-outline"
-                                    autocomplete="username"
-                                    {...{ autofocus: true }}
-                                    modelValue={identity.value}
-                                    onUpdate:modelValue={(v: string) => (identity.value = v)}
-                                    hideDetails
-                                />
-                            </FormField>
+                        )}
+                        {notice.value && (
+                            <VAlert type="success" variant="tonal" density="compact">
+                                {notice.value}
+                            </VAlert>
+                        )}
 
-                            <FormField label={t("Password")} required>
-                                <VTextField
-                                    aria-label={t("Password")}
-                                    prependInnerIcon="mdi-lock-outline"
-                                    type={showPassword.value ? "text" : "password"}
-                                    autocomplete="current-password"
-                                    modelValue={password.value}
-                                    onUpdate:modelValue={(v: string) => (password.value = v)}
-                                    appendInnerIcon={showPassword.value ? "mdi-eye-off-outline" : "mdi-eye-outline"}
-                                    onClick:append-inner={() => (showPassword.value = !showPassword.value)}
-                                    hideDetails
-                                />
-                            </FormField>
+                        {challengeId.value ? (
+                            <>
+                                <VAlert type="info" variant="tonal" density="compact">
+                                    {mfaMessage.value}
+                                </VAlert>
+                                <FormField label={t("Verification Code")} required>
+                                    <VTextField
+                                        aria-label={t("Verification Code")}
+                                        prependInnerIcon="mdi-shield-key-outline"
+                                        autocomplete="one-time-code"
+                                        {...{ inputmode: "numeric", maxlength: "6", autofocus: true }}
+                                        modelValue={mfaCode.value}
+                                        onUpdate:modelValue={(v: string) => (mfaCode.value = v)}
+                                        hideDetails
+                                    />
+                                </FormField>
+                                <VBtn
+                                    block
+                                    size="large"
+                                    loading={loading.value}
+                                    disabled={mfaCode.value.trim().length !== 6}
+                                    onClick={() => void submit()}
+                                    style={{ height: "38px" }}
+                                >
+                                    {t("Verify")}
+                                </VBtn>
+                                <div style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
+                                    <VBtn variant="text" size="small" onClick={() => void resend()}>
+                                        {t("Resend Code")}
+                                    </VBtn>
+                                    <VBtn
+                                        variant="text"
+                                        size="small"
+                                        onClick={() => {
+                                            challengeId.value = null;
+                                            mfaCode.value = "";
+                                            deliveryChannels.value = [];
+                                            error.value = null;
+                                        }}
+                                    >
+                                        {t("Back")}
+                                    </VBtn>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <FormField label={t("Email")} required>
+                                    <VTextField
+                                        aria-label={t("Email")}
+                                        prependInnerIcon="mdi-account-outline"
+                                        autocomplete="username"
+                                        {...{ autofocus: true }}
+                                        modelValue={identity.value}
+                                        onUpdate:modelValue={(v: string) => (identity.value = v)}
+                                        hideDetails
+                                    />
+                                </FormField>
 
-                            <VBtn
-                                block
-                                size="large"
-                                loading={loading.value}
-                                disabled={!identity.value || !password.value}
-                                onClick={() => void submit()}
-                                style={{ height: "38px" }}
-                            >
-                                {t("Login")}
-                            </VBtn>
+                                <FormField label={t("Password")} required>
+                                    <VTextField
+                                        aria-label={t("Password")}
+                                        prependInnerIcon="mdi-lock-outline"
+                                        type={showPassword.value ? "text" : "password"}
+                                        autocomplete="current-password"
+                                        modelValue={password.value}
+                                        onUpdate:modelValue={(v: string) => (password.value = v)}
+                                        appendInnerIcon={showPassword.value ? "mdi-eye-off-outline" : "mdi-eye-outline"}
+                                        onClick:append-inner={() => (showPassword.value = !showPassword.value)}
+                                        hideDetails
+                                    />
+                                </FormField>
 
-                            <VBtn
-                                block
-                                variant="tonal"
-                                prependIcon="mdi-google"
-                                loading={loading.value}
-                                onClick={() => void loginWithGoogle()}
-                                style={{ height: "38px" }}
-                            >
-                                {t("Login With Google")}
-                            </VBtn>
-                        </>
-                    )}
+                                <VBtn
+                                    block
+                                    size="large"
+                                    loading={loading.value}
+                                    disabled={!identity.value || !password.value}
+                                    onClick={() => void submit()}
+                                    style={{ height: "38px" }}
+                                >
+                                    {t("Login")}
+                                </VBtn>
 
-                    <div
-                        style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            gap: "8px",
-                            flexWrap: "wrap",
-                        }}
-                    >
-                        <RouterLink
-                            to={{ name: "Register" }}
+                                {googleEnabled.value && (
+                                    <VBtn
+                                        block
+                                        variant="tonal"
+                                        prependIcon="mdi-google"
+                                        loading={loading.value}
+                                        onClick={() => void loginWithGoogle()}
+                                        style={{ height: "38px" }}
+                                    >
+                                        {t("Login With Google")}
+                                    </VBtn>
+                                )}
+                            </>
+                        )}
+
+                        <div
                             style={{
-                                fontSize: "13px",
-                                color: "var(--pg-accent-interactive)",
-                                textDecoration: "none",
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                gap: "8px",
+                                flexWrap: "wrap",
                             }}
                         >
-                            {t("Create Account")}
-                        </RouterLink>
-                        <div style={{ display: "flex", gap: "4px" }}>
-                            <VBtn variant="text" size="small" onClick={() => setLocale("ar")}>
-                                العربية
-                            </VBtn>
-                            <VBtn variant="text" size="small" onClick={() => setLocale("en")}>
-                                English
-                            </VBtn>
+                            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                                <RouterLink to={{ name: "Register" }} style={{ fontSize: "13px", color: "var(--pg-accent-interactive)", textDecoration: "none" }}>
+                                    {t("Create Account")}
+                                </RouterLink>
+                                <RouterLink to={{ name: "ForgotPassword" }} style={{ fontSize: "13px", color: "var(--pg-accent-interactive)", textDecoration: "none" }}>
+                                    {t("Forgot password?")}
+                                </RouterLink>
+                            </div>
+                            <div style={{ display: "flex", gap: "4px" }}>
+                                <VBtn variant="text" size="small" onClick={() => setLocale("ar")}>
+                                    العربية
+                                </VBtn>
+                                <VBtn variant="text" size="small" onClick={() => setLocale("en")}>
+                                    English
+                                </VBtn>
+                            </div>
                         </div>
                     </div>
-                </div>
-            </SurfaceCard>
+                </SurfaceCard>
+            )}
         </AuthLayout>
     );
 });

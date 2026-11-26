@@ -238,7 +238,7 @@ export const loadArticles: (lang:"en"|"ar") => Promise<Article[]>; // dynamic im
 * Normalise **both** index text and query: lowercase; strip Arabic diacritics and tatweel; unify alef variants (أ إ آ → ا), ya/alef-maqsura (ى → ي), ta-marbuta (ة → ه); convert Arabic-Indic digits to ASCII (reuse `src/utils/arabic.ts`). Underscores in codes are searchable with or without (`LIMIT_EXCEEDED`, `limit exceeded`).
 * Results are grouped by type with the type name visible; max 8 per type; keyboard: ↑ ↓ Enter, Esc closes, Tab moves between groups. Empty query shows "Recent" (last 8 opened, stored in `localStorage` key `pg.guide.recent`, wrapped in try/catch) and the five most-read **Golden Rule** articles.
 * The index is built lazily on first palette open (target < 150 ms for the full corpus; test measures the build and fails above 1000 ms on CI).
-* Palette is global: mounted in `layouts/default.tsx`; shortcut Ctrl+K / Cmd+K; also a magnifier button in the app bar for touch users. It must not open while the user is typing in an input unless they press the shortcut explicitly.
+* Palette is global: mounted in `layouts/default.tsx`; shortcut Ctrl+Shift+K / Cmd+Shift+K (plain Ctrl+K / Cmd+K opens the global search palette); also a "Search guide…" pill in the drawer for touch users. It must not open while the user is typing in an input unless they press the shortcut explicitly.
 
 ## II-6. Contextual help (the "?" drawer)
 
@@ -304,7 +304,7 @@ The Guide itself has no backend. Read-tracking reuses the Academy progress recor
 
 **E2E (`tests/e2e/admin`, Playwright):**
 * `guide-reader.spec.ts`: open `/guide`; search "unknown"; open an article; glossary popover opens by keyboard; mark as read; reload; read state persisted; no horizontal overflow at 360px and 1280px; Arabic RTL screenshot has no overlap.
-* `guide-palette.spec.ts`: Ctrl+K opens, type, Enter navigates, Esc closes, focus returns.
+* `guide-palette.spec.ts`: Ctrl+Shift+K opens, type, Enter navigates, Esc closes, focus returns; the same shortcut opens it from a non-guide screen.
 * `guide-context.spec.ts`: for each of the 5 routes `Approvals`, `OperatorCases`, `Cashouts`, `GatewayWizard`, `AmlCases` (log in as a role that can open it), the "?" drawer opens, shows ≥ 1 card, and form input typed before opening is still there after closing.
 * `guide-safeguard.spec.ts`: on `Approvals`, clicking **Approve** opens the safeguard dialog; **Continue** is disabled until all boxes are ticked; Cancel makes **no** request (assert via route interception).
 
@@ -618,10 +618,10 @@ A request is **idempotent** if sending it twice has the same effect as sending i
 
 @@article id=b01-07 book=1 order=7 title="Secrets and trust: passwords, tokens, MFA, encryption, signatures, certificates" roles=ALL minutes=2 ui=AVAILABLE related=b11-02,b11-03,b06-06
 ### Passwords and MFA
-A **password** proves you know something. **MFA** (multi-factor authentication) adds a second proof, usually a six-digit code sent by SMS to the phone number registered on your account. Both are required for every admin here.
+A **password** proves you know something. **MFA** (multi-factor authentication) adds a second proof: a six-digit code sent to your **email address** first. If the platform has SMS configured and your account has a phone number, the same code is also sent by SMS. Both factors are required for every staff sign-in.
 
 ### One-time code (OTP)
-An **OTP** is a code valid once for a short time. Customers get OTPs by SMS to confirm a payment. Staff receive their MFA code by SMS as well.
+An **OTP** is a code valid once for a short time. Customers get payment OTPs from their payment provider. Staff receive their MFA code by email, plus SMS when the platform has an SMS provider configured.
 
 ### Token and API key
 A **token** or **API key** is a long secret string that lets a program prove who it is. It is a password for software. Anyone who has it can act as that program.
@@ -869,7 +869,7 @@ Every merchant on the platform has a story. It starts when a business owner regi
 We follow **Noon Mart**, the online shop from the payment story. You can read the full rules of each state in [[a:b05-01|What a merchant is]], and the onboarding steps in detail in [[a:b05-02|The onboarding journey]].
 
 ### Chapter 1: Noon Mart joins
-1. **Registration.** The owner opens the public landing page and registers with a phone number or an e-mail address and a password. Google sign-in is not available yet: the route answers `501 GOOGLE_IDENTITY_NOT_CONFIGURED` unless an OIDC provider is configured. There is no phone-only "verify identity" step; that route is retired (`410 IDENTITY_VERIFICATION_RETIRED`). After sign-in the owner completes onboarding inside the authenticated merchant session. You do not see this step in the Back Office. It happens on the merchant side.
+1. **Registration.** The owner opens the public landing page and registers with an e-mail address and a password, or continues with Google. There is no phone registration and no phone-only "verify identity" step (that route is retired with `410 IDENTITY_VERIFICATION_RETIRED`). A password registration must confirm the six-digit code sent to the email before signing in. After sign-in the owner completes onboarding inside the authenticated merchant session. You do not see this step in the Back Office. It happens on the merchant side. If the platform has not configured email delivery, the landing page, registration and sign-in show a maintenance state instead.
 2. **Business profile and KYB.** KYB means **Know Your Business**: we check that the business is real and we know who owns it. The owner enters the business details, uploads documents and declares the owners. You see this work on the **Join Requests** and **KYB Review** screens.
 3. **Submission.** The owner submits. The platform creates a **join request**, which is the formal record of the application. A review clock starts. This clock is called the **SLA**, the deadline we promise for the review. An automatic screening also runs.
 
@@ -891,7 +891,7 @@ Read the table from top to bottom. It follows the chapters above. The last colum
 
 | Stage | What happens | Where you see it |
 | :--- | :--- | :--- |
-| Landing & registration | A person registers with phone or e-mail and password. Google sign-in is not implemented. | (merchant side) |
+| Landing & registration | A person registers with email and password (verified by email code) or Google. No phone registration. | (merchant side) |
 | Business profile & KYB | They enter business details, upload documents, declare owners. | **Join Requests**, **KYB Review** |
 | Submission | A *join request* is submitted; a flat 5-calendar-day review deadline starts; an automatic screening runs. | **Join Requests** |
 | Review | A reviewer checks documents, owners, screening and risk. May ask for more information; the deadline pauses while the applicant answers and resumes with the remaining time. | **Join Requests** |
@@ -911,8 +911,8 @@ Think of a bank building. Customers use the front counter. Staff use a door with
 ### The interfaces: six doors
 Each door is built for one kind of user and has its own way to prove who you are. Here are the six doors, with Noon Mart as our example:
 * Layla opens **Checkout** to pay. She does not sign in. The link key in her link is her key.
-* Noon Mart's owner uses the **Merchant Portal** to run the shop. The owner signs in with an e-mail address or phone number **and a password**, then with **MFA**. MFA (multi-factor authentication) means a second proof after the password, such as a code. Google sign-in is not available; it requires a configured OIDC provider.
-* Huda, Ali and Omar use the **Back Office**, the site you are reading now. They sign in with an e-mail address or phone number, a password and MFA.
+* Noon Mart's owner uses the **Merchant Portal** to run the shop. The owner registers and signs in with an e-mail address and password, or with Google when the platform enables it. Password sign-in then asks for **MFA**, a code sent to email (and SMS when configured). MFA (multi-factor authentication) means a second proof after the password.
+* Huda, Ali and Omar use the **Back Office**, the site you are reading now. They sign in with their e-mail address, a password and MFA (email first; SMS when configured and their account has a phone).
 * Noon Mart's own software uses the **Merchant API** to create links automatically. It sends a token that starts with `pg_live_`. The merchant may also set an **IP allow-list**, a list of network addresses that are allowed to use the token.
 * A display in the shop shows live payments on a **POS screen**. The screen runs under the signed-in merchant session and has a 15-minute idle limit; the per-screen token is issued but not yet enforced on the stream.
 * Payment companies send us messages through **inbound callbacks**. A callback is a message that a payment company sends to us. We accept it only after we check it.
@@ -921,9 +921,9 @@ The table puts the same facts in one place. Read each row from left to right: wh
 
 | Interface | Users | How they sign in | Purpose |
 | :--- | :--- | :--- | :--- |
-| Merchant Portal | merchants, staff, cashiers | e-mail/phone + password + MFA | run the business |
+| Merchant Portal | merchants, staff, cashiers | email + password + MFA, or Google | run the business |
 | Checkout | anonymous payers | none; the link key is the key | pay |
-| Back Office (this) | staff | e-mail/phone + password + MFA | operate and govern |
+| Back Office (this) | staff | email + password + MFA (email first, SMS optional) | operate and govern |
 | Merchant API | merchants' software | `pg_live_` token, optional IP allow-list | automate links |
 | POS screens | in-store displays | signed-in merchant session (the per-screen token is issued but not enforced on the stream), 15-minute idle limit | live payment display |
 | Inbound callbacks | payment companies | signatures, IP allow-lists, secret path tokens | deliver verified events |
@@ -1027,7 +1027,7 @@ Read the table one group per row. The "Size" column is the number of tables in t
 
 @@article id=b03-01 book=3 order=1 title="Signing in, MFA, sessions, language and theme" roles=ALL minutes=1 ui=AVAILABLE related=b03-02,b11-03
 1. Open the Back Office address your manager gave you. It only works from the office network (or an approved VPN). If it does not open from home, that is intentional.
-2. Enter your e-mail and password. Then enter the six-digit **MFA** code sent by SMS to the phone number registered on your account. If your account has no phone number, ask the Security Admin before your first sign-in.
+2. Enter your e-mail and password. Then enter the six-digit **MFA** code sent to your email address. If the platform has SMS configured and your account has a phone, the same code also arrives by SMS. There is a **Forgot password?** link that sends a reset code to the same channels.
 3. Sessions are short on purpose. Use **Sign out** when you finish: it ends the session on the server, not only in the browser. If you are signed out, sign in again; do not ask anyone to extend it.
 4. Language and theme controls are in the top bar. Switching language re-translates menu and screens immediately; Arabic is right-to-left. Numbers and money keep their meaning in both.
 
@@ -1320,10 +1320,12 @@ The concepts are explained in [[a:b05-06|Applications and wallets]] and [[a:b05-
 | **Pending activation** | applications waiting to go live. The badge says **Pending** | see [[a:b05-02]] (the onboarding journey) |
 | **Without rail whitelist** | applications that accept every active rail. The badge says **Review** when there are any | confirm that "all rails" is really intended |
 
-### Three tabs
-The tabs are **Applications**, **Payment links** and **POS terminals**. Each tab has its own search, filters and paging. You can open a tab directly with `?tab=links` or `?tab=pos` in the address.
+### Four tabs
+The tabs are **Applications**, **API tokens**, **Payment links** and **POS terminals**. Each tab has its own search, filters and paging. You can open a tab directly with `?tab=tokens`, `?tab=links` or `?tab=pos` in the address.
 
-**Applications tab.** Columns: **Application**, **Merchant**, **Status**, **Settlement wallet**, **Monthly volume**, **Rail whitelist**, **Redirect domains**, **API tokens**, **Links / POS**, **Created**, **Action**. The **Rail whitelist** cell says **All rails** when no list is set, **No rails** when the list is empty (payments are blocked), or shows the allowed rails. Application status is `DRAFT`, `PENDING`, `ACTIVE`, `SUSPENDED` or `CLOSED`.
+**Applications tab.** Columns: **Application**, **Merchant**, **Status**, **Settlement wallet**, **Monthly volume**, **Rail whitelist**, **Redirect domains**, **API tokens**, **Links / POS**, **Created**, **Action**. The **Rail whitelist** cell says **All rails** when no list is set, **No rails** when the list is empty (payments are blocked), or shows the allowed rails. The **API tokens** cell shows the token count and, underneath, how many tokens have an active IP allow-list and how many CIDRs they contain. Application status is `DRAFT`, `PENDING`, `ACTIVE`, `SUSPENDED` or `CLOSED`.
+
+**API tokens tab.** Every API token on the platform, across all applications. Columns: **Token** (name and the last four characters only), **Application**, **Merchant**, **Environment**, **Scopes**, **IP allowlist**, **Last used**, **Expires**, **Status**, **Created**, **Action**. **IP allowlist** shows the allowed CIDRs when it is on. If a merchant turned the allow-list off but the CIDRs are still stored, the cell says **Off** and shows the stored CIDRs so you do not mistake them for active rules. The tiles for this tab count **Active**, **Revoked tokens**, **Expired tokens** and **IP allowlists**. Use the **Status**, **Environment** and **IP allowlist** filters to find, for example, every token with no IP restriction.
 
 **Payment links tab.** Columns: **Link**, **Application**, **Merchant**, **Amount**, **Fee bearer**, **Uses**, **State**, **Expires**, **Created**, **Action**. A link's **State** is `PENDING`, `COMPLETED`, `EXPIRED` or `CANCELLED`. **Uses** reads "n / ∞" for a link that can be paid many times.
 
@@ -1337,7 +1339,7 @@ Every action opens a box that asks for a **Reason** (10 to 500 characters). The 
 | Application | **Suspend application** | `ACTIVE` | immediate |
 | Application | **Request reactivation** | `SUSPENDED` | approval |
 | Application | **Edit policy** | any status except `CLOSED` | approval |
-| Application drawer | **Revoke token** | token not already revoked | immediate, cannot be undone |
+| API tokens tab or application drawer | **Revoke token** | token not already revoked | immediate, cannot be undone |
 | Payment link | **Cancel link** | `PENDING` | immediate, cannot be undone |
 | POS terminal | **Deactivate terminal** | `ACTIVE` | immediate |
 | POS terminal | **Block terminal** | `ACTIVE` or `INACTIVE` | immediate |
@@ -1360,7 +1362,8 @@ If you change nothing, the form says "Nothing changed: the request matches the c
 ### The application drawer
 Click **Inspect** to open a panel with four tabs: **Configuration and allowlists**, **API tokens**, **Payment links** and **POS terminals**.
 * **Configuration** shows the settlement wallet (with a link to open it on **Wallets**), the rail whitelist and the redirect domains. A **Pending approvals** card appears if something is waiting. While a change is waiting, **Request reactivation** and **Edit policy** are disabled with the message "A change to this entity is already awaiting approval."
-* **API tokens** lists each token by name and its last four characters only (for example `****a91f`), its scopes, whether an IP allow-list is on, when it was last used, when it expires and its status. The full token is never shown.
+* **API tokens** lists each token by name and its last four characters only (for example `****a91f`), its environment, its scopes, whether an IP allow-list is on (with the CIDRs), when it was last used, when it expires and its status. The full token is never shown.
+* The **View API tokens** row action opens the same drawer directly on the **API tokens** tab, and the **API tokens** main tab shows every token across applications.
 
 ### What is hidden
 Roles without sensitive access (for example `SUPPORT`) see **Restricted** for **Redirect domains**, and for **Monthly volume** and **Expected monthly volume**.
@@ -2000,7 +2003,7 @@ The table shows the stages in order. The last column shows what the system write
 | # | Stage | What happens | What the system records |
 | :-- | :--- | :--- | :--- |
 | 1 | Landing | The public page explains the product and has a **Start Now** button. Existing merchants sign in from the same page. | nothing |
-| 2 | Register or sign in | The applicant registers with a phone number or an e-mail address and a password, then signs in. Google sign-in is not implemented. | a user |
+| 2 | Register or sign in | The applicant registers with email and password (verified by email code) or Google, then signs in. No phone registration. | a user |
 | 3 | Business profile and KYB | The applicant enters business details, uploads documents and declares owners. | merchant (`PENDING`), documents, owners |
 | 4 | Submission | The applicant submits the draft. A **5-calendar-day** review deadline (SLA) starts at that moment and an automatic screening runs. | join request, screening |
 | 5 | Review | A reviewer checks identity, documents and screening against a checklist. The reviewer may ask for more information; the deadline pauses while the applicant answers and resumes afterwards. | join request status |
@@ -5634,7 +5637,15 @@ A **backup** is a saved copy of the database that you can restore after a disast
 For more, read [[a:b12-09|Backups from zero]], [[a:b12-10|The Backups screen]] and [[a:b12-11|Operating backups safely]].
 
 ### Platform settings
-**Platform Settings** lists every setting key with its versions and effective date. `SECURITY_ADMIN` can create or edit a setting, export a settings backup and preview a restore. The current `PUT /settings` writes a new version directly with a checklist and audit; it does **not** create a maker-checker approval. The intended control is approval for sensitive keys. Payer-facing checkout copy stays on **Checkout Help**. `merchant_reports.policy` controls whether the merchant report runner/Studio is enabled and whether merchants may attach asset bundles; the merchant AI transcript always states the current asset policy. It is explained in [[a:b07-10|the Checkout Help article]].
+**Platform Settings** opens on **All settings**, with a section list for payments, merchants, risk, reporting, governance, operations, checkout and advanced/unregistered keys. The section list becomes a horizontal strip on a phone. Search matches the setting name, key, description, who reads it, when it takes effect, field labels and field hints, and Arabic text.
+
+Every row says what kind of setting it is: **Live policy** (the platform reads it now), **Legacy fallback**, **Recorded decision** (the design decision register; changing it does not change behaviour), **Retired**, **Managed elsewhere**, **System-managed**, **Using default**, or **Unregistered**. This matters because many `OD-*` keys are recorded decisions, not live switches. The row shows the current value and the effective version; a future version is marked **Scheduled** and is not shown as current.
+
+Open a row to read what it controls, who reads it, when a change applies, the risk and its reason, the default and related settings. The **Value** tab has a typed editor with a hint for every field, units, option explanations and a field filter for long policies. The **History** tab lists current, scheduled and superseded versions and can compare or load an old version.
+
+`SECURITY_ADMIN` can create or edit a setting, export a settings backup and preview a restore. A save creates a new immutable version and requires the setting checklist and a change note; the change note is recorded in the audit log. Platform settings are **not** maker-checker today; ask a second person to review a high-risk change out of band. Payer-facing checkout copy stays on **Checkout Help**, so `checkout.support_config` appears as **Managed elsewhere**. `merchant_reports.policy` controls whether the merchant report runner/Studio is enabled and whether merchants may attach asset bundles; it is explained in [[a:b07-10|the Checkout Help article]].
+
+The **Communication** tab configures the email (SMTP) and optional SMS channels, the channel policy and Google sign-in; it also shows readiness (configured, missing fields, last test and last delivery) and offers test sends. Every field has a hint, and the same values are also editable through the typed **communication.email**, **communication.sms**, **communication.policy** and **auth.google** settings, including their encrypted secrets. Email must be configured or merchant registration and sign-in stay in maintenance.
 
 ### Health checks
 A **health check** asks a service "are you working?". The tool checks:

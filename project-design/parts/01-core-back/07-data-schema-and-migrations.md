@@ -6,6 +6,8 @@ confidence: high
 last_verified: 2026-11-24
 verified_against: d695518+working-tree
 code:
+  - core-back/prisma/migrations/20261126100000_communication_channels/migration.sql
+  - core-back/lib/communication/settings.ts
   - core-back/prisma/migrations/20261113120000_v38_sandbox_execution_plane
   - core-back/prisma/migrations/20261114090000_v39_sandbox_studio
   - core-back/prisma/migrations/20261116120000_route_health_automation
@@ -210,7 +212,7 @@ The mixed timestamp convention is real. Any query that compares a core `TIMESTAM
 
 `core-back/prisma/seed.ts` is the main baseline seeder. It is idempotent by lookup for most rows and covers:
 
-- platform settings (`OD-1` through `OD-11` plus `join_request.four_eyes_policy`, `onboarding.required_documents`, `join_request.volume_threshold`, `kyb.refresh_policy`);
+- platform settings (`OD-1` through `OD-11` plus `join_request.four_eyes_policy`, `onboarding.required_documents`, `join_request.volume_threshold`, `kyb.refresh_policy`, `screening.fail_closed`, `SELF_PAYMENT_POLICY`, `calendar.holidays`) from `prisma/platformSettingsSeed.ts`; the defaults for the three runtime switches match their code defaults;
 - system GL accounts via `seedSystemGlAccounts(client)`;
 - the blueprint catalogue (`seedBlueprints(client)`) — gateways, versions, rails, routes, flows, steps, status/error maps and related definitions;
 - platform credential sets via `seedPlatformCredentialSets(client)`;
@@ -604,3 +606,27 @@ health event per route. The required schema version is **40**.
 
 
 **SQL-only schema guard (GAP-076).** `core-back/prisma/sql-only-objects.allowlist.json` lists the 57 objects Prisma cannot model (composite tenant FKs, trigram/covering indexes, SQL defaults and `schema_versions`). `bun run schema:sql-only-check` runs `prisma migrate diff` and fails if a new object would be dropped or a reviewed object is missing. CI runs it after migrations. Definition changes that keep the same object name are not fingerprinted yet.
+
+## v46 communication channels (2026-11-26)
+
+`20261126100000_communication_channels` adds:
+
+- `platform_settings.source` (`ADMIN` | `ENV_BOOTSTRAP` | `SEED`) and the
+  `platform_setting_secrets` table (Vault ciphertext per key/scope/version/field,
+  cascading with the setting version).
+- `communication_channel_status` for last test/delivery outcome, consecutive
+  failures and the last alert timestamp.
+- `mfa_challenges.purpose` (`LOGIN_MFA` | `EMAIL_VERIFICATION` |
+  `PASSWORD_RESET`), `delivery_channels` and `destination_masked`.
+- `notifications.last_error`, `sent_at` and `delivered_at`.
+- `oauth_states` (hashed state, sealed PKCE verifier, nonce, mode, redirect URI,
+  expiry, single use) and `oauth_login_tickets` (hashed one-time ticket for the
+  merchant session exchange).
+- `users.sessions_invalid_before`: a password reset invalidates every session
+  issued before that instant, enforced by `authDoubleCheck`.
+
+The migration also backfills an EMAIL identity with `verified_at` for active
+users that only had a password (skipping the synthetic `@pending...` and
+`@invited...` addresses) and marks Google identities verified, so the new
+verification gate does not lock existing accounts out. Required schema version:
+**46**.

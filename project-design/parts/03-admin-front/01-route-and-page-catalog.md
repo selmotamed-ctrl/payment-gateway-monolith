@@ -126,7 +126,7 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 | 37 | `/reports/chrome` | `ReportsChrome` | `reports.studio` (projected from `report_engine:author`) | none | Reusable header/footer registry and single global default per type. |
 | 38 | `/reports/merchant-reports` | `ReportsMerchantReports` | `report:review`/`report:approve`/`security:read`/`security:write` | none | Merchant-authored report registry, per-merchant execution history, Studio suspend/resume. |
 | 38 | `/academy` | `AdminAcademy` | none (intentional learning) | 1 / 1.1 | Employee Academy home (full-width hero with the single Continue action and progress rings, tracks, certificates list, Guide reading). Sub-routes `AdminAcademyTracks`, `AdminAcademyTrack`, `AdminAcademyModule`, `AdminAcademyLesson`, `AdminAcademyLab`, `AdminAcademyExam`, `AdminAcademyCertificate`, `AdminAcademyHelp` (none gated) and `AdminAcademyTeam` (role `SECURITY_ADMIN`); see `03-guide-and-academy.md` §7. |
-| 39 | `/settings/platform` | `AdminPlatformSettings` | none (backend `settings:read`/`settings:write`) | none | Versioned platform settings, backup export and restore preview. |
+| 39 | `/settings/platform` | `AdminPlatformSettings` | `settings:read` / `settings:write` (plus security fallback) | `/settings/platform?section=<id>&open=<key>` | Searchable, sectioned, versioned platform settings with a reader/effect/risk and field hints; backup export and restore preview. |
 | 40 | `/settings/checkout-help` | `AdminCheckoutHelp` | none (backend `settings:read`/`settings:write`) | 4 / 4.2 | Checkout support config, preview, version history and diff. |
 | 41 | `/system/backups` | `SystemBackups` | `security:read` or `gateway:read` | none | WAL/daemon/target health, backup history, drills and policy. |
 | 42 | `/guide/book/:bookId` | `AdminGuideBook` | none (learning surface) | 1 / 1.1 | One guide book with ordered articles and progress. |
@@ -203,8 +203,6 @@ Public admin routes are `/login` (`Login`, visitor-only) and the catch-all `NotF
 | `AdminUserDetail` | No entry; direct navigation is allowed. | `/users/:id` requires `user:read` or `security:read`. | Privilege gap. |
 | `PricingControls` | No entry; only the nav item is hidden without `profit.read`/`liquidity.read`. | Commission/velocity endpoints require finance/commission/velocity authorities. | Privilege gap. |
 | `GatewayAiImport` | No entry; it is reachable by URL even though it is not in the nav. | AI transcript/spec endpoints require `gateway:read`/`gateway:write`. | Privilege gap. |
-| `AdminPlatformSettings` | No entry; any authenticated admin can open the page. | Settings reads require `settings:read`; writes require `settings:write`. | Privilege gap. |
-| `AdminCheckoutHelp` | No entry; any authenticated admin can open the page. | Checkout-support reads require `settings:read`; writes require `settings:write`. | Privilege gap. |
 | `AdminGuide` | No entry. | No business-data authority required. | Intentional learning surface. |
 | `AdminAcademy*` | No entry (only `AdminAcademyTeam` has a role gate: `SECURITY_ADMIN`). | Progress and exams need only a back-office session; the team view requires the `SECURITY_ADMIN` role in admin-back and core-back. | Intentional learning surface; exams are server-graded. |
 
@@ -288,6 +286,8 @@ These suites require a running stack and are skipped without the live/edge servi
 
 ## Security hardening (2026-11-05)
 
+`AdminPlatformSettings` and `AdminCheckoutHelp` are gated by `settings:read`/`settings:write` (plus the security fallback); the backend still enforces the same authorities. The settings workspace deep links use `?section=` and `?open=`.
+
 The `VITE_AUTHORIZED` bypass was removed. The route authority table moved to `src/utils/routeAuthorities.ts` with a default-deny guard. `PUBLIC_FOR_AUTHENTICATED` covers Dashboard, every Guide reader route and every Academy route (the Team page keeps its own `SECURITY_ADMIN` check); `AUTHORITY_ALIASES` normalizes dotted and colon forms. AdminUsers/Detail accept `user:read`/`user:write`/`security:*`, AdminPlatformSettings accepts `settings:read`/`settings:write` (plus the security fallback), and PricingControls includes `liquidity.read`. These checks are advisory; core enforces authorities. Any route not in the table is denied to authenticated users unless it is in `PUBLIC_FOR_AUTHENTICATED`.
 
 ## Admin UI completion: six new routes (2026-11-06)
@@ -298,7 +298,7 @@ Six protected children were added to `admin-front/src/router/index.ts` (and the 
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `/wallets` | `Wallets` | Onboarding | `merchants.read` or `support.read_merchant` | `merchant:read` (freeze `merchant:write`) | Cross-merchant wallets: KPI strip, live/checkpoint balance ("Restricted" for non-financial roles), freeze (immediate) / unfreeze (approval) from the row menu. **Inspect** (or the wallet id) navigates to `WalletDetail`; `?open=<id>` redirects there. "Inspect GL account" still opens the GL drawer. |
 | `/wallets/:id` | `WalletDetail` (`meta.parentName: Wallets`) | Onboarding | same as `Wallets` | `merchant:read` (freeze `merchant:write`) | Wallet details page replacing the old wallet drawer: header with status badge, frozen banner, pending approvals, Freeze/Request unfreeze, Refresh; metric strip (live, checkpoint, posted since checkpoint, pending cash-outs). `?tab=` (`overview` default, `statement`, `links`, `activity`): Overview (details card, shard table with a padded **Total** row and a shards-vs-live-balance integrity badge), Statement (`AccountLinesTable`: server-paginated posting lines with side/reference-type/date filters, search, totals of the whole filtered set, links to the source record and to the journal entry drawer), Links and cash-outs (assigned applications, last 10 cash-outs), Status history (`/wallets/:id/audit-events`: when, action, change, reason, by, approval). Merchant 360 and the application drawer link here. |
-| `/applications` | `Applications` ("Applications & Channels") | Onboarding | same | `merchant:read` / `merchant:write` | Tabs Applications, Payment Links, POS Terminals; drawer with rail whitelist, redirect domains, API tokens (revoke), link cancel, terminal status; suspend immediate, reactivation and policy edits go to approval. `?tab=links\|pos`, `?open=<id>`. |
+| `/applications` | `Applications` ("Applications & Channels") | Onboarding | same | `merchant:read` / `merchant:write` | Tabs Applications, API Tokens, Payment Links, POS Terminals; the API-tokens tab lists every token with its environment, scopes and IP allowlist (stored CIDRs stay visible when the switch is off) and can revoke; Applications shows rail-whitelist pills plus token/IP-allowlist counts; drawer with rail whitelist, redirect domains, API tokens (revoke), link cancel, terminal status; suspend immediate, reactivation and policy edits go to approval. `?tab=tokens\|links\|pos`, `?open=<id>`. |
 | `/transactions` | `Transactions` ("Transactions & Webhooks") | Operations | `merchants.read`, `support.read_merchant` or `attempt:read` | `attempt:read` (+`merchant:read`/`finance:read`) | Tabs Payment Attempts and Inbound Webhooks (verified / unmatched filters); the attempt drawer shows summary, step logs, inbound events and the checkout retry group as structured rows. |
 | `/credential-sets` | `CredentialSets` | Gateways | `credentials.manage` or `gateways.edit` | `credential:read`/`gateway:read`, `credential:write` | Vault entries: create, rotate, verify, revoke (reason); secrets are write-only. `?highlight=<id>` (from search hits and Merchant 360). |
 | `/finance/journal-entries` | `JournalEntries` | Finance | `profit.read` or `liquidity.read` | `finance:read` | Double-entry explorer: balanced badge, T-account drawer, GL account drawer; `?glAccountId=`, `?open=`. |
@@ -386,3 +386,15 @@ The Dashboard Route health card shows forced and conflict counts. See
 - The Adjustments page consumes `?attemptId=` and `?merchantId=` and pre-fills the create form, so **Create refund/adjustment** from the Transaction drawer no longer opens an empty page.
 - The Jobs & Outbox type filter includes `REFUND_INQUIRY`.
 - The Journal Entries unbalanced tile includes entries with zero lines, not only entries whose lines do not sum to zero.
+
+## v46 authentication and communication settings routes (2026-11-26)
+
+Public admin routes `/forgot-password` and `/reset-password` complete the
+email-OTP reset flow. The login MFA copy uses the server's `deliveryChannels`,
+and the invitation page makes the phone optional. Platform Settings adds a
+**Communication** tab (`CommunicationTab`) with email/SMS/Google status,
+missing-field diagnostics, last test/delivery results and "send test" actions
+for `settings:write`; the shell shows a warning banner while merchant auth is in
+maintenance. Typed setting namespaces: `communication.email`,
+`communication.sms`, `communication.policy` and `auth.google`; secret fields are
+password controls with a stored placeholder and are never echoed by the API.

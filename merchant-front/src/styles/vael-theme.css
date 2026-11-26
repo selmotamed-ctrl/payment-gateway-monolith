@@ -21,8 +21,33 @@
     --ui-radius-surface: var(--pg-radius-lg);
     --ui-panel-shadow: var(--pg-shadow-menu);
     --ui-overlay: rgb(15 23 42 / 0.45);
+
+    /* Vuetify-style RGB triplets still referenced by inherited styles. */
+    --v-theme-primary: 15 23 42;
+    --v-theme-on-primary: 248 250 252;
+    --v-theme-secondary: 37 99 235;
+    --v-theme-background: 248 250 252;
+    --v-theme-surface: 255 255 255;
+    --v-theme-on-surface: 15 23 42;
+    --v-theme-on-background: 15 23 42;
+    --v-theme-error: 220 38 38;
+    --v-theme-success: 22 163 74;
+    --v-theme-warning: 217 119 6;
+    --v-theme-info: 37 99 235;
 }
 
 [data-theme="dark"] {
     --ui-overlay: rgb(0 0 0 / 0.6);
+
+    --v-theme-primary: 248 250 252;
+    --v-theme-on-primary: 9 9 11;
+    --v-theme-secondary: 161 161 170;
+    --v-theme-background: 9 9 11;
+    --v-theme-surface: 18 18 21;
+    --v-theme-on-surface: 248 250 252;
+    --v-theme-on-background: 248 250 252;
+    --v-theme-error: 248 113 113;
+    --v-theme-success: 74 222 128;
+    --v-theme-warning: 251 191 36;
+    --v-theme-info: 96 165 250;
 }

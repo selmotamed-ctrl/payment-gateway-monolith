@@ -11,10 +11,26 @@ export const toggleDrawer = () => {
     drawer.value = !drawer.value;
 };
 
+export type CommunicationMaintenance = {
+    active: boolean;
+    code: string;
+    message: string;
+};
+
+export type CommunicationStatus = {
+    emailConfigured: boolean;
+    smsConfigured: boolean;
+    googleEnabled: boolean;
+    registrationEnabled: boolean;
+    passwordResetEnabled: boolean;
+    maintenance: CommunicationMaintenance | null;
+};
+
 export type AppInfo = {
     name: string;
     version: string;
     suspended: boolean;
+    communication: CommunicationStatus | null;
 };
 
 export const appInfo = ref<AppInfo | null>(null);
@@ -31,6 +47,16 @@ export const loadAppStatus = async () => {
             name: data?.platformName ?? "Payment Gateway",
             version: data?.version ?? "",
             suspended: !!data?.suspended,
+            communication: data?.communication
+                ? {
+                      emailConfigured: !!data.communication.emailConfigured,
+                      smsConfigured: !!data.communication.smsConfigured,
+                      googleEnabled: !!data.communication.googleEnabled,
+                      registrationEnabled: !!data.communication.registrationEnabled,
+                      passwordResetEnabled: !!data.communication.passwordResetEnabled,
+                      maintenance: data.communication.maintenance ?? null,
+                  }
+                : null,
         };
     } catch (error) {
         appStatusError.value = extractApiErrorMessage(error);

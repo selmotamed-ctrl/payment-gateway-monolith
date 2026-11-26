@@ -122,7 +122,7 @@ describe("typed platform setting editors", () => {
     expect(rows.map((row) => [row.label, row.kind])).toEqual([
       ["Ratification window (hours)", "text"],
       ["Authorised roles", "list"],
-      ["Description", "text"],
+      ["Stored note", "text"],
       ["Extra · Deep · X", "text"],
     ]);
     for (const row of rows) expect(String(row.value)).not.toContain("{");

@@ -336,6 +336,32 @@ const base = z.strictObject({
   KYB_CLAMD_ADDRESS: z.string().trim().max(200).default(""),
   /** CLEAN KYB documents are re-scanned after this many days (0 = never). */
   KYB_RESCAN_DAYS: z.coerce.number().int().min(0).max(3650).default(30),
+  // Email-primary communication (schema v46). Blank values are ignored; an
+  // explicit enabled=false in Platform Settings still wins over this bootstrap.
+  COMMUNICATION_BOOTSTRAP_ENABLED: booleanish.default(true),
+  COMMUNICATION_EMAIL_ENABLED: booleanish.default(false),
+  SMTP_HOST: z.string().trim().max(255).optional(),
+  SMTP_PORT: port.default(587),
+  SMTP_SECURITY: z.enum(["TLS", "STARTTLS", "NONE"]).default("STARTTLS"),
+  SMTP_USER: z.string().trim().max(255).optional(),
+  SMTP_PASSWORD: z.string().max(1024).optional(),
+  SMTP_FROM_EMAIL: z.preprocess((value) => typeof value === "string" && value.trim() === "" ? undefined : value, z.email().optional()),
+  SMTP_FROM_NAME: z.string().trim().max(120).default("Payment Gateway"),
+  SMTP_REPLY_TO: z.preprocess((value) => typeof value === "string" && value.trim() === "" ? undefined : value, z.email().optional()),
+  SMTP_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(10_000),
+  SMTP_ALLOW_INSECURE: booleanish.default(false),
+  COMMUNICATION_SMS_ENABLED: booleanish.default(false),
+  SMS_WEBHOOK_URL: z.preprocess((value) => typeof value === "string" && value.trim() === "" ? undefined : value, z.url().optional()),
+  SMS_WEBHOOK_SECRET: z.string().max(1024).optional(),
+  SMS_SENDER_ID: z.string().trim().max(32).optional(),
+  SMS_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(10_000),
+  GOOGLE_AUTH_ENABLED: booleanish.default(false),
+  GOOGLE_CLIENT_ID: z.string().trim().max(512).optional(),
+  GOOGLE_CLIENT_SECRET: z.string().max(1024).optional(),
+  GOOGLE_HOSTED_DOMAIN: z.string().trim().max(255).optional(),
+  GOOGLE_REDIRECT_URI: z.preprocess((value) => typeof value === "string" && value.trim() === "" ? undefined : value, z.url().optional()),
+  PLATFORM_ALERT_EMAIL: z.preprocess((value) => typeof value === "string" && value.trim() === "" ? undefined : value, z.email().optional()),
+  PLATFORM_ALERT_SMS: z.string().trim().max(32).optional(),
   BASE_CURRENCY: z.string().trim().length(3).default("LYD"),
   GATEWAY_TIMEZONE: z.string().trim().min(1).max(64).default("Africa/Tripoli"),
   REDIS_URL: z.string().trim().max(500).optional(),
@@ -1607,10 +1633,41 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
     }
   }
 
+  if (config.COMMUNICATION_EMAIL_ENABLED) {
+    if (!config.SMTP_HOST) problems.push("SMTP_HOST is required when COMMUNICATION_EMAIL_ENABLED=true");
+    if (!config.SMTP_FROM_EMAIL) problems.push("SMTP_FROM_EMAIL is required when COMMUNICATION_EMAIL_ENABLED=true");
+    if (config.DEPLOY_ENV === "production" && config.SMTP_SECURITY === "NONE") {
+      problems.push("SMTP_SECURITY=NONE is forbidden in a production deployment");
+    }
+    if (config.DEPLOY_ENV === "production" && config.SMTP_ALLOW_INSECURE) {
+      problems.push("SMTP_ALLOW_INSECURE=true is forbidden in a production deployment");
+    }
+    if (config.SMTP_USER && !config.SMTP_PASSWORD) {
+      problems.push("SMTP_PASSWORD is required when SMTP_USER is set");
+    }
+  }
+  if (config.COMMUNICATION_SMS_ENABLED) {
+    if (!config.SMS_WEBHOOK_URL) problems.push("SMS_WEBHOOK_URL is required when COMMUNICATION_SMS_ENABLED=true");
+    if (!config.SMS_WEBHOOK_SECRET) problems.push("SMS_WEBHOOK_SECRET is required when COMMUNICATION_SMS_ENABLED=true");
+  }
+  if (config.GOOGLE_AUTH_ENABLED) {
+    if (!config.GOOGLE_CLIENT_ID) problems.push("GOOGLE_CLIENT_ID is required when GOOGLE_AUTH_ENABLED=true");
+    if (!config.GOOGLE_CLIENT_SECRET) problems.push("GOOGLE_CLIENT_SECRET is required when GOOGLE_AUTH_ENABLED=true");
+    if (!config.GOOGLE_REDIRECT_URI) problems.push("GOOGLE_REDIRECT_URI is required when GOOGLE_AUTH_ENABLED=true");
+  }
+  if (config.GOOGLE_REDIRECT_URI) {
+    try {
+      const url = new URL(config.GOOGLE_REDIRECT_URI);
+      if (config.DEPLOY_ENV === "production" && url.protocol !== "https:") {
+        problems.push("GOOGLE_REDIRECT_URI must use https:// in a production deployment");
+      }
+    } catch {
+      problems.push("GOOGLE_REDIRECT_URI must be an absolute URL");
+    }
+  }
+
   return problems;
 };
-
-/** A tiny dotenv parser that understands `KEY=value`, `KEY="value with spaces"` and `#` comments. */
 export const parseDeployEnv = (source: string): Record<string, string> => {
   const values: Record<string, string> = {};
   for (const rawLine of source.split(/\r?\n/)) {

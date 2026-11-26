@@ -97,6 +97,18 @@ export const tokenActionsFor = (status: string, canWrite: boolean): Array<Entity
     ];
 };
 
+export type TokenAllowlistState = "ACTIVE" | "ACTIVE_EMPTY" | "STORED_OFF" | "OFF";
+
+/**
+ * What the IP-allowlist cell must show. A disabled allowlist can still have
+ * stored CIDRs (the merchant turned the switch off); they are not active and
+ * must not look like they are.
+ */
+export const tokenAllowlistState = (token: { ipWhitelistEnabled: boolean; cidrs: readonly string[] }): TokenAllowlistState => {
+    if (token.ipWhitelistEnabled) return token.cidrs.length > 0 ? "ACTIVE" : "ACTIVE_EMPTY";
+    return token.cidrs.length > 0 ? "STORED_OFF" : "OFF";
+};
+
 /* ------------------------------ Payment link ----------------------------- */
 
 export type PaymentLinkActionKey = "cancel";

@@ -125,7 +125,7 @@ The router has 40 protected children under `/`, a visitor-only `/login`, and a c
 | `/guide` | `AdminGuide` | none (intentional learning surface) | Interactive admin guide, glossary, simulators and checklists. |
 | `/academy`, `/academy/tracks`, `/academy/track/:trackId`, `/academy/module/:moduleId`, `/academy/lesson/:lessonId`, `/academy/lab/:labId`, `/academy/exam/:examId`, `/academy/certificate/:badgeId`, `/academy/help` | `AdminAcademy*` | none (intentional learning surface) | Employee Academy: tracks, lessons, labs, server-graded exams, certificates. |
 | `/academy/team` | `AdminAcademyTeam` | role `SECURITY_ADMIN` | Team certification view with CSV export. |
-| `/settings/platform` | `AdminPlatformSettings` | none (backend `settings:read`/`settings:write`) | Versioned platform settings, backup export and restore. |
+| `/settings/platform` | `AdminPlatformSettings` | `settings:read` / `settings:write` | Searchable, sectioned platform settings with reader/effect/risk and field hints, backup export and restore. |
 | `/settings/checkout-help` | `AdminCheckoutHelp` | none (backend `settings:read`/`settings:write`) | Checkout support config, preview, history and diff. |
 | `/system/backups` | `SystemBackups` | `security:read` or `gateway:read` | WAL/daemon/target health, history, drills and policy. |
 
@@ -142,7 +142,7 @@ Public routes are `/login` (`Login`, visitor-only) and `/:pathMatch(.*)*` (`NotF
 
 ### Global search
 
-- `Ctrl+K` (`Cmd+K` on macOS) opens the global search palette across platform records, admin pages and guide entries. The drawer search pill opens the guide-only modal.
+- `Ctrl+K` (`Cmd+K` on macOS) opens the global search palette across platform records, admin pages and guide entries on every route. `Ctrl+Shift+K` (`Cmd+Shift+K`) opens the guide-only modal, as does the drawer search pill.
 - Record search calls `POST v1/admin/search`; the palette requires at least two characters for record search, aborts stale requests, uses an 8-second timeout and caches non-partial responses for 60 seconds.
 - Search types include merchants, payment attempts, join requests, KYB documents, users, approvals, audit logs, AML cases/screenings/rules/reports, operator cases, gateway inquiries, disputes, adjustments, cash-outs, reconciliation runs, gateways, rails and routes.
 - Deep links open the relevant record drawer where the target page supports it. The guide tab or guide modal routes to `/guide` with the selected entry.
@@ -158,11 +158,14 @@ Public routes are `/login` (`Login`, visitor-only) and `/:pathMatch(.*)*` (`NotF
 
 ### Platform settings (`/settings/platform`)
 
-- Lists settings grouped by key with the latest version, scope, version count and effective date; includes JSON preview, history, version diff and "load into editor".
-- Saves create the next immutable version with scope `PLATFORM`, validate the key and require a JSON object (not an array or scalar), plus the setting checklist when checklists are visible.
-- Backup export writes a JSON file containing the latest version per key and an audit entry.
-- Restore is preview-first: preview classifies added/changed/unchanged/invalid/missing keys; apply requires a reason of at least three characters, the restore checklist and `confirm: true`, and refuses invalid entries or `expectedCurrentVersion` conflicts (`409 SETTING_VERSION_CONFLICT`).
-- Platform settings edits are versioned and audited but are **not** maker-checker approvals, despite sensitive-field hints in the form.
+- A searchable workspace with an **All settings** rail and sections for payments, merchants, risk, reporting, governance, operations, checkout and advanced/unregistered keys. Search matches titles, keys, descriptions, readers, effects, field labels, field hints, keywords, current values and Arabic text.
+- Every row shows a human title, technical key, lifecycle/status badge, risk, effective version, scheduled marker, summary, value preview and effect. Statuses distinguish live policies, legacy fallbacks, recorded decisions (no runtime effect), retired keys, values managed on another screen, system-managed values, unconfigured defaults and unregistered keys.
+- The detail drawer has Overview (reader, effect, risk reason, default, related keys, Guide link), Value (typed editor grouped by field, with hints, units, option hints and a field filter) and History (current/scheduled/superseded versions, diff, load into editor).
+- Effective, latest and scheduled versions are distinct: the row shows the effective value and warns that a new save supersedes a scheduled version.
+- Saves create the next immutable version with scope `PLATFORM`, validate the key and JSON object, require the setting checklist when visible and require a change note. The change note is audited.
+- Platform settings edits are versioned and audited but are **not** maker-checker approvals. The UI says so instead of showing a false four-eyes badge. Checkout support is managed on `/settings/checkout-help` and appears read-only here.
+- Backup export writes a JSON file containing the latest version per key and an audit entry. Restore is preview-first: preview classifies added/changed/unchanged/invalid/missing keys; apply requires a reason, the restore checklist and `confirm: true`, and refuses invalid entries or `expectedCurrentVersion` conflicts (`409 SETTING_VERSION_CONFLICT`).
+- Adding a setting: follow [`docs/developer/platform-settings.md`](../docs/developer/platform-settings.md) and the catalog-coverage test in `tests/unit/platform-settings.test.ts`.
 
 ### Checkout help (`/settings/checkout-help`)
 
@@ -175,7 +178,7 @@ Public routes are `/login` (`Login`, visitor-only) and `/:pathMatch(.*)*` (`NotF
 ### Guide and academy
 
 - `/guide` is the Admin Interactive Guide v1.0: 14 books, 135 articles, 151 glossary terms, 25 safeguard cards, 32 situations, 8 reading paths, 58 quick answers, 19 error codes and a 140-case edge-case catalogue, extracted deterministically from `design/07-guides-and-academy/guide_system_design_and_content.md` into `src/content/guide/generated/` (`bun run content:guide`). Eight routes (home, book, article, glossary, tools, playbook, cards, edge cases), a MiniSearch command palette, five client-only simulators and per-article read tracking stored in the shared Academy progress JSON. Canonical part: [Admin Guide v2](../project-design/parts/03-admin-front/06-guide-v2.md).
-- Guide search is MiniSearch over articles, glossary, cards, situations, FAQ and error codes with Arabic-aware normalisation; `Ctrl+K` also searches platform records and admin pages.
+- Guide search is MiniSearch over articles, glossary, cards, situations, FAQ and error codes with Arabic-aware normalisation; `Ctrl+Shift+K` opens the guide palette, while `Ctrl+K` opens the global palette, which also searches platform records and admin pages.
 - `/academy` is the Employee Academy: 8 tracks (Foundation plus one per role), 11 modules, 49 lessons with 98 practice checks, 15 labs (86 tasks), 218 exam-pool questions (40 critical) and 8 server-graded exams. Content is extracted from the design file (`bun scripts/extract-academy-content.ts`); exam answer keys live only in `core-back`. The UI is full-width and built from the shared admin primitives plus `src/styles/academy/*.css` and `src/components/academy/ui/*` (visual system v2, [Admin Guide and Academy §7.6](../project-design/parts/03-admin-front/03-guide-and-academy.md)).
 - Mastery is computed client-side: all lessons complete, the lab passed and a 100% quiz. Badges are derived, not manually granted. The backend stores progress JSON but does not independently validate answers, labs or mastery.
 - Academy self-progress and exams are available to any authenticated back-office user. The team view is gated to the `SECURITY_ADMIN` role in the router, `admin-back` and `core-back`.
@@ -257,7 +260,7 @@ Relevant browser suites (from `tests/`): admin shell, table/padding geometry, ac
 | :--- | :--- |
 | Login loops or requests fail | Is `admin-back` reachable at `/api`? In dev, is `VITE_API_URL` pointing at the admin edge port (4101)? Remember production uses same-origin `/api`. |
 | "You are not allowed" redirect | The route authority/role guard rejected direct navigation. Hidden navigation is not proof of protection; confirm the backend authority too. |
-| Page loads then APIs return 403 | Expected for ungated routes such as settings, checkout help, users and pricing. The backend is authoritative. |
+| Page loads then APIs return 403 | The route gate is advisory; the edge/core still re-checks authorities. A user without `settings:read`/`settings:write` sees the settings shell but the API calls are refused. The backend is authoritative. |
 | Stale-chunk error | The router retries a failed dynamic import once; hard-reload the SPA if the chunk hash is stale. |
 | Contextual help says no chapter | Check the effective key (`parentName ?? name`), the `GUIDE_ROUTE_HELP` entry, and whether the chapter is in the mapped book. `Merchants`/`MerchantDetail` currently fail through the 9.4 placement bug. |
 | XLSX export misses rows | Table export exports only the current rendered page. Use a summary export or a backend export endpoint when full data is required. |

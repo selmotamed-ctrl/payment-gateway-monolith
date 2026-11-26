@@ -3,7 +3,7 @@ import "./landing.css";
 import { computed, h, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Component } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
+import { VAlert, VBtn, VIcon } from "@/components/vael/VuetifyShim";
 import LogoSvg from "@/assets/images/logo.svg";
 import { setLocale } from "@/plugins/localization";
 import ThemeMenu from "@/components/ThemeMenu";
@@ -11,6 +11,7 @@ import { HeroDemo } from "./HeroDemo";
 import { DeveloperSection } from "./DeveloperSection";
 import { FeePreview } from "./FeePreview";
 import { LedgerTicker } from "./LedgerTicker";
+import { appInfo, loadAppStatus } from "@/state/app";
 import {
     animateProgress,
     splitWords,
@@ -74,7 +75,7 @@ const SECURITY = [
 ];
 
 const ONBOARDING = [
-    { title: "Create your account", text: "Register with your name, phone number and email." },
+    { title: "Create your account", text: "Register with your name and email, or continue with Google." },
     { title: "Business profile", text: "Legal name, registration, tax ID, category and expected volume." },
     { title: "Owners & documents", text: "Beneficial owners and the KYB documents that prove them." },
     { title: "Payout account", text: "The corporate bank account your cash-outs go to." },
@@ -169,6 +170,7 @@ const LandingPage = defineComponent({
         const reveal = useReveal(root, reduced);
         const isRtl = computed(() => locale.value === "ar");
         const year = new Date().getFullYear();
+        const maintenance = computed(() => appInfo.value?.communication?.maintenance ?? null);
 
         const heroStage = ref<HTMLElement | null>(null);
         const marqueePaused = ref(false);
@@ -197,6 +199,7 @@ const LandingPage = defineComponent({
             window.addEventListener("scroll", onScroll, { passive: true });
             onScroll();
             syncDocumentMeta();
+            void loadAppStatus();
         });
         onBeforeUnmount(() => window.removeEventListener("scroll", onScroll));
         watch(locale, () => syncDocumentMeta());
@@ -343,6 +346,14 @@ const LandingPage = defineComponent({
                 </header>
 
                 <main id="pgl-main" tabindex={-1} class="pgl-main">
+                    {maintenance.value ? (
+                        <div class="pgl-container" style={{ paddingBlock: "16px" }}>
+                            <VAlert type="warning" variant="tonal" density="comfortable" closable={false}>
+                                <strong>{t("Platform under maintenance")}. </strong>
+                                {maintenance.value.message}
+                            </VAlert>
+                        </div>
+                    ) : null}
                     {/* ------------------------------------------------ Hero */}
                     <section class="pgl-hero" aria-labelledby="pgl-hero-title">
                         <div class="pgl-hero__bg" aria-hidden="true">

@@ -22,6 +22,10 @@ code:
   - core-back/engine/governance/GovernanceExecution.ts
   - core-back/lib/auth/merchantAuthorities.ts
   - core-back/lib/auth/mfaChallenges.ts
+  - core-back/lib/auth/emailVerification.ts
+  - core-back/lib/auth/passwordReset.ts
+  - core-back/lib/auth/googleOAuth.ts
+  - core-back/lib/communication/settings.ts
   - core-back/lib/auth/throttle.ts
   - core-back/lib/cashoutBalance.ts
   - core-back/api/internal/adminCommerce.ts
@@ -694,8 +698,9 @@ Four new router modules are mounted from `admin.ts` (next to `/system/backups`):
 | `GET /wallets/:id/statement` | Paginated posting lines of the wallet's GL account (the lines of `glAccountId`), `merchant:read`. Query: shared list params (`page`, `pageSize` ≤ 200, default 25, `sortKey` `createdAt`/`amount`, `from`/`to`), `direction` (`DEBIT`/`CREDIT`), `refType` (list), `search` (memo or reference). Response `{lines, total, page, pageSize, totals: {lineCount, totalDebit, totalCredit, netDebit}, currency, redactedFields}`; totals cover the whole filtered set. Roles without financial visibility get an empty page, `totals` money `null` and `redactedFields: ["statementLines"]`. `400 INVALID_FILTER`, `404 WALLET_NOT_FOUND`. Shared helper `api/internal/ledgerLines.ts`. |
 | `GET /wallets/:id/audit-events` | Status history of one wallet (`entityType=WALLET`: `WALLET_FROZEN`, `WALLET_UNFROZEN`), newest first, paginated, `merchant:read`; `before`/`after` (status, reason) are `null` with `redacted: true` without sensitive merchant access. |
 | `POST /wallets/:id/status` | FROZEN immediate (`WALLET_FROZEN`); ACTIVE = approval (`202`, subject `WALLET`). `409 WALLET_INVALID_TRANSITION`, `WALLET_APPROVAL_PENDING`. |
-| `GET /applications`, `/applications/summary`, `/applications/:id` | Real `railWhitelist` (`string[]\|null`) + mode/count, redirect domains (empty + `redactedFields` for non-sensitive principals), tokens (status ACTIVE/REVOKED/EXPIRED, CIDRs), payment links, POS terminals. |
+| `GET /applications`, `/applications/summary`, `/applications/:id` | Real `railWhitelist` (`string[]\|null`) + mode/count, redirect domains (empty + `redactedFields` for non-sensitive principals), token lifecycle and IP-allowlist counts (`tokenActiveCount`, `tokenRevokedCount`, `tokenExpiredCount`, `tokenIpRestrictedCount`, `tokenCidrCount`), tokens (status ACTIVE/REVOKED/EXPIRED, environment, CIDRs), payment links, POS terminals. |
 | `PATCH /applications/:id` | SUSPENDED alone immediate (`APPLICATION_SUSPENDED`); reactivation and any policy edit (rails, redirect domains, assigned wallet) = one approval (`202`, subject `APPLICATION`). Validates rails exist, https hostnames, same-merchant/currency ACTIVE wallet. |
+| `GET /access-tokens`, `/access-tokens/summary` | Platform-wide token oversight (`merchant:read`), no token hash. List rows carry name/last four, application, merchant, `env` (`LIVE`/`SANDBOX`), scopes, `ipWhitelistEnabled`, `cidrs`/`ipCount`, last used, expiry and lifecycle status; filters `status` (CSV), `env` (CSV), `ipWhitelistEnabled`, `applicationId`, `merchantId`, search and date ranges. Summary totals active/revoked/expired/IP-restricted tokens and CIDRs. |
 | `POST /applications/:id/tokens/:tokenId/revoke` | Irreversible, audited; `409 TOKEN_ALREADY_REVOKED`. Core has no token cache (`authDoubleCheck` reads the row each request). |
 | `GET /payment-links`, `POST /payment-links/:id/state` | Only PENDING->CANCELLED (`PAYMENT_LINK_CANCELLED`). |
 | `GET /pos-terminals`, `POST /pos-terminals/:id/status` | ACTIVE->INACTIVE/BLOCKED immediate; to ACTIVE = approval (subject `POS_TERMINAL`). |
@@ -779,3 +784,30 @@ Dispute, adjustment and cash-out summaries return a `byCurrency` array in additi
 - `POST /aml/reports/:id/file` now calls `validateRegulatoryReportForSubmission` before creating the external submission or dispatching the adapter, so a `PROVISIONAL` reporting rule can never reach the authority. `submitRegulatoryReport` shares the same validator.
 - AML route access accepts `aml:read`/`aml:write` as well as `aml.read_confidential`, matching `hasConfidentialAmlAccess`; the admin route table lists both vocabularies.
 - Credential-set reads accept `credential:write`/`gateway:write` as well as the read names, so a default Security Admin can open the screen before re-seeding.
+
+## v46 authentication communication routes (2026-11-26)
+
+Merchant public: `POST /internal/merchant/auth/register` (email + password +
+full name only; no phone), `/auth/email/verify`, `/auth/email/resend`,
+`/auth/login` (returns `mfaRequired`, `challengeId`, `deliveryChannels` and
+`destinationMasked`), `/auth/mfa/resend`, `/auth/google/start`,
+`GET /auth/google/callback`, `/auth/google/exchange`,
+`/auth/password/forgot` and `/auth/password/reset`. `GET /auth/me` also returns
+the public communication/maintenance status and whether Google is enabled.
+Merchant register/login/Google/password routes return
+`503 AUTH_MAINTENANCE_EMAIL_NOT_CONFIGURED` while email is not configured.
+
+Admin public: `/auth/login` returns the same MFA channel metadata,
+`/auth/mfa/resend`, `/auth/password/forgot`, `/auth/password/reset`, and
+`/auth/accept-invitation` accepts an optional phone (email is the primary MFA
+channel). Admin protected: `GET /settings/communication/status`,
+`POST /settings/communication/test-email` and
+`POST /settings/communication/test-sms`.
+
+Login response codes: `EMAIL_NOT_VERIFIED` (403), `EMAIL_VERIFICATION_INVALID`
+(401), `PASSWORD_RESET_INVALID` (401), `GOOGLE_NOT_CONFIGURED` (503),
+`GOOGLE_STATE_INVALID`/`GOOGLE_TICKET_INVALID` (401) and
+`NO_DELIVERY_CHANNEL` (503). Settings reads mask known secrets
+(`smtpPassword`, `webhookSecret`, `clientSecret`) and expose `has<Field>` flags;
+exports redact them and restore keeps the previous ciphertext when a secret is
+not supplied.

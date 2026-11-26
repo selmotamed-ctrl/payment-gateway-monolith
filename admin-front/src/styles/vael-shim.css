@@ -224,6 +224,31 @@ html, body, #app { margin: 0; padding: 0; height: 100%; }
     outline: none;
 }
 
+.pg-text-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    min-inline-size: 0;
+}
+
+.pg-field-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--pg-ink-primary);
+}
+
+.pg-field-required {
+    color: var(--pg-status-danger-dot);
+    margin-inline-start: 3px;
+}
+
+.pg-field-hint {
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--pg-ink-muted);
+}
+
 .pg-input:focus,
 .pg-select:focus {
     border-color: var(--pg-border-focus);

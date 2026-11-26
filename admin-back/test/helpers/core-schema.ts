@@ -905,6 +905,7 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
         )
         .max(10)
         .optional(),
+      reason: z.string().trim().min(3).max(500).optional(),
     })
     .strict(),
 };

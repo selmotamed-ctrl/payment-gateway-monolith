@@ -959,8 +959,9 @@ Four new router modules are mounted from `admin.ts` (next to `/system/backups`):
 | `GET /wallets/:id/statement` | Paginated posting lines of the wallet's GL account (the lines of `glAccountId`), `merchant:read`. Query: shared list params (`page`, `pageSize` ≤ 200, default 25, `sortKey` `createdAt`/`amount`, `from`/`to`), `direction` (`DEBIT`/`CREDIT`), `refType` (list), `search` (memo or reference). Response `{lines, total, page, pageSize, totals: {lineCount, totalDebit, totalCredit, netDebit}, currency, redactedFields}`; totals cover the whole filtered set. Roles without financial visibility get an empty page, `totals` money `null` and `redactedFields: ["statementLines"]`. `400 INVALID_FILTER`, `404 WALLET_NOT_FOUND`. Shared helper `api/internal/ledgerLines.ts`. |
 | `GET /wallets/:id/audit-events` | Status history of one wallet (`entityType=WALLET`: `WALLET_FROZEN`, `WALLET_UNFROZEN`), newest first, paginated, `merchant:read`; `before`/`after` (status, reason) are `null` with `redacted: true` without sensitive merchant access. |
 | `POST /wallets/:id/status` | FROZEN immediate (`WALLET_FROZEN`); ACTIVE = approval (`202`, subject `WALLET`). `409 WALLET_INVALID_TRANSITION`, `WALLET_APPROVAL_PENDING`. |
-| `GET /applications`, `/applications/summary`, `/applications/:id` | Real `railWhitelist` (`string[]\|null`) + mode/count, redirect domains (empty + `redactedFields` for non-sensitive principals), tokens (status ACTIVE/REVOKED/EXPIRED, CIDRs), payment links, POS terminals. |
+| `GET /applications`, `/applications/summary`, `/applications/:id` | Real `railWhitelist` (`string[]\|null`) + mode/count, redirect domains (empty + `redactedFields` for non-sensitive principals), token lifecycle and IP-allowlist counts (`tokenActiveCount`, `tokenRevokedCount`, `tokenExpiredCount`, `tokenIpRestrictedCount`, `tokenCidrCount`), tokens (status ACTIVE/REVOKED/EXPIRED, environment, CIDRs), payment links, POS terminals. |
 | `PATCH /applications/:id` | SUSPENDED alone immediate (`APPLICATION_SUSPENDED`); reactivation and any policy edit (rails, redirect domains, assigned wallet) = one approval (`202`, subject `APPLICATION`). Validates rails exist, https hostnames, same-merchant/currency ACTIVE wallet. |
+| `GET /access-tokens`, `/access-tokens/summary` | Platform-wide token oversight (`merchant:read`), no token hash. List rows carry name/last four, application, merchant, `env` (`LIVE`/`SANDBOX`), scopes, `ipWhitelistEnabled`, `cidrs`/`ipCount`, last used, expiry and lifecycle status; filters `status` (CSV), `env` (CSV), `ipWhitelistEnabled`, `applicationId`, `merchantId`, search and date ranges. Summary totals active/revoked/expired/IP-restricted tokens and CIDRs. |
 | `POST /applications/:id/tokens/:tokenId/revoke` | Irreversible, audited; `409 TOKEN_ALREADY_REVOKED`. Core has no token cache (`authDoubleCheck` reads the row each request). |
 | `GET /payment-links`, `POST /payment-links/:id/state` | Only PENDING->CANCELLED (`PAYMENT_LINK_CANCELLED`). |
 | `GET /pos-terminals`, `POST /pos-terminals/:id/status` | ACTIVE->INACTIVE/BLOCKED immediate; to ACTIVE = approval (subject `POS_TERMINAL`). |
@@ -1044,6 +1045,33 @@ Dispute, adjustment and cash-out summaries return a `byCurrency` array in additi
 - `POST /aml/reports/:id/file` now calls `validateRegulatoryReportForSubmission` before creating the external submission or dispatching the adapter, so a `PROVISIONAL` reporting rule can never reach the authority. `submitRegulatoryReport` shares the same validator.
 - AML route access accepts `aml:read`/`aml:write` as well as `aml.read_confidential`, matching `hasConfidentialAmlAccess`; the admin route table lists both vocabularies.
 - Credential-set reads accept `credential:write`/`gateway:write` as well as the read names, so a default Security Admin can open the screen before re-seeding.
+
+## v46 authentication communication routes (2026-11-26)
+
+Merchant public: `POST /internal/merchant/auth/register` (email + password +
+full name only; no phone), `/auth/email/verify`, `/auth/email/resend`,
+`/auth/login` (returns `mfaRequired`, `challengeId`, `deliveryChannels` and
+`destinationMasked`), `/auth/mfa/resend`, `/auth/google/start`,
+`GET /auth/google/callback`, `/auth/google/exchange`,
+`/auth/password/forgot` and `/auth/password/reset`. `GET /auth/me` also returns
+the public communication/maintenance status and whether Google is enabled.
+Merchant register/login/Google/password routes return
+`503 AUTH_MAINTENANCE_EMAIL_NOT_CONFIGURED` while email is not configured.
+
+Admin public: `/auth/login` returns the same MFA channel metadata,
+`/auth/mfa/resend`, `/auth/password/forgot`, `/auth/password/reset`, and
+`/auth/accept-invitation` accepts an optional phone (email is the primary MFA
+channel). Admin protected: `GET /settings/communication/status`,
+`POST /settings/communication/test-email` and
+`POST /settings/communication/test-sms`.
+
+Login response codes: `EMAIL_NOT_VERIFIED` (403), `EMAIL_VERIFICATION_INVALID`
+(401), `PASSWORD_RESET_INVALID` (401), `GOOGLE_NOT_CONFIGURED` (503),
+`GOOGLE_STATE_INVALID`/`GOOGLE_TICKET_INVALID` (401) and
+`NO_DELIVERY_CHANNEL` (503). Settings reads mask known secrets
+(`smtpPassword`, `webhookSecret`, `clientSecret`) and expose `has<Field>` flags;
+exports redact them and restore keeps the previous ciphertext when a secret is
+not supplied.
 
 ## Core Engine
 
@@ -2820,7 +2848,7 @@ Source: `design/11-automation/background_automation_and_workers_plan.md`. Every 
 
 - **Operator cases:** a reminder `DEADLINE_REMINDER` before `sla_due_at`; at the breach the priority goes up one level (P3 to P2 to P1), the case is annotated `[SLA BREACHED ...]`, audit `OPERATOR_CASE_SLA_BREACHED`, assignee and the OPERATOR queue told. **AML cases:** a reminder to the reviewer (or MLRO/COMPLIANCE) and, at the breach, ONE keyed P1 case `aml.sla_breached:<id>`; only the case id travels in notices and the case (confidentiality). **Join requests:** a reminder only (the breach is the expiry of AUTO-13).
 - **Disputes (D1):** reminders to the merchant and finance at T-72 h and T-24 h; at `evidence_due_at` with no evidence the dispute becomes `EXPIRED` (the chargeback execution already reads an EXPIRED dispute as LOST), the merchant is told, and one keyed finance case `dispute.expired:<id>` asks for the chargeback approval. DEVIATION FROM THE PLAN: the plan says the reserve loss is booked automatically; `executeAdjustment` deliberately refuses any non-human authoriser of a chargeback (design section 19.3), so the booking stays a finance decision and this worker does not bypass it (owner confirmation requested). With evidence submitted nothing is decided; a ruling overdue by `DISPUTE_RULING_SLA_DAYS` opens `dispute.ruling_overdue:<id>`.
-- **Cash-outs (D2):** the operator window in Libyan business hours (`businessTime.ts`: Sunday to Thursday in Africa/Tripoli, holidays from the platform setting `calendar.holidays`, an array of `YYYY-MM-DD`); 75 % reminds finance, 100 % opens a P2 case `cashout.sla:<id>:1`, 200 % a P1 case `...:2` and tells compliance. A merchant that is not ACTIVE is in a documented hold and is not measured. When several stages are reached at once only the highest acts. P50/P90/P95 on the dashboard is not built.
+- **Cash-outs (D2):** the operator window in Libyan business hours (`businessTime.ts`: Sunday to Thursday in Africa/Tripoli, holidays from the platform setting `calendar.holidays` (`{ holidays: ["YYYY-MM-DD", …] }`; a legacy raw array is also accepted)); 75 % reminds finance, 100 % opens a P2 case `cashout.sla:<id>:1`, 200 % a P1 case `...:2` and tells compliance. A merchant that is not ACTIVE is in a documented hold and is not measured. When several stages are reached at once only the highest acts. P50/P90/P95 on the dashboard is not built.
 - **Emergency actions (D7):** an unratified emergency approval (`mode EMERGENCY_RATIFICATION`, `PENDING_REVIEW`, no checker) gets reminders at 4 h and 1 h before `ratify_due_at` (ratifiers = MLRO and COMPLIANCE, never the actor); at the deadline a suspension STAYS in force and a P1 case `emergency.unratified:<id>` opens (audit `EMERGENCY_ACTION_UNRATIFIED`); the escalation repeats every 4 h (`EMERGENCY_ACTION_ESCALATED`); at `ratify_due_at + 48 h` a still-unratified suspension is LIFTED (the merchant returns to the status recorded in the approval's change log, the approval becomes `EXPIRED`, audit `EMERGENCY_ACTION_LIFTED`, case `emergency.lifted:<id>`, and the merchant gets only `MERCHANT_SUSPENSION_ENDED`: nothing about why or that it lapsed). The emergency suspension route now sets `expires_at = ratify_due_at + grace`, so it can still be ratified during the grace. One independent COMPLIANCE or MLRO officer may extend once by 1 to 7 days with a written reason (`POST /approvals/:id/extend-emergency`, also proxied by admin-back; never the actor; a single step by an independent officer, not a second maker-checker round); the extension clears the approval's stages so they run again. Emergency VELOCITY changes are reverted through a registered `EmergencyReverter`, but no emergency velocity flow exists yet, so none is registered: such an approval raises the P1 case saying a manual revert is needed. `ExpiryHousekeepingWorker` never touches `EMERGENCY_RATIFICATION` approvals.
 
 **Journal partitions (AUTO-01).** `JournalPartitionWorker` calls `ensure_journal_line_partitions` (now SECURITY DEFINER, bounded 1..60, `EXECUTE` for the application role) only when a month is missing, audits `JOURNAL_PARTITIONS_ENSURED`, and raises ONE P1 case with a 2 h SLA (the plan's "P0": the most urgent priority the case model has) while rows sit in `journal_lines_default` (`ledger.partition.default_rows`) or while creating the months fails (`ledger.partition.ensure_failed`, with the database error). Moving the stranded rows edits ledger rows, which the append-only guard allows only for a superuser or a `pgw_ledger_maintenance` member, so it is an operator action: `bun run repair-journal-default-partition [--apply]` with a privileged `DATABASE_URL` (dry run by default; one transaction: copy, delete from default, create and guard the month, insert back, verify counts; ids, `created_at`, shards and sequences are unchanged; the default partition is locked ACCESS EXCLUSIVE for seconds with a 5 s lock timeout). The platform monitor's `journal_default_rows` check is the second alarm.
@@ -3080,6 +3108,26 @@ PSP-M refunds, disputes opened/decided and cash-outs are grouped by currency and
 ## Second-pass settlement and reconciliation corrections (2026-11-25)
 
 `postSettlementSweeps` still excludes a statement line tied to a known merchant-direct, internal or fee-at-source attempt. A **batch-net** source line with no local attempt (the gateway reports a settled batch total) is now swept again; previously the absence of an attempt skipped the whole batch and lost the clearing settlement. A test in `test/remediation-high.test.ts` covers the no-attempt batch case and the USD account selection.
+
+## v46 notification routing and readiness (2026-11-26)
+
+`OutboxNotificationWorker` now persists `last_error`, `sent_at` and
+`delivered_at`, marks a permanent configuration failure (`CHANNEL_NOT_CONFIGURED`,
+`RECIPIENT_ADDRESS_MISSING`) as `SUPPRESSED` instead of retrying eight times, and
+for an EMAIL row whose template policy allows SMS creates the mirrored
+`...:SMS` row once (idempotent by event id; the SMS template must exist). The
+runtime transport reads the current settings on every delivery: EMAIL goes to
+SMTP, SMS to the signed webhook, IN_APP is delivered by the row. The recipient
+resolver opens the sealed address or reads the user/merchant contact; it never
+sends to a masked value.
+
+`communication_readiness` is an extra `PlatformMonitorWorker` check. While email
+is unconfigured it raises the keyed case `platform.communication:email` and
+notifies active GATEWAY_ADMIN/SECURITY_ADMIN or `settings:write` users in-app,
+plus SMS when configured and the optional `PLATFORM_ALERT_SMS`; the daily event
+key prevents repeat spam. It also reports an enabled-but-incomplete SMS/Google
+configuration and repeated delivery failures. The case clears when email is
+configured.
 
 ## Storage Engine
 
@@ -3738,7 +3786,7 @@ The mixed timestamp convention is real. Any query that compares a core `TIMESTAM
 
 `core-back/prisma/seed.ts` is the main baseline seeder. It is idempotent by lookup for most rows and covers:
 
-- platform settings (`OD-1` through `OD-11` plus `join_request.four_eyes_policy`, `onboarding.required_documents`, `join_request.volume_threshold`, `kyb.refresh_policy`);
+- platform settings (`OD-1` through `OD-11` plus `join_request.four_eyes_policy`, `onboarding.required_documents`, `join_request.volume_threshold`, `kyb.refresh_policy`, `screening.fail_closed`, `SELF_PAYMENT_POLICY`, `calendar.holidays`) from `prisma/platformSettingsSeed.ts`; the defaults for the three runtime switches match their code defaults;
 - system GL accounts via `seedSystemGlAccounts(client)`;
 - the blueprint catalogue (`seedBlueprints(client)`) — gateways, versions, rails, routes, flows, steps, status/error maps and related definitions;
 - platform credential sets via `seedPlatformCredentialSets(client)`;
@@ -4133,6 +4181,30 @@ health event per route. The required schema version is **40**.
 
 **SQL-only schema guard (GAP-076).** `core-back/prisma/sql-only-objects.allowlist.json` lists the 57 objects Prisma cannot model (composite tenant FKs, trigram/covering indexes, SQL defaults and `schema_versions`). `bun run schema:sql-only-check` runs `prisma migrate diff` and fails if a new object would be dropped or a reviewed object is missing. CI runs it after migrations. Definition changes that keep the same object name are not fingerprinted yet.
 
+## v46 communication channels (2026-11-26)
+
+`20261126100000_communication_channels` adds:
+
+- `platform_settings.source` (`ADMIN` | `ENV_BOOTSTRAP` | `SEED`) and the
+  `platform_setting_secrets` table (Vault ciphertext per key/scope/version/field,
+  cascading with the setting version).
+- `communication_channel_status` for last test/delivery outcome, consecutive
+  failures and the last alert timestamp.
+- `mfa_challenges.purpose` (`LOGIN_MFA` | `EMAIL_VERIFICATION` |
+  `PASSWORD_RESET`), `delivery_channels` and `destination_masked`.
+- `notifications.last_error`, `sent_at` and `delivered_at`.
+- `oauth_states` (hashed state, sealed PKCE verifier, nonce, mode, redirect URI,
+  expiry, single use) and `oauth_login_tickets` (hashed one-time ticket for the
+  merchant session exchange).
+- `users.sessions_invalid_before`: a password reset invalidates every session
+  issued before that instant, enforced by `authDoubleCheck`.
+
+The migration also backfills an EMAIL identity with `verified_at` for active
+users that only had a password (skipping the synthetic `@pending...` and
+`@invited...` addresses) and marks Google identities verified, so the new
+verification gate does not lock existing accounts out. Required schema version:
+**46**.
+
 ## Global Search
 
 > Status: `partial` · Last verified: 2026-11-06
@@ -4147,7 +4219,7 @@ It owns:
 - the query parser, token classification, match scoring and result sanitization in `core-back/lib/search/engine.ts`;
 - the core internal route `POST /internal/admin/search`;
 - the mTLS admin BFF proxy `POST /api/v1/admin/search` with its rate limiter;
-- the admin-front command palette (`Ctrl+K` / `Cmd+K`), local page/guide search, recent queries and the client-side target registry;
+- the admin-front command palette (`Ctrl+K` / `Cmd+K`), local page/guide search, recent queries and the client-side target registry; the guide-only palette uses `Ctrl+Shift+K` / `Cmd+Shift+K`;
 - the `useOpenQuery` deep-link composable that opens a record from a query parameter.
 
 It does not own domain authorization policy (the providers consume authority helpers but `core-back` remains the enforcement point), the underlying record APIs, or the guide content itself.
@@ -4468,7 +4540,7 @@ Relevant test files:
 
 - `core-back/test/globalSearch.test.ts` — parser/token/phone variants, match scoring, sanitization, registry, authority matrix, provider behavior.
 - `tests/unit/global-search.test.ts` — client target registry, local commands, recent-query storage, highlighting, access filtering.
-- `tests/e2e/admin/global-search.spec.ts` — app-bar trigger vs drawer guide search, `Ctrl+K`, debounce, Enter-to-open, one-character behavior, mocked API.
+- `tests/e2e/admin/global-search.spec.ts` — app-bar trigger vs drawer guide search, `Ctrl+K` on every route (including the guide), `Ctrl+Shift+K` for the guide palette, debounce, Enter-to-open, one-character behavior, mocked API.
 - `tests/e2e/exhaustive/exhaustive-admin-surface.spec.ts` — broader admin surface coverage that includes search interactions.
 
 Commands:

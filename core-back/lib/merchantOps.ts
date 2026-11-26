@@ -2,6 +2,14 @@ import { ApiError } from "./error";
 import type { PrismaClient } from "../generated/prisma/client";
 import { decimal } from "../engine/ledger/LedgerPoster";
 import { loadLiveAccountBalances } from "./storageEngine/shardBalances";
+import { Vault } from "../engine/crypto/Vault";
+
+const merchantOpsVault = new Vault();
+const hasRealEmail = (value: string | null | undefined): value is string =>
+  typeof value === "string" &&
+  value.includes("@") &&
+  !value.endsWith("@pending.payment-gateway.local") &&
+  !value.endsWith("@invited.payment-gateway.local");
 
 export const MERCHANT_DESCRIPTIVE_FIELDS = [
   "tradeName",
@@ -226,6 +234,7 @@ export const queueMerchantLifecycleNotification = async (
     select: { id: true, email: true, phone: true },
   });
   const address = recipient?.email ?? recipient?.phone ?? merchant.contactEmail ?? merchant.contactPhone ?? null;
+  const email = hasRealEmail(recipient?.email) ? recipient.email : hasRealEmail(merchant.contactEmail) ? merchant.contactEmail : null;
   const templates: Record<string, { subject: string; body: string }> = {
     MERCHANT_SUSPENDED: {
       subject: "Merchant account suspended",
@@ -242,20 +251,21 @@ export const queueMerchantLifecycleNotification = async (
   };
   for (const template of Object.entries(templates)) {
     await db.notificationTemplate.createMany({
-      data: [{
+      data: (["IN_APP", "EMAIL"] as const).map((channel) => ({
         code: template[0],
-        channel: "IN_APP",
+        channel,
         lang: "EN",
-        subjectTemplate: template[1].subject,
+        subjectTemplate: channel === "EMAIL" ? template[1].subject : null,
         bodyTemplate: template[1].body,
         confidentialityClass: "MERCHANT",
         version: 1,
         active: true,
-      }],
+      })),
       skipDuplicates: true,
     });
   }
   for (const channel of ["IN_APP", "EMAIL"] as const) {
+    if (channel === "EMAIL" && !email) continue;
     try {
       await db.notification.create({
         data: {
@@ -271,7 +281,10 @@ export const queueMerchantLifecycleNotification = async (
               ? `${(address.split("@")[0] ?? "").slice(0, 2)}***@${address.split("@")[1] ?? ""}`
               : `*******${address.slice(-4)}`
             : "merchant-contact",
-          addressCiphertext: "",
+          addressCiphertext:
+            channel === "EMAIL" && email
+              ? await merchantOpsVault.encryptSecret(email, "notification-address")
+              : "",
           status: "QUEUED",
           attempts: 0,
         },

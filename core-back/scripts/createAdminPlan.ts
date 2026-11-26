@@ -118,12 +118,6 @@ export const parseCreateAdminArgs = (
   if (phone !== null && !/^\+?[0-9][0-9 .()-]{5,19}$/.test(phone)) {
     return { ok: false, error: `'${phone}' is not a valid phone number` };
   }
-  if (mfaRequired && !phone) {
-    return {
-      ok: false,
-      error: "MFA is enabled but no phone number was provided (--phone or ADMIN_PHONE); pass --no-mfa only when SMS delivery is not configured",
-    };
-  }
 
   return {
     ok: true,
@@ -155,12 +149,12 @@ export const buildAdminUserData = (args: CreateAdminArgs, passwordHash: string):
   status: "ACTIVE",
 });
 
-export const USAGE = `Usage: ADMIN_PASSWORD=<password> bun run create-admin --email <email> --phone <phone> [--role <ROLE>] [--no-mfa]
+export const USAGE = `Usage: ADMIN_PASSWORD=<password> bun run create-admin --email <email> [--phone <phone>] [--role <ROLE>] [--no-mfa]
 
 Creates or re-provisions an administrator. The account is set to ACTIVE and its
 password is set to the value of ADMIN_PASSWORD (never a command line argument).
-MFA is ON unless --no-mfa (or ADMIN_MFA=false) is passed; because the code is
-delivered by SMS, a phone number is required while MFA is on.
+MFA is ON unless --no-mfa (or ADMIN_MFA=false) is passed. The code is delivered
+by email; supplying a phone adds SMS as a secondary channel.
 
 Environment equivalents: ADMIN_EMAIL, ADMIN_PHONE, ADMIN_ROLE, ADMIN_MFA=false.
 

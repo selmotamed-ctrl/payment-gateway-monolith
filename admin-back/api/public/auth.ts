@@ -75,7 +75,7 @@ router.post(
 
 /**
  * Public: a staff invitee accepts the invitation emailed to them and chooses their own password and the
- * phone that receives their sign-in codes. The account stays INVITED until a checker approves activation.
+ * optional phone for SMS. The account stays INVITED until a checker approves activation.
  */
 const mfaResendSchema = z.object({ challengeId: z.string().uuid() }).strict();
 
@@ -83,7 +83,18 @@ const acceptInvitationSchema = z
   .object({
     token: z.string().min(16).max(256),
     password: zPassword,
-    phone: z.string().trim().regex(/^\+?[0-9 ()-]{6,20}$/),
+    /** Optional: email is the primary MFA channel; a phone adds SMS as a secondary channel. */
+    phone: z.string().trim().regex(/^\+?[0-9 ()-]{6,20}$/).optional(),
+  })
+  .strict();
+
+const passwordForgotSchema = z.object({ email: z.string().email() }).strict();
+
+const passwordResetSchema = z
+  .object({
+    email: z.string().email(),
+    code: z.string().regex(/^\d{6}$/),
+    newPassword: zPassword,
   })
   .strict();
 
@@ -102,6 +113,25 @@ router.post(
     method: "POST",
     path: () => "/internal/admin/auth/mfa/resend",
     schema: mfaResendSchema,
+  }),
+);
+
+router.post(
+  "/password/forgot",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/admin/auth/password/forgot",
+    schema: passwordForgotSchema,
+    status: 202,
+  }),
+);
+
+router.post(
+  "/password/reset",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/admin/auth/password/reset",
+    schema: passwordResetSchema,
   }),
 );
 

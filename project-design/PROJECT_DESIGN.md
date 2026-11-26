@@ -1596,6 +1596,43 @@ New core keys: `EXECUTION_PLANE` (`LIVE`|`SANDBOX`, default `LIVE`), `PLANE_FENC
 - `BASE_CURRENCY` (default `LYD`) is the reporting/display default; ledger books remain per-currency and no FX conversion is implied.
 - `LEDGER_STRICT_CONTEXT=true` is written by the deploy engine so a currency-scoped account lookup without a currency fails with `MISSING_LEDGER_CURRENCY` instead of falling back to the first currency.
 
+## v46 communication configuration (2026-11-26)
+
+Email is the primary channel and SMS is an optional second channel for critical
+authentication messages. The configuration lives in the Platform Settings keys
+`communication.email`, `communication.sms`, `communication.policy` and
+`auth.google`; the environment is the first-run bootstrap and a per-field
+fallback for blank values. An explicit `enabled: false` saved by an administrator
+wins and is never overridden.
+
+Core keys: `COMMUNICATION_BOOTSTRAP_ENABLED` (default true),
+`COMMUNICATION_EMAIL_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY`
+(`TLS`|`STARTTLS`|`NONE`), `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`,
+`SMTP_FROM_NAME`, `SMTP_REPLY_TO`, `SMTP_TIMEOUT_MS`, `SMTP_ALLOW_INSECURE`,
+`COMMUNICATION_SMS_ENABLED`, `SMS_WEBHOOK_URL`, `SMS_WEBHOOK_SECRET`,
+`SMS_SENDER_ID`, `SMS_TIMEOUT_MS`, `GOOGLE_AUTH_ENABLED`, `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `GOOGLE_HOSTED_DOMAIN`,
+`PLATFORM_ALERT_EMAIL` and `PLATFORM_ALERT_SMS`. Secrets are sealed in
+`platform_setting_secrets` by the Vault; they are never returned by the settings
+API or included in a settings export.
+
+On startup `lib/communication/bootstrap.ts` copies the environment into version 1
+of the three settings (under an advisory lock) when no administrator has saved
+them. It updates only an `ENV_BOOTSTRAP` row; an `ADMIN` row is authoritative.
+Operators can run `bun run communication:bootstrap` and use
+`bun run mail:dev` (Maildev SMTP `127.0.0.1:1025`, web `127.0.0.1:1080`) for a
+local inbox.
+
+When email is not configured, merchant registration and sign-in return
+`503 AUTH_MAINTENANCE_EMAIL_NOT_CONFIGURED`; the public `GET
+/internal/merchant/auth/me` advertises the maintenance state, and the admin
+shell shows the security/administrator warning. The platform monitor opens
+`COMMUNICATION_UNCONFIGURED`, notifies authorised staff in-app and by SMS when
+SMS is configured, and clears the case automatically when email becomes ready.
+The deploy engine validates `SMTP_FROM_EMAIL`/`SMTP_HOST` when email is enabled,
+refuses `SMTP_SECURITY=NONE` and `SMTP_ALLOW_INSECURE=true` in production, and
+requires the SMS/Google fields when those channels are enabled.
+
 ---
 
 <a id="platformobservability"></a>
@@ -3112,8 +3149,9 @@ Four new router modules are mounted from `admin.ts` (next to `/system/backups`):
 | `GET /wallets/:id/statement` | Paginated posting lines of the wallet's GL account (the lines of `glAccountId`), `merchant:read`. Query: shared list params (`page`, `pageSize` ≤ 200, default 25, `sortKey` `createdAt`/`amount`, `from`/`to`), `direction` (`DEBIT`/`CREDIT`), `refType` (list), `search` (memo or reference). Response `{lines, total, page, pageSize, totals: {lineCount, totalDebit, totalCredit, netDebit}, currency, redactedFields}`; totals cover the whole filtered set. Roles without financial visibility get an empty page, `totals` money `null` and `redactedFields: ["statementLines"]`. `400 INVALID_FILTER`, `404 WALLET_NOT_FOUND`. Shared helper `api/internal/ledgerLines.ts`. |
 | `GET /wallets/:id/audit-events` | Status history of one wallet (`entityType=WALLET`: `WALLET_FROZEN`, `WALLET_UNFROZEN`), newest first, paginated, `merchant:read`; `before`/`after` (status, reason) are `null` with `redacted: true` without sensitive merchant access. |
 | `POST /wallets/:id/status` | FROZEN immediate (`WALLET_FROZEN`); ACTIVE = approval (`202`, subject `WALLET`). `409 WALLET_INVALID_TRANSITION`, `WALLET_APPROVAL_PENDING`. |
-| `GET /applications`, `/applications/summary`, `/applications/:id` | Real `railWhitelist` (`string[]\|null`) + mode/count, redirect domains (empty + `redactedFields` for non-sensitive principals), tokens (status ACTIVE/REVOKED/EXPIRED, CIDRs), payment links, POS terminals. |
+| `GET /applications`, `/applications/summary`, `/applications/:id` | Real `railWhitelist` (`string[]\|null`) + mode/count, redirect domains (empty + `redactedFields` for non-sensitive principals), token lifecycle and IP-allowlist counts (`tokenActiveCount`, `tokenRevokedCount`, `tokenExpiredCount`, `tokenIpRestrictedCount`, `tokenCidrCount`), tokens (status ACTIVE/REVOKED/EXPIRED, environment, CIDRs), payment links, POS terminals. |
 | `PATCH /applications/:id` | SUSPENDED alone immediate (`APPLICATION_SUSPENDED`); reactivation and any policy edit (rails, redirect domains, assigned wallet) = one approval (`202`, subject `APPLICATION`). Validates rails exist, https hostnames, same-merchant/currency ACTIVE wallet. |
+| `GET /access-tokens`, `/access-tokens/summary` | Platform-wide token oversight (`merchant:read`), no token hash. List rows carry name/last four, application, merchant, `env` (`LIVE`/`SANDBOX`), scopes, `ipWhitelistEnabled`, `cidrs`/`ipCount`, last used, expiry and lifecycle status; filters `status` (CSV), `env` (CSV), `ipWhitelistEnabled`, `applicationId`, `merchantId`, search and date ranges. Summary totals active/revoked/expired/IP-restricted tokens and CIDRs. |
 | `POST /applications/:id/tokens/:tokenId/revoke` | Irreversible, audited; `409 TOKEN_ALREADY_REVOKED`. Core has no token cache (`authDoubleCheck` reads the row each request). |
 | `GET /payment-links`, `POST /payment-links/:id/state` | Only PENDING->CANCELLED (`PAYMENT_LINK_CANCELLED`). |
 | `GET /pos-terminals`, `POST /pos-terminals/:id/status` | ACTIVE->INACTIVE/BLOCKED immediate; to ACTIVE = approval (subject `POS_TERMINAL`). |
@@ -3197,6 +3235,33 @@ Dispute, adjustment and cash-out summaries return a `byCurrency` array in additi
 - `POST /aml/reports/:id/file` now calls `validateRegulatoryReportForSubmission` before creating the external submission or dispatching the adapter, so a `PROVISIONAL` reporting rule can never reach the authority. `submitRegulatoryReport` shares the same validator.
 - AML route access accepts `aml:read`/`aml:write` as well as `aml.read_confidential`, matching `hasConfidentialAmlAccess`; the admin route table lists both vocabularies.
 - Credential-set reads accept `credential:write`/`gateway:write` as well as the read names, so a default Security Admin can open the screen before re-seeding.
+
+## v46 authentication communication routes (2026-11-26)
+
+Merchant public: `POST /internal/merchant/auth/register` (email + password +
+full name only; no phone), `/auth/email/verify`, `/auth/email/resend`,
+`/auth/login` (returns `mfaRequired`, `challengeId`, `deliveryChannels` and
+`destinationMasked`), `/auth/mfa/resend`, `/auth/google/start`,
+`GET /auth/google/callback`, `/auth/google/exchange`,
+`/auth/password/forgot` and `/auth/password/reset`. `GET /auth/me` also returns
+the public communication/maintenance status and whether Google is enabled.
+Merchant register/login/Google/password routes return
+`503 AUTH_MAINTENANCE_EMAIL_NOT_CONFIGURED` while email is not configured.
+
+Admin public: `/auth/login` returns the same MFA channel metadata,
+`/auth/mfa/resend`, `/auth/password/forgot`, `/auth/password/reset`, and
+`/auth/accept-invitation` accepts an optional phone (email is the primary MFA
+channel). Admin protected: `GET /settings/communication/status`,
+`POST /settings/communication/test-email` and
+`POST /settings/communication/test-sms`.
+
+Login response codes: `EMAIL_NOT_VERIFIED` (403), `EMAIL_VERIFICATION_INVALID`
+(401), `PASSWORD_RESET_INVALID` (401), `GOOGLE_NOT_CONFIGURED` (503),
+`GOOGLE_STATE_INVALID`/`GOOGLE_TICKET_INVALID` (401) and
+`NO_DELIVERY_CHANNEL` (503). Settings reads mask known secrets
+(`smtpPassword`, `webhookSecret`, `clientSecret`) and expose `has<Field>` flags;
+exports redact them and restore keeps the previous ciphertext when a secret is
+not supplied.
 
 ---
 
@@ -4989,7 +5054,7 @@ Source: `design/11-automation/background_automation_and_workers_plan.md`. Every 
 
 - **Operator cases:** a reminder `DEADLINE_REMINDER` before `sla_due_at`; at the breach the priority goes up one level (P3 to P2 to P1), the case is annotated `[SLA BREACHED ...]`, audit `OPERATOR_CASE_SLA_BREACHED`, assignee and the OPERATOR queue told. **AML cases:** a reminder to the reviewer (or MLRO/COMPLIANCE) and, at the breach, ONE keyed P1 case `aml.sla_breached:<id>`; only the case id travels in notices and the case (confidentiality). **Join requests:** a reminder only (the breach is the expiry of AUTO-13).
 - **Disputes (D1):** reminders to the merchant and finance at T-72 h and T-24 h; at `evidence_due_at` with no evidence the dispute becomes `EXPIRED` (the chargeback execution already reads an EXPIRED dispute as LOST), the merchant is told, and one keyed finance case `dispute.expired:<id>` asks for the chargeback approval. DEVIATION FROM THE PLAN: the plan says the reserve loss is booked automatically; `executeAdjustment` deliberately refuses any non-human authoriser of a chargeback (design section 19.3), so the booking stays a finance decision and this worker does not bypass it (owner confirmation requested). With evidence submitted nothing is decided; a ruling overdue by `DISPUTE_RULING_SLA_DAYS` opens `dispute.ruling_overdue:<id>`.
-- **Cash-outs (D2):** the operator window in Libyan business hours (`businessTime.ts`: Sunday to Thursday in Africa/Tripoli, holidays from the platform setting `calendar.holidays`, an array of `YYYY-MM-DD`); 75 % reminds finance, 100 % opens a P2 case `cashout.sla:<id>:1`, 200 % a P1 case `...:2` and tells compliance. A merchant that is not ACTIVE is in a documented hold and is not measured. When several stages are reached at once only the highest acts. P50/P90/P95 on the dashboard is not built.
+- **Cash-outs (D2):** the operator window in Libyan business hours (`businessTime.ts`: Sunday to Thursday in Africa/Tripoli, holidays from the platform setting `calendar.holidays` (`{ holidays: ["YYYY-MM-DD", …] }`; a legacy raw array is also accepted)); 75 % reminds finance, 100 % opens a P2 case `cashout.sla:<id>:1`, 200 % a P1 case `...:2` and tells compliance. A merchant that is not ACTIVE is in a documented hold and is not measured. When several stages are reached at once only the highest acts. P50/P90/P95 on the dashboard is not built.
 - **Emergency actions (D7):** an unratified emergency approval (`mode EMERGENCY_RATIFICATION`, `PENDING_REVIEW`, no checker) gets reminders at 4 h and 1 h before `ratify_due_at` (ratifiers = MLRO and COMPLIANCE, never the actor); at the deadline a suspension STAYS in force and a P1 case `emergency.unratified:<id>` opens (audit `EMERGENCY_ACTION_UNRATIFIED`); the escalation repeats every 4 h (`EMERGENCY_ACTION_ESCALATED`); at `ratify_due_at + 48 h` a still-unratified suspension is LIFTED (the merchant returns to the status recorded in the approval's change log, the approval becomes `EXPIRED`, audit `EMERGENCY_ACTION_LIFTED`, case `emergency.lifted:<id>`, and the merchant gets only `MERCHANT_SUSPENSION_ENDED`: nothing about why or that it lapsed). The emergency suspension route now sets `expires_at = ratify_due_at + grace`, so it can still be ratified during the grace. One independent COMPLIANCE or MLRO officer may extend once by 1 to 7 days with a written reason (`POST /approvals/:id/extend-emergency`, also proxied by admin-back; never the actor; a single step by an independent officer, not a second maker-checker round); the extension clears the approval's stages so they run again. Emergency VELOCITY changes are reverted through a registered `EmergencyReverter`, but no emergency velocity flow exists yet, so none is registered: such an approval raises the P1 case saying a manual revert is needed. `ExpiryHousekeepingWorker` never touches `EMERGENCY_RATIFICATION` approvals.
 
 **Journal partitions (AUTO-01).** `JournalPartitionWorker` calls `ensure_journal_line_partitions` (now SECURITY DEFINER, bounded 1..60, `EXECUTE` for the application role) only when a month is missing, audits `JOURNAL_PARTITIONS_ENSURED`, and raises ONE P1 case with a 2 h SLA (the plan's "P0": the most urgent priority the case model has) while rows sit in `journal_lines_default` (`ledger.partition.default_rows`) or while creating the months fails (`ledger.partition.ensure_failed`, with the database error). Moving the stranded rows edits ledger rows, which the append-only guard allows only for a superuser or a `pgw_ledger_maintenance` member, so it is an operator action: `bun run repair-journal-default-partition [--apply]` with a privileged `DATABASE_URL` (dry run by default; one transaction: copy, delete from default, create and guard the month, insert back, verify counts; ids, `created_at`, shards and sequences are unchanged; the default partition is locked ACCESS EXCLUSIVE for seconds with a 5 s lock timeout). The platform monitor's `journal_default_rows` check is the second alarm.
@@ -5249,6 +5314,26 @@ PSP-M refunds, disputes opened/decided and cash-outs are grouped by currency and
 ## Second-pass settlement and reconciliation corrections (2026-11-25)
 
 `postSettlementSweeps` still excludes a statement line tied to a known merchant-direct, internal or fee-at-source attempt. A **batch-net** source line with no local attempt (the gateway reports a settled batch total) is now swept again; previously the absence of an attempt skipped the whole batch and lost the clearing settlement. A test in `test/remediation-high.test.ts` covers the no-attempt batch case and the USD account selection.
+
+## v46 notification routing and readiness (2026-11-26)
+
+`OutboxNotificationWorker` now persists `last_error`, `sent_at` and
+`delivered_at`, marks a permanent configuration failure (`CHANNEL_NOT_CONFIGURED`,
+`RECIPIENT_ADDRESS_MISSING`) as `SUPPRESSED` instead of retrying eight times, and
+for an EMAIL row whose template policy allows SMS creates the mirrored
+`...:SMS` row once (idempotent by event id; the SMS template must exist). The
+runtime transport reads the current settings on every delivery: EMAIL goes to
+SMTP, SMS to the signed webhook, IN_APP is delivered by the row. The recipient
+resolver opens the sealed address or reads the user/merchant contact; it never
+sends to a masked value.
+
+`communication_readiness` is an extra `PlatformMonitorWorker` check. While email
+is unconfigured it raises the keyed case `platform.communication:email` and
+notifies active GATEWAY_ADMIN/SECURITY_ADMIN or `settings:write` users in-app,
+plus SMS when configured and the optional `PLATFORM_ALERT_SMS`; the daily event
+key prevents repeat spam. It also reports an enabled-but-incomplete SMS/Google
+configuration and repeated delivery failures. The case clears when email is
+configured.
 
 ---
 
@@ -5915,7 +6000,7 @@ The mixed timestamp convention is real. Any query that compares a core `TIMESTAM
 
 `core-back/prisma/seed.ts` is the main baseline seeder. It is idempotent by lookup for most rows and covers:
 
-- platform settings (`OD-1` through `OD-11` plus `join_request.four_eyes_policy`, `onboarding.required_documents`, `join_request.volume_threshold`, `kyb.refresh_policy`);
+- platform settings (`OD-1` through `OD-11` plus `join_request.four_eyes_policy`, `onboarding.required_documents`, `join_request.volume_threshold`, `kyb.refresh_policy`, `screening.fail_closed`, `SELF_PAYMENT_POLICY`, `calendar.holidays`) from `prisma/platformSettingsSeed.ts`; the defaults for the three runtime switches match their code defaults;
 - system GL accounts via `seedSystemGlAccounts(client)`;
 - the blueprint catalogue (`seedBlueprints(client)`) — gateways, versions, rails, routes, flows, steps, status/error maps and related definitions;
 - platform credential sets via `seedPlatformCredentialSets(client)`;
@@ -6310,6 +6395,30 @@ health event per route. The required schema version is **40**.
 
 **SQL-only schema guard (GAP-076).** `core-back/prisma/sql-only-objects.allowlist.json` lists the 57 objects Prisma cannot model (composite tenant FKs, trigram/covering indexes, SQL defaults and `schema_versions`). `bun run schema:sql-only-check` runs `prisma migrate diff` and fails if a new object would be dropped or a reviewed object is missing. CI runs it after migrations. Definition changes that keep the same object name are not fingerprinted yet.
 
+## v46 communication channels (2026-11-26)
+
+`20261126100000_communication_channels` adds:
+
+- `platform_settings.source` (`ADMIN` | `ENV_BOOTSTRAP` | `SEED`) and the
+  `platform_setting_secrets` table (Vault ciphertext per key/scope/version/field,
+  cascading with the setting version).
+- `communication_channel_status` for last test/delivery outcome, consecutive
+  failures and the last alert timestamp.
+- `mfa_challenges.purpose` (`LOGIN_MFA` | `EMAIL_VERIFICATION` |
+  `PASSWORD_RESET`), `delivery_channels` and `destination_masked`.
+- `notifications.last_error`, `sent_at` and `delivered_at`.
+- `oauth_states` (hashed state, sealed PKCE verifier, nonce, mode, redirect URI,
+  expiry, single use) and `oauth_login_tickets` (hashed one-time ticket for the
+  merchant session exchange).
+- `users.sessions_invalid_before`: a password reset invalidates every session
+  issued before that instant, enforced by `authDoubleCheck`.
+
+The migration also backfills an EMAIL identity with `verified_at` for active
+users that only had a password (skipping the synthetic `@pending...` and
+`@invited...` addresses) and marks Google identities verified, so the new
+verification gate does not lock existing accounts out. Required schema version:
+**46**.
+
 ---
 
 <a id="coresearch"></a>
@@ -6328,7 +6437,7 @@ It owns:
 - the query parser, token classification, match scoring and result sanitization in `core-back/lib/search/engine.ts`;
 - the core internal route `POST /internal/admin/search`;
 - the mTLS admin BFF proxy `POST /api/v1/admin/search` with its rate limiter;
-- the admin-front command palette (`Ctrl+K` / `Cmd+K`), local page/guide search, recent queries and the client-side target registry;
+- the admin-front command palette (`Ctrl+K` / `Cmd+K`), local page/guide search, recent queries and the client-side target registry; the guide-only palette uses `Ctrl+Shift+K` / `Cmd+Shift+K`;
 - the `useOpenQuery` deep-link composable that opens a record from a query parameter.
 
 It does not own domain authorization policy (the providers consume authority helpers but `core-back` remains the enforcement point), the underlying record APIs, or the guide content itself.
@@ -6649,7 +6758,7 @@ Relevant test files:
 
 - `core-back/test/globalSearch.test.ts` — parser/token/phone variants, match scoring, sanitization, registry, authority matrix, provider behavior.
 - `tests/unit/global-search.test.ts` — client target registry, local commands, recent-query storage, highlighting, access filtering.
-- `tests/e2e/admin/global-search.spec.ts` — app-bar trigger vs drawer guide search, `Ctrl+K`, debounce, Enter-to-open, one-character behavior, mocked API.
+- `tests/e2e/admin/global-search.spec.ts` — app-bar trigger vs drawer guide search, `Ctrl+K` on every route (including the guide), `Ctrl+Shift+K` for the guide palette, debounce, Enter-to-open, one-character behavior, mocked API.
 - `tests/e2e/exhaustive/exhaustive-admin-surface.spec.ts` — broader admin surface coverage that includes search interactions.
 
 Commands:
@@ -8691,6 +8800,16 @@ Schema version 41 (`20261116130000_case_management_taxonomy`) adds the columns a
 
 The catalog test covers classification, attempt-only actions, backup/regulatory readability and references; platform-monitor tests cover source-clear and recurrence; the admin Playwright suite covers the payment and backup cases; live verification covered the observed backup and PSP-M cases. The synthetic seeder and specialist live context presenters remain partial (see frontmatter gaps).
 
+## v46 communication readiness case (2026-11-26)
+
+The case catalog adds `COMMUNICATION_UNCONFIGURED` (group `PLATFORM`, domain
+`OPERATIONS`, source `PLATFORM_MONITOR`, subject `COMMUNICATION_CHANNEL`,
+auto-clear). `communication_readiness` raises the keyed case
+`platform.communication:email` while email is not configured; the case clears
+when the condition disappears. The admin Operator Cases screen maps it to
+Platform Settings → Communication, and authorised staff are notified in-app and
+by SMS when configured.
+
 ---
 
 <a id="edgeshared"></a>
@@ -9231,7 +9350,7 @@ New `coreForward` routes (new files `wallets.ts`, `applications.ts` (application
 
 | Mount | Read | Write |
 | :--- | :--- | :--- |
-| `/wallets` (+ `/:id/statement`, `/:id/audit-events`), `/applications`, `/payment-links`, `/pos-terminals` | `merchant:read` | `merchant:write` |
+| `/wallets` (+ `/:id/statement`, `/:id/audit-events`), `/applications`, `/access-tokens` (+ `/summary`), `/payment-links`, `/pos-terminals` | `merchant:read` | `merchant:write` |
 | `/transactions` | `attempt:read`, `merchant:read`, `finance:read` | n/a |
 | `/inbound-events` | `attempt:read`, `case:read` | n/a |
 | `/system/*` (jobs-outbox, jobs, outbox, audit-outbox, notifications), mounted after `/system/backups` | `security:read` | `security:write` |
@@ -9292,6 +9411,16 @@ read/write guards. `assetsRouter` additionally exposes binary
 `gatewayGuard` (`gateway:read`, `gateway:write`/`gateway:test`). The edge
 validates the state/reason/expiry shape only; core remains the authority for
 maker-checker, expiry and probe execution.
+
+## v46 admin auth and communication settings forwarding (2026-11-26)
+
+The public auth router adds `/auth/password/forgot` and `/auth/password/reset`,
+and `/auth/accept-invitation` accepts an optional phone. The protected settings
+router adds `GET /settings/communication/status`,
+`POST /settings/communication/test-email` and
+`POST /settings/communication/test-sms`; the core settings:read/settings:write
+authorities remain authoritative. Login/MFA responses pass through
+`deliveryChannels` and `destinationMasked`.
 
 ---
 
@@ -9610,6 +9739,16 @@ The edge validates the catalog query shape and the public execute shape (`inputs
 ## v38-v39 sandbox namespace (2026-11-13)
 
 `/api/v1/merchant/sandbox/*` is a dedicated namespace forwarded only to `SANDBOX_CORE_BACK_URLS`. `/overview`, `/seed-demo`, `/seed-history`, `/reset`, `/wallets/:id/*`, `/payments/:id/*`, `/disputes/:id/resolve`, `/reconciliation/*`, `/fake-rails/*` and `/webhooks/test-ping` map to the sandbox control routes; list/create resources (`/wallets`, `/applications`, `/links`, `/payments`, `/tokens`) map to the sandbox core's `/internal/merchant/*` (same router, separate database). `/mirror/*` raw-forwards to `/internal/merchant/*` for Live-parity pages, including a dedicated multipart dispute-evidence route and the POS SSE stream. `/api/external/v1/*` accepts `pg_live_*` and `pg_test_*` and selects the Live or Sandbox pool from the prefix. The client keeps one pool per URL set, so failover cannot cross planes.
+
+## v46 merchant auth forwarding (2026-11-26)
+
+The public auth router adds `/auth/google/start`, `GET /auth/google/callback`
+(proxies the core result and redirects the browser to `redirectPath` or
+`errorPath`), `/auth/google/exchange`, `/auth/email/verify`,
+`/auth/email/resend`, `/auth/password/forgot`, `/auth/password/reset` and
+`/auth/mfa/resend`. The register body is email + password + full name; the
+legacy `/auth/google` path is an alias for the start endpoint. `/auth/me`
+continues to be public and now carries the maintenance/communication block.
 
 ---
 
@@ -9985,8 +10124,8 @@ Additional exported primitives/extras are `SurfaceCardText`, `MetaPill`, `FormCh
 
 - A skip link targeting `#pg-main-content`.
 - A 56 px flat app bar with menu toggle, brand, breadcrumbs, live ledger invariant pill (for `profit.read` or `liquidity.read`), global search trigger (`Ctrl+K`/`Cmd+K`), help button, theme mode menu (System/Light/Dark), language menu, and user menu.
-- A 248 px `VNavigationDrawer`, permanent on desktop and temporary below the compact breakpoint. It contains brand/environment badge, guide search pill, collapsible navigation sections, and an operator card with role and maker/checker dots.
-- Route progress bar, focused `VMain`, global search palette, guide search modal, and contextual help drawer.
+- A 248 px `VNavigationDrawer`, permanent on desktop and temporary below the compact breakpoint. It contains brand/environment badge, guide search pill (`Ctrl+Shift+K`/`Cmd+Shift+K`), collapsible navigation sections, and an operator card with role and maker/checker dots.
+- Route progress bar, focused `VMain`, global search palette (`Ctrl+K` on every route, including the guide), guide search modal (`Ctrl+Shift+K` on every route), and contextual help drawer.
 - The `?` key opens help when the user is not typing in an input; `Escape` closes the topmost overlay.
 
 `admin-front/src/layouts/sections.tsx` owns the visible navigation groups and both `routesAuthorities` and `routesRoles`. The shell hides a section when every route in it is hidden, so an empty group header never renders.
@@ -10161,7 +10300,7 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 - **`JsonDiffViewer`** (rewritten) takes `diff: unknown`: an RFC-6902 array, `{operations}`, `{before, after}` or a plain payload (`DRAFT_AML_RULE`, `CREATE_ADJUSTMENT`...). The pure model `components/ui/jsonDiffModel.ts` humanises paths (`/payoutBankDetailsJson/iban` -> "Payout Bank Details · IBAN"), flattens nested objects to sub-rows, classifies money keys (`*Amount|*Ceiling|*Fee|*Balance|*Volume` -> `MoneyDisplay`), status strings (`StatusBadge`), lists (chips) and dates. `JsonValueCell`/`JsonValueList` render the same values as key/value rows. `components/JsonPatchDiff` is now a thin wrapper.
 - **`summarizeAuditChange(before, after)`** (`utils/auditSummary.ts`) returns the humanised labels of the changed top-level keys (ignoring identical values and timestamps); `components/AuditChangeChips.tsx` shows up to 3 chips plus "+N more" in the audit-log table, Merchant 360 and the case timeline.
-- **Builders** (`components/builders/**`, each with a pure model under `builders/model/` and unit tests): `CostModelBuilder` (+`formatCostModel`: `1.25% + 0.500 LYD (min…, max…)`), `RouteScopeBuilder` + `MismatchPolicyBuilder` (`tolerance_amount`, the only key the settlement engine reads), `MaintenanceWindowsBuilder` (absolute UTC `start`/`end`; a route is hidden while `start <= now < end`), `ParserConfigBuilder`/`ColumnMappingBadges` (statement sources), `AmlParamsBuilder`/summaries (7 rule types; `scope` is edited as a structured tree and the UI states that the engine does not evaluate it), `PlatformSettingTypedEditor` + `SettingValueView` (typed editors for the decision register OD-1..OD-11 and the policy keys; unknown keys fall back to a structured tree editor that preserves them), `LogoAssetPicker`, `ChipListInput`, `OptionChips`, `RepeatableRows`, `KeyValueSummary`, `StructuredValueEditor`. Every builder round-trips unknown keys losslessly.
+- **Builders** (`components/builders/**`, each with a pure model under `builders/model/` and unit tests): `CostModelBuilder` (+`formatCostModel`: `1.25% + 0.500 LYD (min…, max…)`), `RouteScopeBuilder` + `MismatchPolicyBuilder` (`tolerance_amount`, the only key the settlement engine reads), `MaintenanceWindowsBuilder` (absolute UTC `start`/`end`; a route is hidden while `start <= now < end`), `ParserConfigBuilder`/`ColumnMappingBadges` (statement sources), `AmlParamsBuilder`/summaries (7 rule types; `scope` is edited as a structured tree and the UI states that the engine does not evaluate it), `PlatformSettingTypedEditor` + `SettingValueView` (typed editors for the decision register OD-1..OD-11 and the policy keys; unknown keys fall back to a structured tree editor that preserves them), `LogoAssetPicker`, `ChipListInput`, `OptionChips`, `RepeatableRows`, `KeyValueSummary`, `StructuredValueEditor`. Every builder round-trips unknown keys losslessly. The Platform Settings workspace (`pages/settings/platform/**`) adds a pure catalog/search model (`builders/model/settingsCatalog.ts`, `settingsSearch.ts`): sections, lifecycle/status badges, reader/effect/risk metadata, effective/scheduled version selection, unconfigured and unregistered states, Arabic-aware search and a compact row + detail drawer. Every catalog field has a hint; unknown keys are shown as unregistered instead of being silently treated as understood.
 - **Commission tiers:** `CommissionTiersEditor` (`pages/finance/pricing/components`) edits `{ upTo, flat, percent }` (percent is a fraction) and is shown for TIERED only (the calculator ignores tiers for FLAT/PERCENTAGE/HYBRID). The create form also carries min/max fee, fee bearer, rounding mode and optional merchant/application scope.
 - **Shared drawers** (`components/ledger/JournalEntryDrawer`, `GlAccountDrawer`; `pages/merchants/components/WalletDetailDrawer`, `ApplicationDetailDrawer`) are opened by an id prop (`null` = closed) and emit `close`/`changed`. Governed actions share `ReasonModal` (>=10 characters) and a 202 handler that explains "submitted for approval" and links to `/approvals`.
 - **i18n slices:** `constants/i18n/{commerce,ledgerOps,forms,builders}.ts` are merged by `plugins/i18n.ts` after the main catalogue; each new string has an `[English, Arabic]` pair and unit tests assert EN/AR sync. Table filter configs live in `components/Table/registry/{commerce,ledgerOps,forms}.ts` and are spread into `tableRegistry`.
@@ -10207,6 +10346,18 @@ The four portals now run on the **vael-ui Vapor** UI layer. The branch `vael-ui-
 - **Verification:** admin Playwright 79 passed / 11 live skips, merchant 22 passed, checkout 7 passed; all four portals type-check and build; admin Vitest 48 and merchant content 23 pass. The admin suite covers shell geometry, RTL, themes, tables, inline filters, row context menus, wallet/GL drawers, approvals/safeguard checklists, guide context/reader, object storage and backups.
 
 Known residuals: the shim tag names still read as Vuetify in JSX; all forms are not yet on `vael-form`; and the native `select`/checkbox fallbacks trade vael-ui search/motion for deterministic form behavior while the field adapters are completed. These are tracked as `GAP-2026-11-26-UI-01` and `GAP-2026-11-26-UI-02`.
+
+### 18.1 Master integration (2026-11-26)
+
+`master` (email-primary communication, email/Google merchant auth, the human-readable Platform Settings workspace, and the Applications & Channels API-token surface) was merged into `vael-ui-migration` and every new surface was migrated to the vael/Vapor layer rather than reintroducing Vuetify:
+
+- **New pages/components:** the admin settings workspace (`pages/settings/platform/components/{CommunicationTab,NewSettingDrawer,SettingDetailDrawer,SettingRow,SettingsHealthStrip,SettingsSectionNav}.tsx`), admin forgot/reset-password pages, merchant forgot/reset-password, verify-email, Google-finish and `components/communication/MaintenanceScreen.tsx` now import `dc`/`defineComponent` from `@/utils/dc`, Vuetify-named components from `@/components/vael/VuetifyShim`, and `useLocale` from `@/utils/vael-compat`. No `vuetify` or `kt-dc` import remains in any portal.
+- **PageHeader slot:** the master `end={() => …}` prop is expressed as the vael `PageHeader` default slot; the removed `PageHeader.end` prop is not reintroduced.
+- **Shim `VTextField`:** now uses `inheritAttrs: false`, binds only real input attributes, keeps an explicit `aria-label` (falling back to `label`) so field names remain accessible, and renders a visible label/hint/error shell (`.pg-text-field`, `.pg-field-label`, `.pg-field-hint`) when those props are present. This restores labels on the new settings workspace and auth pages while `FormField` keeps owning labels in existing forms. The shim `VSwitch` keeps vael-ui's `role="switch"`; Playwright tests target `getByRole("switch")`.
+- **Shim link resolution:** `VBtn`/`VListItem` resolve `to` through `useRouter()`, falling back to the app router on the current instance when the component is created inside a drawer slot. Before this fix, a `VBtn to=…` rendered inside `SlideOverDrawer`'s `v-slots` silently dropped its link (a `TypeError` was swallowed by the slot render).
+- **Theme bridge:** `styles/vael-theme.css` now also defines the Vuetify-style RGB triplets (`--v-theme-primary`, `--v-theme-on-surface`, `--v-theme-background`, …) inherited styles still reference (`rgb(var(--v-theme-primary))`), in light and dark. Native `<option>` elements from the shim `VSelect` are visible to `getByText`, so tests scope environment text to the table.
+- **ECharts lazy chunk:** `merchant-front/src/components/EChart/lazy.tsx` was added (the merchant cards imported `@/components/EChart/lazy` without the module).
+- **Icons:** the generator now emits 244 admin icons (the new settings/section/auth `mdi-*` names) while merchant/checkout/Fake Rails stay at 138/52/35.
 
 ---
 
@@ -10294,7 +10445,7 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 | 37 | `/reports/chrome` | `ReportsChrome` | `reports.studio` (projected from `report_engine:author`) | none | Reusable header/footer registry and single global default per type. |
 | 38 | `/reports/merchant-reports` | `ReportsMerchantReports` | `report:review`/`report:approve`/`security:read`/`security:write` | none | Merchant-authored report registry, per-merchant execution history, Studio suspend/resume. |
 | 38 | `/academy` | `AdminAcademy` | none (intentional learning) | 1 / 1.1 | Employee Academy home (full-width hero with the single Continue action and progress rings, tracks, certificates list, Guide reading). Sub-routes `AdminAcademyTracks`, `AdminAcademyTrack`, `AdminAcademyModule`, `AdminAcademyLesson`, `AdminAcademyLab`, `AdminAcademyExam`, `AdminAcademyCertificate`, `AdminAcademyHelp` (none gated) and `AdminAcademyTeam` (role `SECURITY_ADMIN`); see `03-guide-and-academy.md` §7. |
-| 39 | `/settings/platform` | `AdminPlatformSettings` | none (backend `settings:read`/`settings:write`) | none | Versioned platform settings, backup export and restore preview. |
+| 39 | `/settings/platform` | `AdminPlatformSettings` | `settings:read` / `settings:write` (plus security fallback) | `/settings/platform?section=<id>&open=<key>` | Searchable, sectioned, versioned platform settings with a reader/effect/risk and field hints; backup export and restore preview. |
 | 40 | `/settings/checkout-help` | `AdminCheckoutHelp` | none (backend `settings:read`/`settings:write`) | 4 / 4.2 | Checkout support config, preview, version history and diff. |
 | 41 | `/system/backups` | `SystemBackups` | `security:read` or `gateway:read` | none | WAL/daemon/target health, backup history, drills and policy. |
 | 42 | `/guide/book/:bookId` | `AdminGuideBook` | none (learning surface) | 1 / 1.1 | One guide book with ordered articles and progress. |
@@ -10371,8 +10522,6 @@ Public admin routes are `/login` (`Login`, visitor-only) and the catch-all `NotF
 | `AdminUserDetail` | No entry; direct navigation is allowed. | `/users/:id` requires `user:read` or `security:read`. | Privilege gap. |
 | `PricingControls` | No entry; only the nav item is hidden without `profit.read`/`liquidity.read`. | Commission/velocity endpoints require finance/commission/velocity authorities. | Privilege gap. |
 | `GatewayAiImport` | No entry; it is reachable by URL even though it is not in the nav. | AI transcript/spec endpoints require `gateway:read`/`gateway:write`. | Privilege gap. |
-| `AdminPlatformSettings` | No entry; any authenticated admin can open the page. | Settings reads require `settings:read`; writes require `settings:write`. | Privilege gap. |
-| `AdminCheckoutHelp` | No entry; any authenticated admin can open the page. | Checkout-support reads require `settings:read`; writes require `settings:write`. | Privilege gap. |
 | `AdminGuide` | No entry. | No business-data authority required. | Intentional learning surface. |
 | `AdminAcademy*` | No entry (only `AdminAcademyTeam` has a role gate: `SECURITY_ADMIN`). | Progress and exams need only a back-office session; the team view requires the `SECURITY_ADMIN` role in admin-back and core-back. | Intentional learning surface; exams are server-graded. |
 
@@ -10456,6 +10605,8 @@ These suites require a running stack and are skipped without the live/edge servi
 
 ## Security hardening (2026-11-05)
 
+`AdminPlatformSettings` and `AdminCheckoutHelp` are gated by `settings:read`/`settings:write` (plus the security fallback); the backend still enforces the same authorities. The settings workspace deep links use `?section=` and `?open=`.
+
 The `VITE_AUTHORIZED` bypass was removed. The route authority table moved to `src/utils/routeAuthorities.ts` with a default-deny guard. `PUBLIC_FOR_AUTHENTICATED` covers Dashboard, every Guide reader route and every Academy route (the Team page keeps its own `SECURITY_ADMIN` check); `AUTHORITY_ALIASES` normalizes dotted and colon forms. AdminUsers/Detail accept `user:read`/`user:write`/`security:*`, AdminPlatformSettings accepts `settings:read`/`settings:write` (plus the security fallback), and PricingControls includes `liquidity.read`. These checks are advisory; core enforces authorities. Any route not in the table is denied to authenticated users unless it is in `PUBLIC_FOR_AUTHENTICATED`.
 
 ## Admin UI completion: six new routes (2026-11-06)
@@ -10466,7 +10617,7 @@ Six protected children were added to `admin-front/src/router/index.ts` (and the 
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `/wallets` | `Wallets` | Onboarding | `merchants.read` or `support.read_merchant` | `merchant:read` (freeze `merchant:write`) | Cross-merchant wallets: KPI strip, live/checkpoint balance ("Restricted" for non-financial roles), freeze (immediate) / unfreeze (approval) from the row menu. **Inspect** (or the wallet id) navigates to `WalletDetail`; `?open=<id>` redirects there. "Inspect GL account" still opens the GL drawer. |
 | `/wallets/:id` | `WalletDetail` (`meta.parentName: Wallets`) | Onboarding | same as `Wallets` | `merchant:read` (freeze `merchant:write`) | Wallet details page replacing the old wallet drawer: header with status badge, frozen banner, pending approvals, Freeze/Request unfreeze, Refresh; metric strip (live, checkpoint, posted since checkpoint, pending cash-outs). `?tab=` (`overview` default, `statement`, `links`, `activity`): Overview (details card, shard table with a padded **Total** row and a shards-vs-live-balance integrity badge), Statement (`AccountLinesTable`: server-paginated posting lines with side/reference-type/date filters, search, totals of the whole filtered set, links to the source record and to the journal entry drawer), Links and cash-outs (assigned applications, last 10 cash-outs), Status history (`/wallets/:id/audit-events`: when, action, change, reason, by, approval). Merchant 360 and the application drawer link here. |
-| `/applications` | `Applications` ("Applications & Channels") | Onboarding | same | `merchant:read` / `merchant:write` | Tabs Applications, Payment Links, POS Terminals; drawer with rail whitelist, redirect domains, API tokens (revoke), link cancel, terminal status; suspend immediate, reactivation and policy edits go to approval. `?tab=links\|pos`, `?open=<id>`. |
+| `/applications` | `Applications` ("Applications & Channels") | Onboarding | same | `merchant:read` / `merchant:write` | Tabs Applications, API Tokens, Payment Links, POS Terminals; the API-tokens tab lists every token with its environment, scopes and IP allowlist (stored CIDRs stay visible when the switch is off) and can revoke; Applications shows rail-whitelist pills plus token/IP-allowlist counts; drawer with rail whitelist, redirect domains, API tokens (revoke), link cancel, terminal status; suspend immediate, reactivation and policy edits go to approval. `?tab=tokens\|links\|pos`, `?open=<id>`. |
 | `/transactions` | `Transactions` ("Transactions & Webhooks") | Operations | `merchants.read`, `support.read_merchant` or `attempt:read` | `attempt:read` (+`merchant:read`/`finance:read`) | Tabs Payment Attempts and Inbound Webhooks (verified / unmatched filters); the attempt drawer shows summary, step logs, inbound events and the checkout retry group as structured rows. |
 | `/credential-sets` | `CredentialSets` | Gateways | `credentials.manage` or `gateways.edit` | `credential:read`/`gateway:read`, `credential:write` | Vault entries: create, rotate, verify, revoke (reason); secrets are write-only. `?highlight=<id>` (from search hits and Merchant 360). |
 | `/finance/journal-entries` | `JournalEntries` | Finance | `profit.read` or `liquidity.read` | `finance:read` | Double-entry explorer: balanced badge, T-account drawer, GL account drawer; `?glAccountId=`, `?open=`. |
@@ -10554,6 +10705,18 @@ The Dashboard Route health card shows forced and conflict counts. See
 - The Adjustments page consumes `?attemptId=` and `?merchantId=` and pre-fills the create form, so **Create refund/adjustment** from the Transaction drawer no longer opens an empty page.
 - The Jobs & Outbox type filter includes `REFUND_INQUIRY`.
 - The Journal Entries unbalanced tile includes entries with zero lines, not only entries whose lines do not sum to zero.
+
+## v46 authentication and communication settings routes (2026-11-26)
+
+Public admin routes `/forgot-password` and `/reset-password` complete the
+email-OTP reset flow. The login MFA copy uses the server's `deliveryChannels`,
+and the invitation page makes the phone optional. Platform Settings adds a
+**Communication** tab (`CommunicationTab`) with email/SMS/Google status,
+missing-field diagnostics, last test/delivery results and "send test" actions
+for `settings:write`; the shell shows a warning banner while merchant auth is in
+maintenance. Typed setting namespaces: `communication.email`,
+`communication.sms`, `communication.policy` and `auth.google`; secret fields are
+password controls with a stored placeholder and are never echoed by the API.
 
 ---
 
@@ -10843,7 +11006,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 ## Registry slices (2026-11-06)
 
-`components/Table/tableRegistry.ts` (keyed by ROUTE NAME) now spreads three area slices, `registry/commerce.ts`, `registry/ledgerOps.ts` and `registry/forms.ts`, so independent areas add filter configs without editing one shared literal. The approvals subject-type filter lists the new `WALLET` and `POS_TERMINAL` subjects. Pages with several tables (Applications: applications / payment links / POS terminals; Transactions: attempts / inbound events; Jobs & Outbox) pass their filters explicitly to `ApiTable`.
+`components/Table/tableRegistry.ts` (keyed by ROUTE NAME) now spreads three area slices, `registry/commerce.ts`, `registry/ledgerOps.ts` and `registry/forms.ts`, so independent areas add filter configs without editing one shared literal. The approvals subject-type filter lists the new `WALLET` and `POS_TERMINAL` subjects. Pages with several tables (Applications: applications / API tokens / payment links / POS terminals; Transactions: attempts / inbound events; Jobs & Outbox) pass their filters explicitly to `ApiTable`. The API-tokens registry filters by lifecycle status, environment, IP-allowlist state, merchant, application and creation date.
 
 ## Safeguard/export extension (2026-11-23)
 
@@ -10924,7 +11087,7 @@ The clarity renderer adds:
 
 `GuideSearch.ts` builds a lazy MiniSearch index over articles, terms, cards, situations, edge cases, quick answers and error codes. Both index and query normalisation lowercase text, strip Arabic diacritics/tatweel, unify alef/ya/ta-marbuta and convert Arabic-Indic digits. Searches use prefix matching, fuzzy 0.2 and `AND` with an `OR` fallback; results are grouped with at most eight per type.
 
-`GuideSearchPalette` is mounted in the default layout. Ctrl/Cmd+K opens the guide palette on `/guide/**` and the global record palette elsewhere; the app-bar trigger and drawer "Search guide…" button also open the guide palette. Recent documents are stored under `pg.guide.recent`.
+`GuideSearchPalette` is mounted in the default layout. Ctrl/Cmd+Shift+K opens the guide palette on every admin route; Ctrl/Cmd+K always opens the global record palette (which also searches guide entries). The app-bar trigger and drawer "Search guide…" button also open the guide palette. Recent documents are stored under `pg.guide.recent`.
 
 `PageHeader` automatically renders `ContextHelpButton`; a shared `ContextHelpDrawer` resolves the current route (parent-first) through `context-map.json`, shows the screen summary, safeguard cards, situations and articles, and never unmounts the page. `SafeguardDialog` is mounted globally and `useSafeguard(cardId).confirm()` blocks 22 risky actions until every required box is ticked; Cancel resolves `false` without sending a request.
 
@@ -11255,7 +11418,7 @@ The integration points are the 22 action areas named in the guide design: approv
 
 <a id="admin-uioperations"></a>
 
-> **Part ID:** `admin-ui.operations` · **Status:** `partial` · **Last verified:** 2026-11-23 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `admin-ui.operations` · **Status:** `partial` · **Last verified:** 2026-11-26 · **Verified against:** `working-tree 2026-11-26`
 
 # Backups Settings and Operations
 
@@ -11318,6 +11481,9 @@ The overview endpoint is `no-store`, syncs daemon catalog rows into `backupCatal
 ### 3.2 Platform settings (`/settings/platform`)
 
 Page: `admin-front/src/pages/settings/platform/index.tsx`.
+Catalog: `admin-front/src/components/builders/model/settingsCatalog.ts`.
+Search/merge/version model: `admin-front/src/components/builders/model/settingsSearch.ts`.
+Typed value definitions: `admin-front/src/components/builders/model/settingsSchemas.ts`.
 
 Endpoints:
 
@@ -11331,37 +11497,72 @@ Endpoints:
 | Restore apply | `POST v1/admin/settings/restore-apply` | `settings:write` |
 | Save setting | `PUT v1/admin/settings` | `settings:write` |
 
-The page groups all versions by setting key, newest first, and shows:
+The page is a searchable workspace, not a flat key list:
 
-- Key, latest version, scope, version count and effective date.
-- A JSON preview.
-- History and edit dialog.
+- **Sections**: All settings, Payments & routing, Merchants & onboarding, Risk &
+  screening, Reporting & compliance, Governance & approvals, Operations & data,
+  Checkout & support, Advanced & unregistered.
+- **Search** matches the title, key, section, summary, description, reader,
+  effect, field labels, field hints, option hints, keywords, current value and
+  Arabic text. Multi-word search is AND; the result count is announced.
+- **Status filters**: All, Live policies, Decision records, Using defaults and
+  Needs attention.
+- **Rows** show the human title, technical key, lifecycle/status badge, risk,
+  effective version, scheduled marker, summary, a one-line value preview and the
+  effect. Clicking a row opens a detail drawer.
+- **Detail drawer** tabs: Overview (description, reader, effect, risk reason,
+  default, related settings, Guide link, governance warning), Value (typed editor
+  grouped by field group with hints, units, option hints and a field filter) and
+  History (current/scheduled/superseded versions, diff, load into editor).
+- **Deep links**: `?section=risk&open=screening.fail_closed`.
+- **New setting** lists known runtime settings with no stored row and an advanced
+  custom-key path. A custom key is explicitly described as stored value only; the
+  platform will not read it until a core reader and catalog entry exist.
+
+Lifecycle semantics:
+
+| Status | Meaning |
+| :--- | :--- |
+| **Live policy** (`RUNTIME`) | Core reads the key at runtime. |
+| **Legacy fallback** (`FALLBACK`) | Read only when the canonical key is absent. |
+| **Recorded decision** (`DECISION`) | Decision-register record; no runtime effect. |
+| **Retired** (`DEPRECATED`) | No longer read; read-only. |
+| **Managed elsewhere** (`MANAGED`) | Another screen owns it; the drawer links there. |
+| **System-managed** (`SYSTEM`) | Seeder/deploy owns it; read-only. |
+| **Gateway evidence** (`DYNAMIC`) | `gateway.go_live.*` family created by the wizard. |
+| **Using default** (`UNCONFIGURED`) | Known runtime key with no stored row; defaults are shown. |
+| **Unregistered** (`UNREGISTERED`) | Key is not in the catalog; the screen warns instead of guessing. |
+
+The UI distinguishes **latest**, **effective** and **scheduled** versions:
+
+- Latest = highest version number.
+- Effective = highest version whose `effectiveFrom` has passed.
+- Scheduled = future-effective versions.
+
+The row shows the effective value. A scheduled version is flagged and the drawer
+warns that saving a new version now supersedes it. The edit form is prefilled
+from the latest version so a scheduled value is not silently replaced in the
+editor.
 
 A save:
 
 1. Validates the key against `^[A-Za-z0-9._:-]{2,120}$`.
-2. Requires a JSON object (not an array or scalar).
+2. Requires a JSON object (not an array or scalar) and the typed field checks.
 3. Requires the setting checklist when checklists are visible.
-4. Calls `PUT v1/admin/settings` with `settings: { [key]: parsed }` and the checked keys.
-5. The backend creates the next version with `scope: "PLATFORM"` and an effective date (now unless supplied) and writes a `PLATFORM_SETTINGS_UPDATED` audit entry.
+4. Requires a change note of at least three characters.
+5. Calls `PUT v1/admin/settings` with `settings: { [key]: parsed }`, the checked
+   keys and `reason`.
+6. Core writes the next immutable version, audit `PLATFORM_SETTINGS_UPDATED`
+   with the settings, checklist and reason, and invalidates the merchant-report
+   and route-health policy caches.
 
-This path is versioned and audited but is **not** a maker-checker approval. The form marks fields as sensitive/maker-checker, but the backend handler writes directly for an operator with `settings:write`.
+The settings page is **not maker-checker**. The UI does not show a false
+"Four-Eyes Required" badge; it states that the change is immediate and audited,
+and recommends a second reviewer for high-risk settings. Maker-checker for
+platform settings remains a separate future feature.
 
-The history dialog can compare an older version with the current version. The diff is computed by flattening both JSON objects and listing added/removed/changed paths. "Load into editor" copies a version's JSON into the editor; it does not write until the operator saves.
-
-Backup export downloads a JSON file containing the latest version per key with `exportedAt`, key/scope/version/value/effective/updated fields, and writes a `PLATFORM_SETTINGS_EXPORTED` audit entry.
-
-Restore is preview-first:
-
-- The operator selects a JSON file.
-- The backend validates entries, computes `ADDED`/`CHANGED`/`UNCHANGED`/`INVALID` and the missing-in-backup keys, and returns the preview. Preview requires only read authority and writes a preview audit entry.
-- Apply requires a reason of at least 3 characters, the restore checklist, `confirm: true`, and only sends entries that are added/changed and have a value.
-- The backend rejects invalid entries before apply and checks `expectedCurrentVersion` for each setting inside a transaction. A concurrent change returns `409 SETTING_VERSION_CONFLICT`.
-- Apply creates new versions and writes `PLATFORM_SETTINGS_RESTORED` with the reason and checklist.
-
-The summary card shows keys, versions, updates in the last 24 hours, future-effective count, and per-scope counts. The summary export is a CSV-to-XLSX workbook of those metrics.
-
-### 3.3 Checkout help settings (`/settings/checkout-help`)
+`checkout.support_config` is listed as **Managed elsewhere** and links to
+`/settings/checkout-help`.
 
 Page: `admin-front/src/pages/settings/checkout-help/index.tsx`.
 
@@ -11436,15 +11637,17 @@ The UI hides write controls where it knows the authority. The backend remains au
 ## 4. Contracts and invariants
 
 1. **Platform settings are append-only versions.** A save never mutates an existing row; the next version is `latest + 1`.
-2. **The effective version is the highest version whose effective date has passed.** Future-effective versions remain visible but are not yet effective.
-3. **Restore must preview first.** Apply requires explicit confirmation, a reason, the checklist, and matching `expectedCurrentVersion` values.
-4. **Invalid restore entries block apply.** The UI and backend both refuse to apply when `invalid > 0`.
-5. **Backup policy is maker-checker.** The maker submits; a different checker executes through approvals.
-6. **Backup trigger/drill are immediate writes under `security:write`.** They are not maker-checker approvals.
-7. **Checkout support save creates a new version and audit entries.** It is not a maker-checker execution.
-8. **The Academy team view requires the `SECURITY_ADMIN` role and writes an audit entry; exam grading is server-side.**
-9. **All spreadsheet exports use the shared XLSX pipeline.**
-10. **Runtime visibility flags override build-time flags.**
+2. **The effective version is the highest version whose effective date has passed.** The row shows the effective value; a future version is shown as scheduled and is never displayed as current.
+3. **The catalog is the explanation.** Every seeded key and every runtime key must have a catalog definition with a section, summary, description, reader, effect, risk, risk reason, defaults and hints for every field. An unknown key is shown as Unregistered, not silently edited as if it were understood.
+4. **Restore must preview first.** Apply requires explicit confirmation, a reason, the checklist, and matching `expectedCurrentVersion` values.
+5. **Invalid restore entries block apply.** The UI and backend both refuse to apply when `invalid > 0`.
+6. **Backup policy is maker-checker.** The maker submits; a different checker executes through approvals.
+7. **Backup trigger/drill are immediate writes under `security:write`.** They are not maker-checker approvals.
+8. **Checkout support save creates a new version and audit entries.** It is not a maker-checker execution.
+9. **Platform settings are immediate and audited, not maker-checker.** The UI states this and requires a change note; high-risk settings should be reviewed by a second person out of band.
+10. **The Academy team view requires the `SECURITY_ADMIN` role and writes an audit entry; exam grading is server-side.**
+11. **All spreadsheet exports use the shared XLSX pipeline.**
+12. **Runtime visibility flags override build-time flags.**
 
 ## 5. Data / API / config / deployment surface
 
@@ -11465,7 +11668,7 @@ The UI hides write controls where it knows the authority. The backend remains au
 - Review backups: start with WAL lag, daemon reachability, target health and the latest drill. A failed/absent drill is not a healthy backup posture.
 - Trigger a backup: choose a target and kind; `delta` is not a substitute for a full restore point.
 - Change backup policy: submit the form, then have a different checker execute the pending approval. The backup page will not execute it directly.
-- Change a platform setting: edit the JSON object, record the checklist, and save; verify the new version and effective date. Treat the form's maker-checker hint as advisory only.
+- Change a platform setting: search by name or key, open the row, read the reader/effect/risk and field hints, complete the checklist, write a change note and save. Verify the current and scheduled versions. The change is immediate and audited; ask a second person to review high-risk settings out of band.
 - Restore settings: preview, inspect invalid/missing/version conflicts, then apply with a real reason. Do not retry a version conflict without re-previewing.
 - Change checkout support: ensure contact channels and FAQ content are valid in both languages, preview the result, and save. This changes payer-visible help immediately for new fetches.
 - Academy team view not visible: it needs the `SECURITY_ADMIN` role.
@@ -11485,8 +11688,9 @@ The UI hides write controls where it knows the authority. The backend remains au
 
 - The backup page does not hand the operator into the specific pending approval after a policy save.
 - `BACKUP_POLICY` is missing from the shared approvals subject-type filter options, even though the backend supports it.
-- Platform settings and checkout support are versioned/audited but not maker-checker.
-- The route-level UI gates for platform settings and checkout help are absent (the Academy team route is role-gated).
+- Platform settings and checkout support are versioned/audited but not maker-checker. The settings page states this honestly and requires a change note.
+- The settings catalog is frontend metadata; a new core key without a catalog entry appears as Unregistered until the catalog, hints and translations are added.
+- Checkout support is managed on its own screen and appears read-only in the settings workspace.
 - Academy labs are browser-graded practice; certification is decided only by server-graded exams.
 
 ### Missing / deferred
@@ -11500,21 +11704,71 @@ The UI hides write controls where it knows the authority. The backend remains au
 
 - **Workflow gap:** a backup policy maker cannot continue directly to approval; the pending request must be found in the general approvals queue.
 - **Filter gap:** the approvals subject filter cannot select `BACKUP_POLICY`.
-- **Governance gap:** `sensitiveMakerChecker` hints on platform settings/checkout help fields do not produce a maker-checker approval.
-- **Authorization risk:** direct navigation to settings/checkout help is not blocked by the router; the page loads and then fails backend calls for unauthorized users.
+- **Governance gap:** platform settings/checkout help saves are immediate and audited, not maker-checker. High-risk settings rely on an out-of-band second review.
+- **Catalog drift risk:** a runtime key added without a catalog definition will display as Unregistered and cannot explain its effect.
 - **Export scope risk:** table exports are current-page only; do not treat them as full-result exports.
 - **Documentation gap:** historical design claims about weekly drills/hourly Redis/ready-to-run backup certificates are superseded by the storage/backup parts.
 
 ## 8. Verification and tests
 
+- `tests/e2e/admin/platform-settings.spec.ts` proves sections, search, status badges, the drawer, current vs scheduled versions, unconfigured/managed settings, the typed save body with change note and the phone layout.
+- `tests/unit/platform-settings.test.ts` proves seeded-key catalog coverage, field hints, section/status translation, defaults, effective/scheduled versions, unregistered keys, search (including Arabic) and go-live aspect editors.
 - `tests/e2e/admin/backups.spec.ts` mocks the backup overview and verifies the rendered health/schedule/drill state and the trigger request payload.
 - `core-back/test/backup-admin/backup-admin-routes.test.ts` covers backup route authority, trigger/drill/policy behavior and audit entries.
+- `core-back/test/automation/business-time.test.ts` covers the `calendar.holidays` object shape.
+- `admin-back/test/core-contract.test.ts` proves the change note (`reason`) is forwarded to core.
 - `tests/unit/academy-content.test.ts` covers the Academy content counts.
 - The XLSX pipeline has no dedicated unit test in this repository; coverage is through page-level usage and the shared UI compliance test.
 
 The backup E2E suite requires the live stack; the core backup test requires PostgreSQL/Redis.
 
-## 9. Source references
+## 9. Communication settings (2026-11-26)
+
+The settings catalog registers four runtime keys with typed editors:
+
+| Key | Section | Purpose |
+| :--- | :--- | :--- |
+| `communication.email` | Operations & data | Primary SMTP channel: host, port, security, credentials, sender and timeout. Merchant registration and sign-in stay in maintenance while it is not configured. |
+| `communication.sms` | Operations & data | Optional signed SMS aggregator webhook and sender ID. SMS is additive; email remains primary. |
+| `communication.policy` | Operations & data | Which templates may also use SMS (`OFF`, `AUTH_ONLY`, `CRITICAL_ONLY`, `ALL`) and whether staff may fall back to SMS when email is missing. |
+| `auth.google` | Merchants & onboarding | Server-side Google OAuth 2.0 client ID, secret, redirect URI and optional hosted domain for merchant sign-in and registration. |
+
+All four use `showWhenUnconfigured`, so they appear as **Using default** before the first save and can be created from the detail drawer. Secrets (`smtpPassword`, `webhookSecret`, `clientSecret`) use the `secret` field kind: the API returns a mask, a blank input keeps the stored value, and the value is stored encrypted in `platform_setting_secrets`.
+
+The **Communication** tab sits beside **Platform settings** and **Notification templates**. It shows email, SMS and Google readiness (configured, source, missing fields, last test, last delivery, consecutive failures), the merchant maintenance banner and test-send actions. Each card opens the matching typed setting in the same detail drawer. The tab does not save values itself, so the change-note, checklist and immutable-version rules are identical to every other setting.
+
+`tests/unit/platform-settings.test.ts` requires every definition string and field hint to have an Arabic entry; the communication strings live in `constants/i18n/settings.ts`. `tests/e2e/admin/platform-settings.spec.ts` covers the tab, the maintenance banner and opening the typed email editor.
+
+## 10. Adding or changing a platform setting
+
+The full developer checklist is in `docs/developer/platform-settings.md`. The
+canonical rule is:
+
+1. Decide whether it is a platform setting, deploy/env config, a domain column or
+   static UI text. Never store secrets, personal data or AML-confidential
+   evidence in a setting.
+2. Choose an immutable `domain.name` key and a JSON object value with safe
+   defaults.
+3. Add the default to `core-back/prisma/platformSettingsSeed.ts` when every
+   environment should have it.
+4. Add the core reader with defensive parsing, a safe fallback and cache
+   invalidation after a settings save.
+5. Add the catalog definition in `settingsCatalog.ts`: section, summary,
+   description, readBy, effect, risk, riskReason, defaults, keywords, edit/create
+   flags and a hint for every field.
+6. Add the typed namespace in `settingsSchemas.ts`; every field needs a label,
+   hint, type and optional unit/default/options.
+7. Add English and Arabic text in `admin-front/src/constants/i18n/settings.ts`.
+8. Add or update unit, core, edge and Playwright tests.
+9. Update this part, the route/test catalogues, `TRACKER.md`, the Guide article
+   and the Companion snapshot when the operator-facing behavior changes.
+10. Run `bun scripts/project-design/build.ts --check`, `git diff --check` and the
+    relevant workspace gates.
+
+Lifecycle status must be honest: if nothing reads the key at runtime, mark it
+`DECISION` and say so. Do not present a recorded decision as a live switch.
+
+## 11. Source references
 
 ### Old design sections
 
@@ -11526,7 +11780,10 @@ The backup E2E suite requires the live stack; the core backup test requires Post
 
 - `admin-front/src/pages/system/backups/index.tsx`
 - `admin-front/src/pages/settings/platform/index.tsx`
+- `admin-front/src/pages/settings/platform/components/**`
+- `admin-front/src/components/builders/model/{settingsSchemas,settingsCatalog,settingsSearch}.ts`
 - `admin-front/src/pages/settings/checkout-help/index.tsx`
+- `docs/developer/platform-settings.md`
 - `admin-front/src/pages/academy/*.tsx`
 - `admin-front/src/utils/xlsx/**`
 - `admin-front/src/components/ui/SummaryExportCard.tsx`
@@ -11541,7 +11798,7 @@ The backup E2E suite requires the live stack; the core backup test requires Post
 - `project-design/appendices/env-and-config-matrix.md`
 - `project-design/appendices/test-inventory.md`
 
-## 10. Change history
+## 12. Change history
 
 - 2026-11-03 — Initial canonical operations part. Records backup/target/drill/policy behavior, settings versioning/restore, checkout-support history/diff, academy reporting, export/checklist behavior, and the authority/workflow gaps.
 
@@ -12130,6 +12387,20 @@ A "Sandbox Live Mirror" section reuses the Live pages under `/sandbox/mirror/*` 
 ## Second-pass sandbox visibility (2026-11-25)
 
 Sandbox menu entries are filtered with `canOpenRoute`; the route table now allows `gateways.edit`/`security:read` for the Sandbox Overview, Sandbox Merchants and Fake Rails screens, so the Gateway Admin and Security Admin roles named by the Guide can open them. The Sandbox Live Mirror is described as the same Live screens backed by sandbox data, not as read-only, because the proxy forwards the same methods.
+
+## v46 email/Google merchant authentication (2026-11-26)
+
+The landing page loads `GET /auth/me` and shows a maintenance banner when email
+delivery is not configured; `/login` and `/register` render a maintenance screen
+instead of their forms in that state. Registration asks for full name, email and
+password only (no phone) or Google; after registration the user verifies the
+six-digit email code on `/verify-email`. Login shows the channel copy from
+`deliveryChannels` (email, SMS when configured, or both), supports resend and
+links to `/forgot-password` and `/reset-password`. Google uses the server
+authorization-code + PKCE flow: the button receives `authorizationUrl`, the edge
+callback redirects to `/auth/google/finish?ticket=...`, and the page exchanges
+the one-time ticket for the normal session. All new pages are EN/AR and follow
+the existing AuthLayout/SurfaceCard/FormField system.
 
 ---
 
@@ -14738,6 +15009,22 @@ New keys: `SANDBOX_ENABLED` (default false), `SANDBOX_NODE`, `SANDBOX_CORE_PORT`
 ## Backup and object-storage input hardening (2026-11-23)
 
 `BUN_VERSION` defaults to the tested 1.4.x line (1.4.4) because the committed lockfiles are version 2. `BACKUP_PRIMARY_S3_ENDPOINT` must be an http(s) URL without whitespace or shell metacharacters; `BACKUP_PRIMARY_S3_BUCKET` accepts an S3 bucket/path (optional `s3://`) using safe characters only; `BACKUP_MINIO_VERSION` and `BACKUP_MINIO_BINARY_URL` are restricted to safe tags/URLs; `BACKUP_MINIO_DATA_DIR` uses the safe absolute-path schema and rejects system directories. `BACKUP_ALLOW_INSECURE_HTTP` remains a documented availability option and is rejected only where the object-storage production guard applies. The object-storage and backup certificate directories must be separate and non-nested.
+
+## v46 communication deployment keys (2026-11-26)
+
+The deploy config accepts `COMMUNICATION_BOOTSTRAP_ENABLED`,
+`COMMUNICATION_EMAIL_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY`,
+`SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`,
+`SMTP_REPLY_TO`, `SMTP_TIMEOUT_MS`, `SMTP_ALLOW_INSECURE`,
+`COMMUNICATION_SMS_ENABLED`, `SMS_WEBHOOK_URL`, `SMS_WEBHOOK_SECRET`,
+`SMS_SENDER_ID`, `SMS_TIMEOUT_MS`, `GOOGLE_AUTH_ENABLED`, `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `GOOGLE_HOSTED_DOMAIN`, `GOOGLE_REDIRECT_URI`,
+`PLATFORM_ALERT_EMAIL` and `PLATFORM_ALERT_SMS`. `coreEnv` forwards them to the
+core process; the core bootstrap copies them into Platform Settings when no
+administrator has saved them. Validation requires the host/from address when
+email is enabled, the webhook URL and secret when SMS is enabled, and the client
+ID/secret/redirect URI when Google is enabled; production refuses
+`SMTP_SECURITY=NONE` and `SMTP_ALLOW_INSECURE=true`.
 
 ---
 
@@ -17832,8 +18119,8 @@ Run with `bun test ./path`. Concurrency tests need PostgreSQL 18 and are not cov
 
 ## Admin UI completion suites (2026-11-06)
 
-- **Unit (`tests/unit`, vitest, 490 passing in 30 files):** pure logic of the new UI: governance action tables per state (immediate vs approval), owner/revalidation forms, journal/route-cap/lifecycle/health/jobs models, the JSON diff model, audit summaries (`formatAuditValue`, `describeAuditChange`), commission tiers, dispute evidence mapping, and the builders' round trips (cost model, scope, maintenance windows, parser config, AML params, settings schemas, template variables) including unknown-key preservation. `commerce-i18n` and `builders-api-error-i18n` assert that every message key the logic can produce has an Arabic entry. `frontend-security-admin` (default-deny route authorities, alias map) and `guide-content` (every router name has a context-map screen) caught the six new routes until they were registered properly. `guide-markdown-refs` covers the clarity renderer helpers (parenthetical reference extraction, meaningful-prose preservation, short labels, preview snippets); `guide-content` also runs the clarity `--check` gate.
-- **E2E (Playwright, needs Chrome: set `PLAYWRIGHT_CHROME_PATH=/usr/bin/google-chrome-stable` when the bundled browser is not installed):** `e2e/admin/wallet-details.spec.ts` drives the wallet details page against mocked responses (Inspect and old `?open=` links land on `/wallets/:id`; the shard **Total** row has cell padding; the statement is paged by the server with totals of the whole result and a side filter sent as `direction=`; the tab survives a reload; a journal entry opens above the page and above the GL account drawer, checked with `elementFromPoint`; the GL drawer paginates its lines; a frozen wallet shows the banner and the status history). `e2e/admin/commerce-governance.spec.ts` drives the wallets page against realistic mocked responses (restricted balances render "Restricted" and never 0; a freeze needs a >=10-character reason and sends exactly `{status: "FROZEN", reason}`; restoring returns HTTP 202 and is reported as submitted for approval; a read-only role gets no freeze action). `exhaustive-admin-surface.spec.ts` now covers 31 routes (the six new ones included) across 3 viewports x 2 locales x 2 themes (372 combinations: no horizontal overflow, correct direction and theme, app bar never overlapping). `e2e/admin/backups.spec.ts` was updated for the second confirmation the page has asked for since the frontend hardening commit (its spec was stale). `e2e/admin/guide-reader.spec.ts` also holds the phone-width regression for guides: a wide article table and the edge-case catalogue must scroll inside their wrapper, keep `overflow-wrap: normal` on cells and never make the page itself overflow horizontally.
+- **Unit (`tests/unit`, vitest, 490 passing in 30 files):** pure logic of the new UI: governance action tables per state (immediate vs approval), owner/revalidation forms, journal/route-cap/lifecycle/health/jobs models, the JSON diff model, audit summaries (`formatAuditValue`, `describeAuditChange`), commission tiers, dispute evidence mapping, and the builders' round trips (cost model, scope, maintenance windows, parser config, AML params, settings schemas, template variables) including unknown-key preservation. `platform-settings.test.ts` is the settings catalog gate: every seeded key has a definition and typed namespace, every field has a hint, every section/status/catalog string has Arabic, unconfigured runtime settings show safe defaults, decision/managed/system/deprecated statuses are honest, effective/scheduled/latest versions are separated, unregistered keys are warned, Arabic and hint search works, section counts are correct and `gateway.go_live.*` aspects resolve to typed editors. `commerce-i18n` and `builders-api-error-i18n` assert that every message key the logic can produce has an Arabic entry. `frontend-security-admin` (default-deny route authorities, alias map) and `guide-content` (every router name has a context-map screen) caught the six new routes until they were registered properly. `guide-markdown-refs` covers the clarity renderer helpers (parenthetical reference extraction, meaningful-prose preservation, short labels, preview snippets); `guide-content` also runs the clarity `--check` gate.
+- **E2E (Playwright, needs Chrome: set `PLAYWRIGHT_CHROME_PATH=/usr/bin/google-chrome-stable` when the bundled browser is not installed):** `e2e/admin/platform-settings.spec.ts` drives the settings workspace against mocked responses (sections and search, live/decision/using-default/unregistered/managed badges, drawer reader/effect/hints, scheduled vs effective versions, unconfigured and managed settings, a typed save body with a change note and checklist, and a phone-width no-overflow check). `e2e/admin/wallet-details.spec.ts` drives the wallet details page against mocked responses (Inspect and old `?open=` links land on `/wallets/:id`; the shard **Total** row has cell padding; the statement is paged by the server with totals of the whole result and a side filter sent as `direction=`; the tab survives a reload; a journal entry opens above the page and above the GL account drawer, checked with `elementFromPoint`; the GL drawer paginates its lines; a frozen wallet shows the banner and the status history). `e2e/admin/commerce-governance.spec.ts` drives the wallets page against realistic mocked responses (restricted balances render "Restricted" and never 0; a freeze needs a >=10-character reason and sends exactly `{status: "FROZEN", reason}`; restoring returns HTTP 202 and is reported as submitted for approval; a read-only role gets no freeze action). `exhaustive-admin-surface.spec.ts` now covers 31 routes (the six new ones included) across 3 viewports x 2 locales x 2 themes (372 combinations: no horizontal overflow, correct direction and theme, app bar never overlapping). `e2e/admin/backups.spec.ts` was updated for the second confirmation the page has asked for since the frontend hardening commit (its spec was stale). `e2e/admin/guide-reader.spec.ts` also holds the phone-width regression for guides: a wide article table and the edge-case catalogue must scroll inside their wrapper, keep `overflow-wrap: normal` on cells and never make the page itself overflow horizontally. `e2e/admin/application-tokens.spec.ts` pins the Applications & Channels token/allowlist surface against mocked responses: rail-whitelist pills and the IP-allowlist counts appear on the applications table, the platform-wide **API tokens** tab lists the token, its environment and CIDRs, and the **View API tokens** row action opens the application drawer on the tokens tab. After the vael-ui merge the settings suite toggles the typed switch with `getByRole("switch")` (vael-ui keeps the ARIA switch role) and the token suite scopes the environment text to the API-tokens table because the shim `VSelect` is a native `<select>` whose `<option>` text is also visible to `getByText`.
 - **Component compliance (`admin-front` `bun run test:unit`):** helper components must live in `components/` subfolders so every route page keeps `PageHeader` (the test stops at the first offender).
 
 ## Backup daemon suites (2026-11-06)
@@ -18029,6 +18316,20 @@ New or extended DB-free suites:
 - `core-back/test/background-jobs.test.ts`, `core-back/test/refund-three-phase.test.ts` — fixtures now give the merchant ceiling headroom so the tests exercise the reserve/refund path rather than the ceiling guard.
 
 The final core run was 20,265 pass / 5,066 skip / 4 fail; the 4 failures are the known audit-chain/vault environment tests that need PostgreSQL and `KMS_MASTER_KEY`. Admin-back 835, merchant-back 157, checkout-back 275, deploy 685, backup-daemon 238, object-storage-daemon 16, fake-rails-back 113, root Vitest 534, admin-front 48, merchant-front 23, companion 27; all front builds pass.
+
+## v46 communication suites (2026-11-26)
+
+`core-back/test/communication-settings.test.ts` covers settings merge precedence,
+explicit disable, channel policy and masking; `communication-settings-secrets.test.ts`
+covers secret extraction/masking/export; `communication-transport.test.ts` covers
+SMTP payloads, the signed SMS webhook and the resolver's refusal to use a masked
+address; `communication-auth-pg.test.ts` drives registration → email verification
+→ password login → email+SMS OTP → password reset on PostgreSQL;
+`google-oauth-pg.test.ts` covers state/PKCE, single-use ticket and merchant
+provisioning. `tests/unit/i18n-catalogue.test.ts` guards the new EN/AR keys and
+`tests/e2e/merchant/auth.spec.ts` covers the no-phone registration, email MFA
+copy and maintenance screen. Deploy config tests cover the SMTP/SMS/Google
+validation.
 
 ---
 

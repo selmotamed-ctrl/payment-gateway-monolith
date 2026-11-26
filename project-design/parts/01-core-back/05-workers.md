@@ -14,6 +14,8 @@ code:
   - core-back/engine/workers/PollWorker.ts
   - core-back/engine/workers/InboundInboxWorker.ts
   - core-back/engine/workers/OutboxNotificationWorker.ts
+  - core-back/engine/workers/communicationMonitorChecks.ts
+  - core-back/engine/notifications/CommunicationTransport.ts
   - core-back/engine/workers/LedgerInvariantWorker.ts
   - core-back/engine/workers/LedgerCheckpointWorker.ts
   - core-back/engine/workers/LedgerShardScalerWorker.ts
@@ -307,7 +309,7 @@ Source: `design/11-automation/background_automation_and_workers_plan.md`. Every 
 
 - **Operator cases:** a reminder `DEADLINE_REMINDER` before `sla_due_at`; at the breach the priority goes up one level (P3 to P2 to P1), the case is annotated `[SLA BREACHED ...]`, audit `OPERATOR_CASE_SLA_BREACHED`, assignee and the OPERATOR queue told. **AML cases:** a reminder to the reviewer (or MLRO/COMPLIANCE) and, at the breach, ONE keyed P1 case `aml.sla_breached:<id>`; only the case id travels in notices and the case (confidentiality). **Join requests:** a reminder only (the breach is the expiry of AUTO-13).
 - **Disputes (D1):** reminders to the merchant and finance at T-72 h and T-24 h; at `evidence_due_at` with no evidence the dispute becomes `EXPIRED` (the chargeback execution already reads an EXPIRED dispute as LOST), the merchant is told, and one keyed finance case `dispute.expired:<id>` asks for the chargeback approval. DEVIATION FROM THE PLAN: the plan says the reserve loss is booked automatically; `executeAdjustment` deliberately refuses any non-human authoriser of a chargeback (design section 19.3), so the booking stays a finance decision and this worker does not bypass it (owner confirmation requested). With evidence submitted nothing is decided; a ruling overdue by `DISPUTE_RULING_SLA_DAYS` opens `dispute.ruling_overdue:<id>`.
-- **Cash-outs (D2):** the operator window in Libyan business hours (`businessTime.ts`: Sunday to Thursday in Africa/Tripoli, holidays from the platform setting `calendar.holidays`, an array of `YYYY-MM-DD`); 75 % reminds finance, 100 % opens a P2 case `cashout.sla:<id>:1`, 200 % a P1 case `...:2` and tells compliance. A merchant that is not ACTIVE is in a documented hold and is not measured. When several stages are reached at once only the highest acts. P50/P90/P95 on the dashboard is not built.
+- **Cash-outs (D2):** the operator window in Libyan business hours (`businessTime.ts`: Sunday to Thursday in Africa/Tripoli, holidays from the platform setting `calendar.holidays` (`{ holidays: ["YYYY-MM-DD", …] }`; a legacy raw array is also accepted)); 75 % reminds finance, 100 % opens a P2 case `cashout.sla:<id>:1`, 200 % a P1 case `...:2` and tells compliance. A merchant that is not ACTIVE is in a documented hold and is not measured. When several stages are reached at once only the highest acts. P50/P90/P95 on the dashboard is not built.
 - **Emergency actions (D7):** an unratified emergency approval (`mode EMERGENCY_RATIFICATION`, `PENDING_REVIEW`, no checker) gets reminders at 4 h and 1 h before `ratify_due_at` (ratifiers = MLRO and COMPLIANCE, never the actor); at the deadline a suspension STAYS in force and a P1 case `emergency.unratified:<id>` opens (audit `EMERGENCY_ACTION_UNRATIFIED`); the escalation repeats every 4 h (`EMERGENCY_ACTION_ESCALATED`); at `ratify_due_at + 48 h` a still-unratified suspension is LIFTED (the merchant returns to the status recorded in the approval's change log, the approval becomes `EXPIRED`, audit `EMERGENCY_ACTION_LIFTED`, case `emergency.lifted:<id>`, and the merchant gets only `MERCHANT_SUSPENSION_ENDED`: nothing about why or that it lapsed). The emergency suspension route now sets `expires_at = ratify_due_at + grace`, so it can still be ratified during the grace. One independent COMPLIANCE or MLRO officer may extend once by 1 to 7 days with a written reason (`POST /approvals/:id/extend-emergency`, also proxied by admin-back; never the actor; a single step by an independent officer, not a second maker-checker round); the extension clears the approval's stages so they run again. Emergency VELOCITY changes are reverted through a registered `EmergencyReverter`, but no emergency velocity flow exists yet, so none is registered: such an approval raises the P1 case saying a manual revert is needed. `ExpiryHousekeepingWorker` never touches `EMERGENCY_RATIFICATION` approvals.
 
 **Journal partitions (AUTO-01).** `JournalPartitionWorker` calls `ensure_journal_line_partitions` (now SECURITY DEFINER, bounded 1..60, `EXECUTE` for the application role) only when a month is missing, audits `JOURNAL_PARTITIONS_ENSURED`, and raises ONE P1 case with a 2 h SLA (the plan's "P0": the most urgent priority the case model has) while rows sit in `journal_lines_default` (`ledger.partition.default_rows`) or while creating the months fails (`ledger.partition.ensure_failed`, with the database error). Moving the stranded rows edits ledger rows, which the append-only guard allows only for a superuser or a `pgw_ledger_maintenance` member, so it is an operator action: `bun run repair-journal-default-partition [--apply]` with a privileged `DATABASE_URL` (dry run by default; one transaction: copy, delete from default, create and guard the month, insert back, verify counts; ids, `created_at`, shards and sequences are unchanged; the default partition is locked ACCESS EXCLUSIVE for seconds with a 5 s lock timeout). The platform monitor's `journal_default_rows` check is the second alarm.
@@ -567,3 +569,23 @@ PSP-M refunds, disputes opened/decided and cash-outs are grouped by currency and
 ## Second-pass settlement and reconciliation corrections (2026-11-25)
 
 `postSettlementSweeps` still excludes a statement line tied to a known merchant-direct, internal or fee-at-source attempt. A **batch-net** source line with no local attempt (the gateway reports a settled batch total) is now swept again; previously the absence of an attempt skipped the whole batch and lost the clearing settlement. A test in `test/remediation-high.test.ts` covers the no-attempt batch case and the USD account selection.
+
+## v46 notification routing and readiness (2026-11-26)
+
+`OutboxNotificationWorker` now persists `last_error`, `sent_at` and
+`delivered_at`, marks a permanent configuration failure (`CHANNEL_NOT_CONFIGURED`,
+`RECIPIENT_ADDRESS_MISSING`) as `SUPPRESSED` instead of retrying eight times, and
+for an EMAIL row whose template policy allows SMS creates the mirrored
+`...:SMS` row once (idempotent by event id; the SMS template must exist). The
+runtime transport reads the current settings on every delivery: EMAIL goes to
+SMTP, SMS to the signed webhook, IN_APP is delivered by the row. The recipient
+resolver opens the sealed address or reads the user/merchant contact; it never
+sends to a masked value.
+
+`communication_readiness` is an extra `PlatformMonitorWorker` check. While email
+is unconfigured it raises the keyed case `platform.communication:email` and
+notifies active GATEWAY_ADMIN/SECURITY_ADMIN or `settings:write` users in-app,
+plus SMS when configured and the optional `PLATFORM_ALERT_SMS`; the daily event
+key prevents repeat spam. It also reports an enabled-but-incomplete SMS/Google
+configuration and repeated delivery failures. The case clears when email is
+configured.

@@ -131,6 +131,7 @@ const defs = [
   define({ code: "OBJECT_STORAGE", group: "PLATFORM", domain: "OPERATIONS", source: "PLATFORM_MONITOR", subjectType: "OBJECT_STORAGE", autoClear: true }),
   define({ code: "MONITOR_CHECK_FAILED", group: "PLATFORM", domain: "OPERATIONS", source: "PLATFORM_MONITOR", subjectType: "PLATFORM_CHECK", priority: "P2", autoClear: true }),
   define({ code: "PLATFORM_ALERT", group: "PLATFORM", domain: "OPERATIONS", source: "PLATFORM_MONITOR", subjectType: "PLATFORM_CHECK", autoClear: true }),
+  define({ code: "COMMUNICATION_UNCONFIGURED", group: "PLATFORM", domain: "OPERATIONS", source: "PLATFORM_MONITOR", subjectType: "COMMUNICATION_CHANNEL", autoClear: true }),
 
   // Route health
   define({ code: "ROUTE_HEALTH", group: "ROUTE_HEALTH", domain: "GATEWAY", source: "ROUTE_HEALTH", subjectType: "RAIL_ROUTE", autoClear: true }),
@@ -230,6 +231,7 @@ export const caseTypeForSubjectKey = (
   if (key.startsWith("platform.stale_unknown")) return caseOf("STALE_UNKNOWN_BACKLOG");
   if (key.startsWith("platform.refund_unscheduled")) return caseOf("REFUND_UNSCHEDULED");
   if (key.startsWith("platform.object_storage")) return caseOf("OBJECT_STORAGE");
+  if (key.startsWith("platform.communication")) return caseOf("COMMUNICATION_UNCONFIGURED");
   if (key.startsWith("platform.monitor_check_failed")) return caseOf("MONITOR_CHECK_FAILED");
   if (key.startsWith("platform.")) return caseOf("PLATFORM_ALERT");
   if (key.startsWith("report.overdue")) return caseOf("REPORT_OVERDUE");

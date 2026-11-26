@@ -18,7 +18,7 @@ export const userCreateSchema = z
     email: zEmail,
     fullName: z.string().min(2).max(120).optional(),
     role: zAdminRole,
-    // No phone and no initial password: the invitee chooses both when accepting the emailed invitation,
+    // No phone and no initial password: the invitee chooses their password when accepting the emailed invitation,
     // so the maker never knows the credentials or receives the MFA codes of the user they propose.
     locale: z.enum(["ar", "en"]).optional(),
     authorities: z.record(z.string().max(64), z.array(z.string().max(64)).max(50)).optional(),

@@ -536,7 +536,7 @@ New `coreForward` routes (new files `wallets.ts`, `applications.ts` (application
 
 | Mount | Read | Write |
 | :--- | :--- | :--- |
-| `/wallets` (+ `/:id/statement`, `/:id/audit-events`), `/applications`, `/payment-links`, `/pos-terminals` | `merchant:read` | `merchant:write` |
+| `/wallets` (+ `/:id/statement`, `/:id/audit-events`), `/applications`, `/access-tokens` (+ `/summary`), `/payment-links`, `/pos-terminals` | `merchant:read` | `merchant:write` |
 | `/transactions` | `attempt:read`, `merchant:read`, `finance:read` | n/a |
 | `/inbound-events` | `attempt:read`, `case:read` | n/a |
 | `/system/*` (jobs-outbox, jobs, outbox, audit-outbox, notifications), mounted after `/system/backups` | `security:read` | `security:write` |
@@ -597,3 +597,13 @@ read/write guards. `assetsRouter` additionally exposes binary
 `gatewayGuard` (`gateway:read`, `gateway:write`/`gateway:test`). The edge
 validates the state/reason/expiry shape only; core remains the authority for
 maker-checker, expiry and probe execution.
+
+## v46 admin auth and communication settings forwarding (2026-11-26)
+
+The public auth router adds `/auth/password/forgot` and `/auth/password/reset`,
+and `/auth/accept-invitation` accepts an optional phone. The protected settings
+router adds `GET /settings/communication/status`,
+`POST /settings/communication/test-email` and
+`POST /settings/communication/test-sms`; the core settings:read/settings:write
+authorities remain authoritative. Login/MFA responses pass through
+`deliveryChannels` and `destinationMasked`.
