@@ -10010,7 +10010,7 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 
 <a id="admin-uisystem"></a>
 
-> **Part ID:** `admin-ui.system` · **Status:** `partial` · **Last verified:** 2026-11-26 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `admin-ui.system` · **Status:** `partial` · **Last verified:** 2026-11-26 · **Verified against:** `da23ed8e+working-tree`
 
 # Admin UI System
 
