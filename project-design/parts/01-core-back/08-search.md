@@ -39,7 +39,7 @@ It owns:
 - the query parser, token classification, match scoring and result sanitization in `core-back/lib/search/engine.ts`;
 - the core internal route `POST /internal/admin/search`;
 - the mTLS admin BFF proxy `POST /api/v1/admin/search` with its rate limiter;
-- the admin-front command palette (`Ctrl+K` / `Cmd+K`), local page/guide search, recent queries and the client-side target registry;
+- the admin-front command palette (`Ctrl+K` / `Cmd+K`), local page/guide search, recent queries and the client-side target registry; the guide-only palette uses `Ctrl+Shift+K` / `Cmd+Shift+K`;
 - the `useOpenQuery` deep-link composable that opens a record from a query parameter.
 
 It does not own domain authorization policy (the providers consume authority helpers but `core-back` remains the enforcement point), the underlying record APIs, or the guide content itself.
@@ -360,7 +360,7 @@ Relevant test files:
 
 - `core-back/test/globalSearch.test.ts` — parser/token/phone variants, match scoring, sanitization, registry, authority matrix, provider behavior.
 - `tests/unit/global-search.test.ts` — client target registry, local commands, recent-query storage, highlighting, access filtering.
-- `tests/e2e/admin/global-search.spec.ts` — app-bar trigger vs drawer guide search, `Ctrl+K`, debounce, Enter-to-open, one-character behavior, mocked API.
+- `tests/e2e/admin/global-search.spec.ts` — app-bar trigger vs drawer guide search, `Ctrl+K` on every route (including the guide), `Ctrl+Shift+K` for the guide palette, debounce, Enter-to-open, one-character behavior, mocked API.
 - `tests/e2e/exhaustive/exhaustive-admin-surface.spec.ts` — broader admin surface coverage that includes search interactions.
 
 Commands:

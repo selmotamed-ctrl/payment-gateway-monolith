@@ -311,7 +311,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 ## Registry slices (2026-11-06)
 
-`components/Table/tableRegistry.ts` (keyed by ROUTE NAME) now spreads three area slices, `registry/commerce.ts`, `registry/ledgerOps.ts` and `registry/forms.ts`, so independent areas add filter configs without editing one shared literal. The approvals subject-type filter lists the new `WALLET` and `POS_TERMINAL` subjects. Pages with several tables (Applications: applications / payment links / POS terminals; Transactions: attempts / inbound events; Jobs & Outbox) pass their filters explicitly to `ApiTable`.
+`components/Table/tableRegistry.ts` (keyed by ROUTE NAME) now spreads three area slices, `registry/commerce.ts`, `registry/ledgerOps.ts` and `registry/forms.ts`, so independent areas add filter configs without editing one shared literal. The approvals subject-type filter lists the new `WALLET` and `POS_TERMINAL` subjects. Pages with several tables (Applications: applications / API tokens / payment links / POS terminals; Transactions: attempts / inbound events; Jobs & Outbox) pass their filters explicitly to `ApiTable`. The API-tokens registry filters by lifecycle status, environment, IP-allowlist state, merchant, application and creation date.
 
 ## Safeguard/export extension (2026-11-23)
 

@@ -54,6 +54,8 @@ const DefaultLayout = dc(() => {
     const isMacPlatform = /Mac|iPhone|iPad/i.test(navigator.platform || "");
     const searchShortcutLabel = isMacPlatform ? "⌘ K" : "Ctrl K";
     const searchShortcutAria = isMacPlatform ? "⌘K" : "Ctrl+K";
+    const guideSearchShortcutLabel = isMacPlatform ? "⌘ ⇧ K" : "Ctrl Shift K";
+    const guideSearchShortcutAria = isMacPlatform ? "Meta+Shift+K" : "Control+Shift+K";
     const collapsedSections = ref<number[]>([]);
 
     const isSectionCollapsed = (index: number) => collapsedSections.value.includes(index);
@@ -181,7 +183,7 @@ const DefaultLayout = dc(() => {
     const onGlobalKeydown = (event: KeyboardEvent) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
             event.preventDefault();
-            if (String(route.name ?? "").startsWith("AdminGuide")) {
+            if (event.shiftKey) {
                 openGuideSearch();
             } else {
                 openGlobalSearch();
@@ -395,9 +397,16 @@ const DefaultLayout = dc(() => {
                     <StatusBadge status="LAN" label="LAN" toneOverride="neutral" showDot={false} />
                 </div>
                 <div class="pg-drawer__search">
-                    <button ref={guideSearchTrigger} type="button" class="pg-search-pill" onClick={openGuideSearch}>
+                    <button
+                        ref={guideSearchTrigger}
+                        type="button"
+                        class="pg-search-pill"
+                        aria-keyshortcuts={guideSearchShortcutAria}
+                        onClick={openGuideSearch}
+                    >
                         <VIcon icon="mdi-book-search-outline" size={16} />
                         <span class="pg-search-pill__label">{t("Search guide…")}</span>
+                        <span class="pg-search-pill__kbd">{guideSearchShortcutLabel}</span>
                     </button>
                 </div>
                 <VDivider />

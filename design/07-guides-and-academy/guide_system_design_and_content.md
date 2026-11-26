@@ -238,7 +238,7 @@ export const loadArticles: (lang:"en"|"ar") => Promise<Article[]>; // dynamic im
 * Normalise **both** index text and query: lowercase; strip Arabic diacritics and tatweel; unify alef variants (أ إ آ → ا), ya/alef-maqsura (ى → ي), ta-marbuta (ة → ه); convert Arabic-Indic digits to ASCII (reuse `src/utils/arabic.ts`). Underscores in codes are searchable with or without (`LIMIT_EXCEEDED`, `limit exceeded`).
 * Results are grouped by type with the type name visible; max 8 per type; keyboard: ↑ ↓ Enter, Esc closes, Tab moves between groups. Empty query shows "Recent" (last 8 opened, stored in `localStorage` key `pg.guide.recent`, wrapped in try/catch) and the five most-read **Golden Rule** articles.
 * The index is built lazily on first palette open (target < 150 ms for the full corpus; test measures the build and fails above 1000 ms on CI).
-* Palette is global: mounted in `layouts/default.tsx`; shortcut Ctrl+K / Cmd+K; also a magnifier button in the app bar for touch users. It must not open while the user is typing in an input unless they press the shortcut explicitly.
+* Palette is global: mounted in `layouts/default.tsx`; shortcut Ctrl+Shift+K / Cmd+Shift+K (plain Ctrl+K / Cmd+K opens the global search palette); also a "Search guide…" pill in the drawer for touch users. It must not open while the user is typing in an input unless they press the shortcut explicitly.
 
 ## II-6. Contextual help (the "?" drawer)
 
@@ -304,7 +304,7 @@ The Guide itself has no backend. Read-tracking reuses the Academy progress recor
 
 **E2E (`tests/e2e/admin`, Playwright):**
 * `guide-reader.spec.ts`: open `/guide`; search "unknown"; open an article; glossary popover opens by keyboard; mark as read; reload; read state persisted; no horizontal overflow at 360px and 1280px; Arabic RTL screenshot has no overlap.
-* `guide-palette.spec.ts`: Ctrl+K opens, type, Enter navigates, Esc closes, focus returns.
+* `guide-palette.spec.ts`: Ctrl+Shift+K opens, type, Enter navigates, Esc closes, focus returns; the same shortcut opens it from a non-guide screen.
 * `guide-context.spec.ts`: for each of the 5 routes `Approvals`, `OperatorCases`, `Cashouts`, `GatewayWizard`, `AmlCases` (log in as a role that can open it), the "?" drawer opens, shows ≥ 1 card, and form input typed before opening is still there after closing.
 * `guide-safeguard.spec.ts`: on `Approvals`, clicking **Approve** opens the safeguard dialog; **Continue** is disabled until all boxes are ticked; Cancel makes **no** request (assert via route interception).
 
@@ -1320,10 +1320,12 @@ The concepts are explained in [[a:b05-06|Applications and wallets]] and [[a:b05-
 | **Pending activation** | applications waiting to go live. The badge says **Pending** | see [[a:b05-02]] (the onboarding journey) |
 | **Without rail whitelist** | applications that accept every active rail. The badge says **Review** when there are any | confirm that "all rails" is really intended |
 
-### Three tabs
-The tabs are **Applications**, **Payment links** and **POS terminals**. Each tab has its own search, filters and paging. You can open a tab directly with `?tab=links` or `?tab=pos` in the address.
+### Four tabs
+The tabs are **Applications**, **API tokens**, **Payment links** and **POS terminals**. Each tab has its own search, filters and paging. You can open a tab directly with `?tab=tokens`, `?tab=links` or `?tab=pos` in the address.
 
-**Applications tab.** Columns: **Application**, **Merchant**, **Status**, **Settlement wallet**, **Monthly volume**, **Rail whitelist**, **Redirect domains**, **API tokens**, **Links / POS**, **Created**, **Action**. The **Rail whitelist** cell says **All rails** when no list is set, **No rails** when the list is empty (payments are blocked), or shows the allowed rails. Application status is `DRAFT`, `PENDING`, `ACTIVE`, `SUSPENDED` or `CLOSED`.
+**Applications tab.** Columns: **Application**, **Merchant**, **Status**, **Settlement wallet**, **Monthly volume**, **Rail whitelist**, **Redirect domains**, **API tokens**, **Links / POS**, **Created**, **Action**. The **Rail whitelist** cell says **All rails** when no list is set, **No rails** when the list is empty (payments are blocked), or shows the allowed rails. The **API tokens** cell shows the token count and, underneath, how many tokens have an active IP allow-list and how many CIDRs they contain. Application status is `DRAFT`, `PENDING`, `ACTIVE`, `SUSPENDED` or `CLOSED`.
+
+**API tokens tab.** Every API token on the platform, across all applications. Columns: **Token** (name and the last four characters only), **Application**, **Merchant**, **Environment**, **Scopes**, **IP allowlist**, **Last used**, **Expires**, **Status**, **Created**, **Action**. **IP allowlist** shows the allowed CIDRs when it is on. If a merchant turned the allow-list off but the CIDRs are still stored, the cell says **Off** and shows the stored CIDRs so you do not mistake them for active rules. The tiles for this tab count **Active**, **Revoked tokens**, **Expired tokens** and **IP allowlists**. Use the **Status**, **Environment** and **IP allowlist** filters to find, for example, every token with no IP restriction.
 
 **Payment links tab.** Columns: **Link**, **Application**, **Merchant**, **Amount**, **Fee bearer**, **Uses**, **State**, **Expires**, **Created**, **Action**. A link's **State** is `PENDING`, `COMPLETED`, `EXPIRED` or `CANCELLED`. **Uses** reads "n / ∞" for a link that can be paid many times.
 
@@ -1337,7 +1339,7 @@ Every action opens a box that asks for a **Reason** (10 to 500 characters). The 
 | Application | **Suspend application** | `ACTIVE` | immediate |
 | Application | **Request reactivation** | `SUSPENDED` | approval |
 | Application | **Edit policy** | any status except `CLOSED` | approval |
-| Application drawer | **Revoke token** | token not already revoked | immediate, cannot be undone |
+| API tokens tab or application drawer | **Revoke token** | token not already revoked | immediate, cannot be undone |
 | Payment link | **Cancel link** | `PENDING` | immediate, cannot be undone |
 | POS terminal | **Deactivate terminal** | `ACTIVE` | immediate |
 | POS terminal | **Block terminal** | `ACTIVE` or `INACTIVE` | immediate |
@@ -1360,7 +1362,8 @@ If you change nothing, the form says "Nothing changed: the request matches the c
 ### The application drawer
 Click **Inspect** to open a panel with four tabs: **Configuration and allowlists**, **API tokens**, **Payment links** and **POS terminals**.
 * **Configuration** shows the settlement wallet (with a link to open it on **Wallets**), the rail whitelist and the redirect domains. A **Pending approvals** card appears if something is waiting. While a change is waiting, **Request reactivation** and **Edit policy** are disabled with the message "A change to this entity is already awaiting approval."
-* **API tokens** lists each token by name and its last four characters only (for example `****a91f`), its scopes, whether an IP allow-list is on, when it was last used, when it expires and its status. The full token is never shown.
+* **API tokens** lists each token by name and its last four characters only (for example `****a91f`), its environment, its scopes, whether an IP allow-list is on (with the CIDRs), when it was last used, when it expires and its status. The full token is never shown.
+* The **View API tokens** row action opens the same drawer directly on the **API tokens** tab, and the **API tokens** main tab shows every token across applications.
 
 ### What is hidden
 Roles without sensitive access (for example `SUPPORT`) see **Restricted** for **Redirect domains**, and for **Monthly volume** and **Expected monthly volume**.

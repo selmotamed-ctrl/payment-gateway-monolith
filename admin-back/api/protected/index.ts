@@ -3,6 +3,7 @@ import rateLimiter from "express-rate-limit";
 import { env } from "../../lib/env";
 import { lazyLimiter, rateLimitKey } from "../../lib/clientIp";
 import { requireAuthoritiesByMethod, requireSession } from "../middleware/authorityGuard";
+import { accessTokensRouter } from "./accessTokens";
 import { academyRouter } from "./academy";
 import { amlRouter } from "./aml";
 import { approvalsRouter } from "./approvals";
@@ -92,6 +93,7 @@ router.use(
 const merchantOpsGuard = guard({ read: ["merchant:read"], write: ["merchant:write"] });
 router.use("/wallets", merchantOpsGuard, walletsRouter);
 router.use("/applications", merchantOpsGuard, applicationsRouter);
+router.use("/access-tokens", merchantOpsGuard, accessTokensRouter);
 router.use("/payment-links", merchantOpsGuard, paymentLinksRouter);
 router.use("/pos-terminals", merchantOpsGuard, posTerminalsRouter);
 // Read-only monitors. They have no mutating routes, so the write list denies every non-read method.
