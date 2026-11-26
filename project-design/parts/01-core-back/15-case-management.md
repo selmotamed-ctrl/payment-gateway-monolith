@@ -96,3 +96,13 @@ Schema version 41 (`20261116130000_case_management_taxonomy`) adds the columns a
 ## 7. Tests and open scope
 
 The catalog test covers classification, attempt-only actions, backup/regulatory readability and references; platform-monitor tests cover source-clear and recurrence; the admin Playwright suite covers the payment and backup cases; live verification covered the observed backup and PSP-M cases. The synthetic seeder and specialist live context presenters remain partial (see frontmatter gaps).
+
+## v46 communication readiness case (2026-11-26)
+
+The case catalog adds `COMMUNICATION_UNCONFIGURED` (group `PLATFORM`, domain
+`OPERATIONS`, source `PLATFORM_MONITOR`, subject `COMMUNICATION_CHANNEL`,
+auto-clear). `communication_readiness` raises the keyed case
+`platform.communication:email` while email is not configured; the case clears
+when the condition disappears. The admin Operator Cases screen maps it to
+Platform Settings → Communication, and authorised staff are notified in-app and
+by SMS when configured.

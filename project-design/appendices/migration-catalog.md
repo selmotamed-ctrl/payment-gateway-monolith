@@ -53,3 +53,4 @@
 | `20261124120000_append_only_case_and_storage_guards` | 83 | Schema version 43: close the remaining append-only gaps (GAP-075). |
 | `20261124150000_currency_context_and_aggregates` | 69 | Schema version 44: explicit reconciliation context for settlement sweeps. |
 | `20261124170000_attempt_wallet_snapshot` | 23 | Schema version 45: snapshot the settlement wallet on each attempt. |
+| `20261126100000_communication_channels` | 124 | Schema v46: email-primary communication, encrypted platform-setting secrets, |

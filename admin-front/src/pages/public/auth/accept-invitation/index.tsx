@@ -14,7 +14,7 @@ import { SurfaceCard } from "@/components/ui/SurfaceCard";
 
 /**
  * Public page where an invited staff member accepts the invitation emailed to them. They choose their own
- * password and the phone that receives their sign-in codes: nobody else, including the person who proposed
+ * password; e-mail is the primary MFA channel and a phone is optional: nobody else, including the person who proposed
  * the account, ever knows either. The account then waits for a checker to approve its activation.
  */
 const MIN_PASSWORD_LENGTH = 12;
@@ -33,11 +33,10 @@ const AcceptInvitationPage = dc(() => {
     const showConfirmation = ref(false);
 
     const mismatch = computed(() => confirmation.value.length > 0 && confirmation.value !== password.value);
-    const phoneValid = computed(() => /^\+?[0-9 ()-]{6,20}$/.test(phone.value.trim()));
+    const phoneValid = computed(() => phone.value.trim().length === 0 || /^\+?[0-9 ()-]{6,20}$/.test(phone.value.trim()));
     const passwordChecks = computed(() => [
         { key: "length", label: t("At least 12 characters"), ok: password.value.length >= MIN_PASSWORD_LENGTH },
         { key: "match", label: t("Passwords match"), ok: password.value.length > 0 && password.value === confirmation.value },
-        { key: "phone", label: t("Phone number can receive sign-in codes"), ok: phoneValid.value },
     ]);
     const canSubmit = computed(
         () =>
@@ -55,7 +54,7 @@ const AcceptInvitationPage = dc(() => {
             await api.post(urlsMap.authAcceptInvitation, {
                 token: token.value.trim(),
                 password: password.value,
-                phone: phone.value.trim(),
+                ...(phone.value.trim() ? { phone: phone.value.trim() } : {}),
             });
             done.value = true;
             password.value = "";
@@ -76,7 +75,7 @@ const AcceptInvitationPage = dc(() => {
                             {t("Accept invitation")}
                         </div>
                         <div style={{ fontSize: "13px", color: "var(--pg-ink-muted)" }}>
-                            {t("Choose your own password and the phone that receives your sign-in codes")}
+                            {t("Choose your own password. Sign-in codes go to your email address.")}
                         </div>
                     </div>
 
@@ -131,9 +130,9 @@ const AcceptInvitationPage = dc(() => {
                                     hideDetails
                                 />
                             </FormField>
-                            <FormField label={t("Phone for sign-in codes")} required hint={t("Include the country code; this phone receives every sign-in code")}>
+                            <FormField label={t("Phone for SMS codes (optional)")} hint={t("Email is the primary channel. Add a phone to receive the same code by SMS.")}>
                                 <VTextField
-                                    aria-label={t("Phone for sign-in codes")}
+                                    aria-label={t("Phone for SMS codes (optional)")}
                                     autocomplete="tel"
                                     modelValue={phone.value}
                                     onUpdate:modelValue={(value: string) => (phone.value = value)}

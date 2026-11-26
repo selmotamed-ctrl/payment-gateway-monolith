@@ -1024,7 +1024,7 @@ const UsersPage = dc(() => {
                 }}
             >
                 <VAlert type="info" variant="tonal" density="compact">
-                    {t("The user starts in INVITED state.")} {t("The invitee receives an email with a single-use invitation code and chooses their own password and phone.")}
+                    {t("The user starts in INVITED state.")} {t("The invitee receives an email with a single-use invitation code and chooses their own password. A phone number is optional and adds SMS as a second sign-in channel.")}
                 </VAlert>
                 <SectionFields title={t("User details")}>
                     <FormField label={t("Email")} required>

@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { RouterLink, RouterView, useRoute } from "vue-router";
 import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
 import {
+    VAlert,
     VAppBar,
     VAvatar,
     VBtn,
@@ -37,6 +38,7 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
+import { appInfo, loadAppStatus } from "@/state/app";
 
 const DefaultLayout = dc(() => {
     const { t, current: locale } = useLocale();
@@ -140,6 +142,8 @@ const DefaultLayout = dc(() => {
     };
     const ledgerInvariant = ref<{ drift: string; currency: string; ok: boolean } | null>(null);
     let invariantTimer: ReturnType<typeof setInterval> | undefined;
+    const communicationMaintenance = computed(() => appInfo.value?.communication?.maintenance ?? null);
+    const canConfigureCommunication = computed(() => hasOneOfAuthorities(["settings:read"]));
 
     const loadLedgerInvariant = async () => {
         if (!canViewLedger.value) return;
@@ -208,6 +212,7 @@ const DefaultLayout = dc(() => {
         clearGlobalSearchCache();
         window.addEventListener("keydown", onGlobalKeydown);
         void loadLedgerInvariant();
+        void loadAppStatus();
         invariantTimer = setInterval(() => void loadLedgerInvariant(), 60_000);
     });
     onBeforeUnmount(() => {
@@ -484,6 +489,20 @@ const DefaultLayout = dc(() => {
                 class="pg-main"
                 {...{ id: "pg-main-content", tabindex: "-1", "aria-busy": routeLoading.value ? "true" : "false" }}
             >
+                {communicationMaintenance.value && canConfigureCommunication.value ? (
+                    <div style={{ padding: "12px 24px 0" }}>
+                        <VAlert type="warning" variant="tonal" density="compact">
+                            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                                <span style={{ flex: 1 }}>
+                                    {t("Email delivery is not configured. Merchant registration and sign-in are in maintenance.")}
+                                </span>
+                                <RouterLink to={{ name: "AdminPlatformSettings" }} style={{ fontWeight: 600 }}>
+                                    {t("Configure communication")}
+                                </RouterLink>
+                            </div>
+                        </VAlert>
+                    </div>
+                ) : null}
                 {route.meta.sandboxMirror ? (
                     <div style={{ padding: "16px 24px 0" }}>
                         <SandboxBanner subtitle="You are editing Sandbox data only. Live pages, money and reports are untouched." />

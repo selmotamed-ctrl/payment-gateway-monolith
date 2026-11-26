@@ -422,6 +422,39 @@ export const envSchema = z.strictObject({
    */
   NOTIFICATION_WEBHOOK_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(5000),
   /**
+   * Email-primary communication (schema v46). These values are the first-run
+   * bootstrap for Platform Settings: an explicit admin setting wins, blank or
+   * missing fields fall back to the environment, and an empty result puts
+   * merchant registration/sign-in into maintenance.
+   */
+  COMMUNICATION_BOOTSTRAP_ENABLED: booleanFromEnvironment.default(true),
+  COMMUNICATION_EMAIL_ENABLED: booleanFromEnvironment.default(false),
+  SMTP_HOST: z.string().trim().max(255).optional(),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+  SMTP_SECURITY: z.enum(["TLS", "STARTTLS", "NONE"]).default("STARTTLS"),
+  SMTP_USER: z.string().trim().max(255).optional(),
+  SMTP_PASSWORD: z.string().max(1024).optional(),
+  SMTP_FROM_EMAIL: z.string().trim().max(320).optional(),
+  SMTP_FROM_NAME: z.string().trim().max(120).default("Payment Gateway"),
+  SMTP_REPLY_TO: z.string().trim().max(320).optional(),
+  SMTP_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(10_000),
+  /** Development only: accept a self-signed SMTP certificate. Refused in production by the deploy validator. */
+  SMTP_ALLOW_INSECURE: booleanFromEnvironment.default(false),
+  COMMUNICATION_SMS_ENABLED: booleanFromEnvironment.default(false),
+  SMS_PROVIDER: z.enum(["WEBHOOK"]).default("WEBHOOK"),
+  SMS_WEBHOOK_URL: z.preprocess((value) => typeof value === "string" && value.trim() === "" ? undefined : value, z.url().optional()),
+  SMS_WEBHOOK_SECRET: z.string().max(1024).optional(),
+  SMS_SENDER_ID: z.string().trim().max(32).optional(),
+  SMS_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(10_000),
+  GOOGLE_AUTH_ENABLED: booleanFromEnvironment.default(false),
+  GOOGLE_CLIENT_ID: z.string().trim().max(512).optional(),
+  GOOGLE_CLIENT_SECRET: z.string().max(1024).optional(),
+  GOOGLE_HOSTED_DOMAIN: z.string().trim().max(255).optional(),
+  GOOGLE_REDIRECT_URI: z.preprocess((value) => typeof value === "string" && value.trim() === "" ? undefined : value, z.url().optional()),
+  /** Fallback recipients for the "communication is not configured" alert when no admin user can be reached. */
+  PLATFORM_ALERT_EMAIL: z.string().trim().max(320).optional(),
+  PLATFORM_ALERT_SMS: z.string().trim().max(32).optional(),
+  /**
    * The standalone Fake Payment Rails emulator (design
    * `fake_payment_rails_service_architecture.md`).
    *
@@ -719,6 +752,31 @@ const resolveEnvironment = (): CoreEnv => {
     UNKNOWN_ATTEMPT_CASE_SLA_HOURS: 24,
     NOTIFICATION_WEBHOOK_URL: undefined,
     NOTIFICATION_WEBHOOK_TIMEOUT_MS: 5000,
+    COMMUNICATION_BOOTSTRAP_ENABLED: true,
+    COMMUNICATION_EMAIL_ENABLED: false,
+    SMTP_HOST: undefined,
+    SMTP_PORT: 587,
+    SMTP_SECURITY: "STARTTLS",
+    SMTP_USER: undefined,
+    SMTP_PASSWORD: undefined,
+    SMTP_FROM_EMAIL: undefined,
+    SMTP_FROM_NAME: "Payment Gateway",
+    SMTP_REPLY_TO: undefined,
+    SMTP_TIMEOUT_MS: 10_000,
+    SMTP_ALLOW_INSECURE: false,
+    COMMUNICATION_SMS_ENABLED: false,
+    SMS_PROVIDER: "WEBHOOK",
+    SMS_WEBHOOK_URL: undefined,
+    SMS_WEBHOOK_SECRET: undefined,
+    SMS_SENDER_ID: undefined,
+    SMS_TIMEOUT_MS: 10_000,
+    GOOGLE_AUTH_ENABLED: false,
+    GOOGLE_CLIENT_ID: undefined,
+    GOOGLE_CLIENT_SECRET: undefined,
+    GOOGLE_HOSTED_DOMAIN: undefined,
+    GOOGLE_REDIRECT_URI: undefined,
+    PLATFORM_ALERT_EMAIL: undefined,
+    PLATFORM_ALERT_SMS: undefined,
     EXECUTION_PLANE: "LIVE",
     PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE: false,
     FAKE_RAILS_CONTROL_URL: undefined,

@@ -133,8 +133,9 @@ bun run create-admin --email compliance@payment-gateway.internal \
 The password policy is **12+ characters with a lowercase letter, an uppercase
 letter and a digit**. The command is idempotent: running it again resets the
 password, marks the account `ACTIVE` and clears a stale MFA secret. MFA is
-**off** by default (the code is delivered through the notification queue, so
-only enable it once SMS is configured); pass `--mfa` to require it.
+**on** by default and the six-digit code is sent to the account's **email**
+address; pass `--no-mfa` only for a break-glass account when no delivery channel
+is configured yet.
 
 Sign in at the admin portal with the **email** in the "Email or phone" field.
 The seeded roles are `GATEWAY_ADMIN`, `SECURITY_ADMIN`, `FINANCE`,
@@ -404,6 +405,39 @@ takes effect on the next deploy without rebuilding the SPA.
 | `KMS_MASTER_KEY` | Root key for the AES-256-GCM vault and the session signing. **Never** delivered to an edge host. |
 | `BASE_CURRENCY` / `GATEWAY_TIMEZONE` | Defaults `LYD` / `Africa/Tripoli`. |
 | `REDIS_URL` | Optional external Redis URL; enables the L2 cache, velocity counters and cross-node `InvalidationBus`. When empty, `REDIS_NODES` is used. |
+
+### Communication channels (email primary, SMS secondary)
+
+`core-back` sends authentication codes and notifications by email through SMTP.
+SMS is an optional second channel for critical codes. The same keys are also
+available in **Admin → Platform Settings → Communication**; the environment is
+the first-run bootstrap and the fallback for blank fields. A value saved by an
+administrator wins, including `enabled: false`.
+
+| Variable | Notes |
+| :--- | :--- |
+| `COMMUNICATION_BOOTSTRAP_ENABLED` | `true` by default. Copies the `SMTP_*` / `SMS_*` / `GOOGLE_*` values into Platform Settings when no administrator has saved them. |
+| `COMMUNICATION_EMAIL_ENABLED` | `false` by default. Must be `true` for merchant registration/sign-in; otherwise those screens show maintenance. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY` | Mailbox host, port and `TLS` / `STARTTLS` / `NONE` (the last is refused in production). |
+| `SMTP_USER`, `SMTP_PASSWORD` | Optional SMTP credentials. The password is sealed in the Vault when it is bootstrapped into Platform Settings. |
+| `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`, `SMTP_REPLY_TO` | Sender identity. `SMTP_FROM_EMAIL` is required when the channel is enabled. |
+| `SMTP_TIMEOUT_MS`, `SMTP_ALLOW_INSECURE` | Delivery timeout and development-only certificate relaxation. |
+| `COMMUNICATION_SMS_ENABLED`, `SMS_WEBHOOK_URL`, `SMS_WEBHOOK_SECRET`, `SMS_SENDER_ID` | Optional signed SMS aggregator. Critical authentication codes are also sent by SMS when configured and the user has a phone. |
+| `GOOGLE_AUTH_ENABLED`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Server-side Google OAuth 2.0 code + PKCE. The redirect URI must exactly match the Google Console entry (for merchant: `https://<MERCHANT_DOMAIN>/api/v1/merchant/auth/google/callback`). |
+| `GOOGLE_HOSTED_DOMAIN` | Optional Google Workspace domain restriction. |
+| `PLATFORM_ALERT_EMAIL`, `PLATFORM_ALERT_SMS` | Optional fallback recipients for the "email delivery is not configured" alert when no staff account can be reached. |
+
+When email is not configured, merchant registration and sign-in return
+`503 AUTH_MAINTENANCE_EMAIL_NOT_CONFIGURED`, the landing/login/register pages
+show a maintenance state, the admin shell warns the security/administrator
+users, and the platform monitor opens a `COMMUNICATION_UNCONFIGURED` case.
+Restore email to clear it automatically.
+
+For local development, `cd core-back && bun run mail:dev` starts a Maildev SMTP
+catcher on `127.0.0.1:1025` and a web inbox on `http://127.0.0.1:1080`; configure
+`SMTP_HOST=127.0.0.1`, `SMTP_PORT=1025`, `SMTP_SECURITY=NONE`,
+`SMTP_FROM_EMAIL=no-reply@example.test` and `COMMUNICATION_EMAIL_ENABLED=true`
+in the core `.env` (or in Platform Settings).
 
 ## 4. Certificates (mTLS 1.3)
 

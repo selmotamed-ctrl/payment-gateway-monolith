@@ -57,9 +57,13 @@ describe("create-admin bootstrap", () => {
     expect(off.ok && off.args.phone).toBeNull();
   });
 
-  test("requires a phone number while MFA is enabled", () => {
+  test("MFA can be enabled without a phone (email is the primary channel)", () => {
     const noPhone = parseCreateAdminArgs(["--email", "a@b.co"], { ADMIN_PASSWORD: "Str0ngPassword!" });
-    expect(noPhone.ok).toBe(false);
+    expect(noPhone.ok).toBe(true);
+    if (noPhone.ok) {
+      expect(noPhone.args.mfaRequired).toBe(true);
+      expect(noPhone.args.phone).toBeNull();
+    }
     const withPhone = parseCreateAdminArgs(["--email", "a@b.co", "--phone", "+218911234567"], {
       ADMIN_PASSWORD: "Str0ngPassword!",
     });

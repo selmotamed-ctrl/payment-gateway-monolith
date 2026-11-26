@@ -26,7 +26,7 @@ import {
  * The setting value is always a JSON OBJECT (`PUT /settings` takes `valueJson: record`).
  * Keys a namespace does not declare are never dropped: they are carried as `extras`.
  */
-export type SettingFieldKind = "text" | "longtext" | "integer" | "number" | "money" | "boolean" | "select" | "strings" | "stringListMap" | "tree";
+export type SettingFieldKind = "text" | "longtext" | "integer" | "number" | "money" | "boolean" | "select" | "strings" | "stringListMap" | "tree" | "secret";
 
 export type SettingFieldDef = {
     key: string;
@@ -255,6 +255,64 @@ const NAMESPACES: Record<string, SettingNamespaceDef> = {
             description,
         ],
     },
+    "communication.email": {
+        id: "communication.email",
+        title: "Email delivery (SMTP)",
+        description: "Primary communication channel. Merchant registration and sign-in are in maintenance while this is not configured.",
+        fields: [
+            { key: "enabled", kind: "boolean", label: "Email channel enabled" },
+            { key: "provider", kind: "select", label: "Provider", options: ["SMTP"] },
+            { key: "smtpHost", kind: "text", label: "SMTP host", aliases: ["host"] },
+            { key: "smtpPort", kind: "integer", label: "SMTP port", min: 1, max: 65535, aliases: ["port"] },
+            { key: "smtpSecurity", kind: "select", label: "Connection security", options: ["STARTTLS", "TLS", "NONE"], aliases: ["security"] },
+            { key: "smtpUsername", kind: "text", label: "SMTP username", aliases: ["user", "username"] },
+            { key: "smtpPassword", kind: "secret", label: "SMTP password", hint: "Stored encrypted. Leave blank to keep the current password." },
+            { key: "fromEmail", kind: "text", label: "From address", aliases: ["from"] },
+            { key: "fromName", kind: "text", label: "From name" },
+            { key: "replyTo", kind: "text", label: "Reply-to address" },
+            { key: "timeoutMs", kind: "integer", label: "Timeout (ms)", min: 1000, max: 120000 },
+            { key: "allowInsecure", kind: "boolean", label: "Allow insecure TLS (development only)" },
+            description,
+        ],
+    },
+    "communication.sms": {
+        id: "communication.sms",
+        title: "SMS delivery (secondary channel)",
+        description: "Optional second channel. Critical codes (sign-in, password reset, verification) are also sent by SMS when this is configured and the user has a phone.",
+        fields: [
+            { key: "enabled", kind: "boolean", label: "SMS channel enabled" },
+            { key: "provider", kind: "select", label: "Provider", options: ["WEBHOOK"] },
+            { key: "webhookUrl", kind: "text", label: "Aggregator webhook URL", aliases: ["url"] },
+            { key: "webhookSecret", kind: "secret", label: "Webhook signing secret", hint: "Stored encrypted. Leave blank to keep the current secret." },
+            { key: "senderId", kind: "text", label: "Sender ID" },
+            { key: "timeoutMs", kind: "integer", label: "Timeout (ms)", min: 1000, max: 120000 },
+            description,
+        ],
+    },
+    "communication.policy": {
+        id: "communication.policy",
+        title: "Channel policy",
+        description: "Email is always used when configured. This policy decides which messages are ALSO sent by SMS.",
+        fields: [
+            { key: "smsMode", kind: "select", label: "SMS mode", options: ["OFF", "AUTH_ONLY", "CRITICAL_ONLY", "ALL"] },
+            { key: "smsTemplateCodes", kind: "strings", label: "SMS template codes", uppercase: true },
+            { key: "staffSmsFallbackWhenEmailMissing", kind: "boolean", label: "Allow staff SMS when email is not configured" },
+            description,
+        ],
+    },
+    "auth.google": {
+        id: "auth.google",
+        title: "Google sign-in",
+        description: "Server-side OAuth 2.0 authorization-code flow with PKCE. The redirect URI must exactly match the Google Console entry.",
+        fields: [
+            { key: "enabled", kind: "boolean", label: "Google sign-in enabled" },
+            { key: "clientId", kind: "text", label: "Google OAuth client ID" },
+            { key: "clientSecret", kind: "secret", label: "Google OAuth client secret", hint: "Stored encrypted. Leave blank to keep the current secret." },
+            { key: "redirectUri", kind: "text", label: "Redirect URI" },
+            { key: "hostedDomain", kind: "text", label: "Hosted domain (optional)" },
+            description,
+        ],
+    },
 };
 
 /** The canonical key of the OD-2 policy carries the same shape (`join_request.four_eyes_policy`). */
@@ -399,7 +457,7 @@ export const validateSettingForm = (def: SettingNamespaceDef | null, form: Setti
     for (const field of def?.fields ?? []) {
         const value = form.values[field.key];
         const text = typeof value === "string" ? value.trim() : "";
-        const textual = ["text", "longtext", "integer", "number", "money", "select"].includes(field.kind);
+        const textual = ["text", "longtext", "integer", "number", "money", "select", "secret"].includes(field.kind);
         if (field.required && textual && !text) {
             errors.push({ field: field.key, code: "REQUIRED" });
             continue;

@@ -302,19 +302,12 @@ export const coreTokenIpsSchema = z
 
 export const coreRegisterSchema = z
   .object({
-    phone: z.string().min(6).max(20).optional(),
-    email: z.email().optional(),
+    email: z.email(),
     password: z.string().min(10).max(128),
     fullName: z.string().min(2).max(120),
-    identityType: z.enum(["NATIONAL_ID", "PASSPORT"]).optional(),
-    identityNumber: z.string().min(4).max(32).optional(),
     locale: z.enum(["ar", "en"]).optional(),
   })
-  .strict()
-  .refine((value) => Boolean(value.phone || value.email), {
-    error: "a phone number or an email address is required",
-    path: ["phone"],
-  });
+  .strict();
 
 export const coreVerifyIdentitySchema = z
   .object({
@@ -336,10 +329,37 @@ export const coreInvitationAcceptSchema = z
   .object({
     token: z.string().min(16).max(256),
     password: z.string().min(10).max(128),
+    phone: z.string().min(6).max(20).optional(),
   })
   .strict();
 
-export const coreGoogleSchema = z.object({ idToken: z.string().min(20).max(4096) }).strict();
+export const coreGoogleSchema = z
+  .object({
+    mode: z.enum(["login", "register"]).optional(),
+    returnPath: z.enum(["/login", "/register"]).optional(),
+    redirectUri: z.string().max(512).optional(),
+  })
+  .strict();
+
+export const coreGoogleExchangeSchema = z.object({ ticket: z.string().min(16).max(512) }).strict();
+
+export const coreEmailVerifySchema = z
+  .object({ email: z.email(), code: z.string().regex(/^\d{6}$/) })
+  .strict();
+
+export const coreEmailResendSchema = z.object({ email: z.email() }).strict();
+
+export const corePasswordForgotSchema = z.object({ email: z.email() }).strict();
+
+export const corePasswordResetSchema = z
+  .object({
+    email: z.email(),
+    code: z.string().regex(/^\d{6}$/),
+    newPassword: z.string().min(10).max(128),
+  })
+  .strict();
+
+export const coreMfaResendSchema = z.object({ challengeId: z.string().uuid() }).strict();
 
 export const coreMfaSchema = z
   .object({

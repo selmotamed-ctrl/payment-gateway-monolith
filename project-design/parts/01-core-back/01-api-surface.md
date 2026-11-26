@@ -22,6 +22,10 @@ code:
   - core-back/engine/governance/GovernanceExecution.ts
   - core-back/lib/auth/merchantAuthorities.ts
   - core-back/lib/auth/mfaChallenges.ts
+  - core-back/lib/auth/emailVerification.ts
+  - core-back/lib/auth/passwordReset.ts
+  - core-back/lib/auth/googleOAuth.ts
+  - core-back/lib/communication/settings.ts
   - core-back/lib/auth/throttle.ts
   - core-back/lib/cashoutBalance.ts
   - core-back/api/internal/adminCommerce.ts
@@ -779,3 +783,30 @@ Dispute, adjustment and cash-out summaries return a `byCurrency` array in additi
 - `POST /aml/reports/:id/file` now calls `validateRegulatoryReportForSubmission` before creating the external submission or dispatching the adapter, so a `PROVISIONAL` reporting rule can never reach the authority. `submitRegulatoryReport` shares the same validator.
 - AML route access accepts `aml:read`/`aml:write` as well as `aml.read_confidential`, matching `hasConfidentialAmlAccess`; the admin route table lists both vocabularies.
 - Credential-set reads accept `credential:write`/`gateway:write` as well as the read names, so a default Security Admin can open the screen before re-seeding.
+
+## v46 authentication communication routes (2026-11-26)
+
+Merchant public: `POST /internal/merchant/auth/register` (email + password +
+full name only; no phone), `/auth/email/verify`, `/auth/email/resend`,
+`/auth/login` (returns `mfaRequired`, `challengeId`, `deliveryChannels` and
+`destinationMasked`), `/auth/mfa/resend`, `/auth/google/start`,
+`GET /auth/google/callback`, `/auth/google/exchange`,
+`/auth/password/forgot` and `/auth/password/reset`. `GET /auth/me` also returns
+the public communication/maintenance status and whether Google is enabled.
+Merchant register/login/Google/password routes return
+`503 AUTH_MAINTENANCE_EMAIL_NOT_CONFIGURED` while email is not configured.
+
+Admin public: `/auth/login` returns the same MFA channel metadata,
+`/auth/mfa/resend`, `/auth/password/forgot`, `/auth/password/reset`, and
+`/auth/accept-invitation` accepts an optional phone (email is the primary MFA
+channel). Admin protected: `GET /settings/communication/status`,
+`POST /settings/communication/test-email` and
+`POST /settings/communication/test-sms`.
+
+Login response codes: `EMAIL_NOT_VERIFIED` (403), `EMAIL_VERIFICATION_INVALID`
+(401), `PASSWORD_RESET_INVALID` (401), `GOOGLE_NOT_CONFIGURED` (503),
+`GOOGLE_STATE_INVALID`/`GOOGLE_TICKET_INVALID` (401) and
+`NO_DELIVERY_CHANNEL` (503). Settings reads mask known secrets
+(`smtpPassword`, `webhookSecret`, `clientSecret`) and expose `has<Field>` flags;
+exports redact them and restore keeps the previous ciphertext when a secret is
+not supplied.

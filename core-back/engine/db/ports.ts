@@ -434,6 +434,9 @@ export interface NotificationRow {
   providerMessageId: string | null;
   attempts: number;
   nextAttemptAt: Date | null;
+  lastError?: string | null;
+  sentAt?: Date | null;
+  deliveredAt?: Date | null;
 }
 
 export interface PlatformSettingRow {

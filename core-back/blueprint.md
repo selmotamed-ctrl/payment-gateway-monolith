@@ -1045,6 +1045,33 @@ Dispute, adjustment and cash-out summaries return a `byCurrency` array in additi
 - AML route access accepts `aml:read`/`aml:write` as well as `aml.read_confidential`, matching `hasConfidentialAmlAccess`; the admin route table lists both vocabularies.
 - Credential-set reads accept `credential:write`/`gateway:write` as well as the read names, so a default Security Admin can open the screen before re-seeding.
 
+## v46 authentication communication routes (2026-11-26)
+
+Merchant public: `POST /internal/merchant/auth/register` (email + password +
+full name only; no phone), `/auth/email/verify`, `/auth/email/resend`,
+`/auth/login` (returns `mfaRequired`, `challengeId`, `deliveryChannels` and
+`destinationMasked`), `/auth/mfa/resend`, `/auth/google/start`,
+`GET /auth/google/callback`, `/auth/google/exchange`,
+`/auth/password/forgot` and `/auth/password/reset`. `GET /auth/me` also returns
+the public communication/maintenance status and whether Google is enabled.
+Merchant register/login/Google/password routes return
+`503 AUTH_MAINTENANCE_EMAIL_NOT_CONFIGURED` while email is not configured.
+
+Admin public: `/auth/login` returns the same MFA channel metadata,
+`/auth/mfa/resend`, `/auth/password/forgot`, `/auth/password/reset`, and
+`/auth/accept-invitation` accepts an optional phone (email is the primary MFA
+channel). Admin protected: `GET /settings/communication/status`,
+`POST /settings/communication/test-email` and
+`POST /settings/communication/test-sms`.
+
+Login response codes: `EMAIL_NOT_VERIFIED` (403), `EMAIL_VERIFICATION_INVALID`
+(401), `PASSWORD_RESET_INVALID` (401), `GOOGLE_NOT_CONFIGURED` (503),
+`GOOGLE_STATE_INVALID`/`GOOGLE_TICKET_INVALID` (401) and
+`NO_DELIVERY_CHANNEL` (503). Settings reads mask known secrets
+(`smtpPassword`, `webhookSecret`, `clientSecret`) and expose `has<Field>` flags;
+exports redact them and restore keeps the previous ciphertext when a secret is
+not supplied.
+
 ## Core Engine
 
 > Status: `partial` · Last verified: 2026-11-26
@@ -3081,6 +3108,26 @@ PSP-M refunds, disputes opened/decided and cash-outs are grouped by currency and
 
 `postSettlementSweeps` still excludes a statement line tied to a known merchant-direct, internal or fee-at-source attempt. A **batch-net** source line with no local attempt (the gateway reports a settled batch total) is now swept again; previously the absence of an attempt skipped the whole batch and lost the clearing settlement. A test in `test/remediation-high.test.ts` covers the no-attempt batch case and the USD account selection.
 
+## v46 notification routing and readiness (2026-11-26)
+
+`OutboxNotificationWorker` now persists `last_error`, `sent_at` and
+`delivered_at`, marks a permanent configuration failure (`CHANNEL_NOT_CONFIGURED`,
+`RECIPIENT_ADDRESS_MISSING`) as `SUPPRESSED` instead of retrying eight times, and
+for an EMAIL row whose template policy allows SMS creates the mirrored
+`...:SMS` row once (idempotent by event id; the SMS template must exist). The
+runtime transport reads the current settings on every delivery: EMAIL goes to
+SMTP, SMS to the signed webhook, IN_APP is delivered by the row. The recipient
+resolver opens the sealed address or reads the user/merchant contact; it never
+sends to a masked value.
+
+`communication_readiness` is an extra `PlatformMonitorWorker` check. While email
+is unconfigured it raises the keyed case `platform.communication:email` and
+notifies active GATEWAY_ADMIN/SECURITY_ADMIN or `settings:write` users in-app,
+plus SMS when configured and the optional `PLATFORM_ALERT_SMS`; the daily event
+key prevents repeat spam. It also reports an enabled-but-incomplete SMS/Google
+configuration and repeated delivery failures. The case clears when email is
+configured.
+
 ## Storage Engine
 
 > Status: `partial` · Last verified: 2026-11-13
@@ -4132,6 +4179,30 @@ health event per route. The required schema version is **40**.
 
 
 **SQL-only schema guard (GAP-076).** `core-back/prisma/sql-only-objects.allowlist.json` lists the 57 objects Prisma cannot model (composite tenant FKs, trigram/covering indexes, SQL defaults and `schema_versions`). `bun run schema:sql-only-check` runs `prisma migrate diff` and fails if a new object would be dropped or a reviewed object is missing. CI runs it after migrations. Definition changes that keep the same object name are not fingerprinted yet.
+
+## v46 communication channels (2026-11-26)
+
+`20261126100000_communication_channels` adds:
+
+- `platform_settings.source` (`ADMIN` | `ENV_BOOTSTRAP` | `SEED`) and the
+  `platform_setting_secrets` table (Vault ciphertext per key/scope/version/field,
+  cascading with the setting version).
+- `communication_channel_status` for last test/delivery outcome, consecutive
+  failures and the last alert timestamp.
+- `mfa_challenges.purpose` (`LOGIN_MFA` | `EMAIL_VERIFICATION` |
+  `PASSWORD_RESET`), `delivery_channels` and `destination_masked`.
+- `notifications.last_error`, `sent_at` and `delivered_at`.
+- `oauth_states` (hashed state, sealed PKCE verifier, nonce, mode, redirect URI,
+  expiry, single use) and `oauth_login_tickets` (hashed one-time ticket for the
+  merchant session exchange).
+- `users.sessions_invalid_before`: a password reset invalidates every session
+  issued before that instant, enforced by `authDoubleCheck`.
+
+The migration also backfills an EMAIL identity with `verified_at` for active
+users that only had a password (skipping the synthetic `@pending...` and
+`@invited...` addresses) and marks Google identities verified, so the new
+verification gate does not lock existing accounts out. Required schema version:
+**46**.
 
 ## Global Search
 

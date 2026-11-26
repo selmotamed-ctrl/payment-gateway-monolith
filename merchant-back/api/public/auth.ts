@@ -4,18 +4,26 @@ import { z } from "zod";
 import { lazyLimiter, rateLimitKey } from "../../lib/clientIp";
 import { createAccountLimiters, type AccountKey } from "../../lib/authLimiters";
 import { env } from "../../lib/env";
-import { ApiError } from "../../lib/error";
+import { ApiError, parseOrThrow } from "../../lib/error";
 import { zEmail, zMfaCode, zPassword, zPhone } from "../../lib/zReady";
 import {
+  coreEmailResendSchema,
+  coreEmailVerifySchema,
+  coreGoogleExchangeSchema,
   coreGoogleSchema,
   coreInvitationAcceptSchema,
   coreLoginSchema,
+  coreMfaResendSchema,
   coreMfaSchema,
+  corePasswordForgotSchema,
+  corePasswordResetSchema,
   coreRegisterSchema,
   coreVerifyIdentitySchema,
 } from "../contract";
 import { captureSessionToken, logoutHandler } from "../../lib/security/sessionCookie";
-import { coreForward } from "../forward";
+import { coreCallContext, coreForward } from "../forward";
+import { callCore } from "../../lib/coreInternalClient";
+import { targetUrlsForRequest } from "../../lib/corePools";
 
 const router = express.Router();
 
@@ -60,19 +68,12 @@ router.use(accountLimiters.perAddress, accountLimiters.ceiling);
 
 const registerSchema = z
   .object({
-    phone: zPhone.optional(),
-    email: zEmail.optional(),
+    email: zEmail,
     password: zPassword,
     fullName: z.string().min(2).max(120),
-    identityType: z.enum(["NATIONAL_ID", "PASSPORT"]).optional(),
-    identityNumber: z.string().min(4).max(32).optional(),
     locale: z.enum(["ar", "en"]).optional(),
   })
-  .strict()
-  .refine((value) => Boolean(value.phone || value.email), {
-    error: "a phone number or an email address is required",
-    path: ["phone"],
-  });
+  .strict();
 
 const verifyIdentitySchema = z
   .object({
@@ -90,10 +91,26 @@ const loginSchema = z
   })
   .strict();
 
-const googleSchema = z
+const googleStartSchema = z
   .object({
-    idToken: z.string().min(20).max(4096),
+    mode: z.enum(["login", "register"]).optional(),
+    returnPath: z.enum(["/login", "/register"]).optional(),
+    redirectUri: z.string().max(512).optional(),
   })
+  .strict();
+
+const googleCallbackQuerySchema = z.object({ code: z.string().min(8).max(4096), state: z.string().min(8).max(256) }).strict();
+
+const googleExchangeSchema = z.object({ ticket: z.string().min(16).max(512) }).strict();
+
+const emailVerifySchema = z.object({ email: zEmail, code: z.string().regex(/^\d{6}$/) }).strict();
+
+const emailResendSchema = z.object({ email: zEmail }).strict();
+
+const passwordForgotSchema = z.object({ email: zEmail }).strict();
+
+const passwordResetSchema = z
+  .object({ email: zEmail, code: z.string().regex(/^\d{6}$/), newPassword: zPassword })
   .strict();
 
 const mfaSchema = z
@@ -102,6 +119,8 @@ const mfaSchema = z
     challengeId: z.string().min(4).max(128).optional(),
   })
   .strict();
+
+const mfaResendSchema = z.object({ challengeId: z.string().uuid() }).strict();
 
 router.post(
   "/register",
@@ -157,12 +176,98 @@ router.post(
 );
 
 router.post(
+  "/google/start",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/merchant/auth/google/start",
+    schema: googleStartSchema,
+    coreSchema: coreGoogleSchema,
+    requireAuth: false,
+  }),
+);
+
+// Legacy alias used by the first frontend build.
+router.post(
   "/google",
   coreForward({
     method: "POST",
     path: () => "/internal/merchant/auth/google",
-    schema: googleSchema,
+    schema: googleStartSchema,
     coreSchema: coreGoogleSchema,
+    requireAuth: false,
+  }),
+);
+
+router.get("/google/callback", async (req: Request, res: Response): Promise<void> => {
+  const query = parseOrThrow(googleCallbackQuerySchema, req.query);
+  try {
+    const result = await callCore<{ redirectPath?: string; errorPath?: string }>({
+      ...coreCallContext(req),
+      targetUrls: targetUrlsForRequest(req),
+      method: "GET",
+      path: "/internal/merchant/auth/google/callback",
+      query,
+    });
+    res.redirect(302, result.redirectPath ?? result.errorPath ?? "/login?error=GOOGLE_LOGIN_FAILED");
+  } catch {
+    res.redirect(302, "/login?error=GOOGLE_LOGIN_FAILED");
+  }
+});
+
+router.post(
+  "/google/exchange",
+  captureSessionToken,
+  coreForward({
+    method: "POST",
+    path: () => "/internal/merchant/auth/google/exchange",
+    schema: googleExchangeSchema,
+    coreSchema: coreGoogleExchangeSchema,
+    requireAuth: false,
+  }),
+);
+
+router.post(
+  "/email/verify",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/merchant/auth/email/verify",
+    schema: emailVerifySchema,
+    coreSchema: coreEmailVerifySchema,
+    requireAuth: false,
+  }),
+);
+
+router.post(
+  "/email/resend",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/merchant/auth/email/resend",
+    schema: emailResendSchema,
+    coreSchema: coreEmailResendSchema,
+    requireAuth: false,
+    status: 202,
+  }),
+);
+
+router.post(
+  "/password/forgot",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/merchant/auth/password/forgot",
+    schema: passwordForgotSchema,
+    coreSchema: corePasswordForgotSchema,
+    requireAuth: false,
+    status: 202,
+  }),
+);
+
+router.post(
+  "/password/reset",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/merchant/auth/password/reset",
+    schema: passwordResetSchema,
+    coreSchema: corePasswordResetSchema,
     requireAuth: false,
   }),
 );
@@ -184,6 +289,17 @@ router.post(
     path: () => "/internal/merchant/auth/mfa/verify",
     schema: mfaSchema,
     coreSchema: coreMfaSchema,
+    requireAuth: false,
+  }),
+);
+
+router.post(
+  "/mfa/resend",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/merchant/auth/mfa/resend",
+    schema: mfaResendSchema,
+    coreSchema: coreMfaResendSchema,
     requireAuth: false,
   }),
 );

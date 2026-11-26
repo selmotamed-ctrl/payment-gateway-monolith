@@ -38,6 +38,7 @@ import {
     type SettingForm,
 } from "@/components/builders/model";
 import { NotificationTemplatesTab } from "./components/NotificationTemplatesTab";
+import { CommunicationTab } from "./components/CommunicationTab";
 type PlatformSetting = {
     id: string;
     key: string;
@@ -114,7 +115,7 @@ const PlatformSettingsPage = dc(() => {
     const search = ref("");
 
     const dialogOpen = ref(false);
-    const tab = ref<"settings" | "templates">("settings");
+    const tab = ref<"settings" | "templates" | "communication">("settings");
     const editKey = ref("");
     const editForm = ref<SettingForm>(parseSettingForm(null, {}));
     const editError = ref<string | null>(null);
@@ -373,6 +374,22 @@ const PlatformSettingsPage = dc(() => {
         dialogOpen.value = true;
     };
 
+    const openKnownSetting = (key: string) => {
+        tab.value = "settings";
+        const entry = rows.value.find((row) => row.key === key);
+        if (entry) {
+            openEdit(entry);
+            return;
+        }
+        editKey.value = key;
+        editForm.value = parseSettingForm(resolveSettingNamespace(key), {});
+        editError.value = null;
+        editChecklist.value = {};
+        history.value = [];
+        compareRow.value = null;
+        dialogOpen.value = true;
+    };
+
     const copySettingValue = async (entry: { key: string; latest: PlatformSetting }) => {
         try {
             await navigator.clipboard.writeText(JSON.stringify({ key: entry.key, version: entry.latest.version, value: entry.latest.valueJson }, null, 2));
@@ -474,15 +491,18 @@ const PlatformSettingsPage = dc(() => {
 
                 <SegmentedTabs
                     modelValue={tab.value}
-                    onUpdate:modelValue={(value: string) => (tab.value = value === "templates" ? "templates" : "settings")}
+                    onUpdate:modelValue={(value: string) => (tab.value = value === "templates" ? "templates" : value === "communication" ? "communication" : "settings")}
                     tabs={[
                         { value: "settings", label: t("Platform settings") },
+                        { value: "communication", label: t("Communication") },
                         { value: "templates", label: t("Notification templates") },
                     ]}
                     ariaLabel={t("Platform settings sections")}
                 />
                 {tab.value === "templates" ? (
                     <NotificationTemplatesTab />
+                ) : tab.value === "communication" ? (
+                    <CommunicationTab onEdit={openKnownSetting} />
                 ) : (
                     <>
                 <VAlert type="info" variant="tonal">

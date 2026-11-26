@@ -25,6 +25,7 @@ import { getExecutionPlane } from "../../lib/executionPlane";
 import { createStandardPlatformChecks, type CertificateFile } from "./platformMonitorChecks";
 import { createStaleUnknownMonitorCheck, createUnscheduledRefundMonitorCheck } from "./moneyPathMonitorChecks";
 import { createBackupMonitorCheck } from "./backupMonitorChecks";
+import { createCommunicationReadinessCheck } from "./communicationMonitorChecks";
 import { getBackupControlClient } from "../../lib/storageEngine/backupControlClient";
 import { CommissionNettingWorker } from "./CommissionNettingWorker";
 import { JournalPartitionWorker } from "./JournalPartitionWorker";
@@ -60,11 +61,8 @@ import {
 import { PrismaRepositories } from "../db/repositories";
 import { toCamelRows } from "../db/rawRows";
 import { Vault } from "../crypto/Vault";
-import {
-  createNotificationTransport,
-  type NotificationRecipientResolver,
-  type NotificationTransport,
-} from "../notifications/NotificationTransport";
+import type { NotificationTransport } from "../notifications/NotificationTransport";
+import { createRuntimeCommunicationTransport } from "../notifications/CommunicationTransport";
 
 export interface ProductionWorkerRuntimeOptions {
   db: PrismaLike;
@@ -774,6 +772,7 @@ export const createProductionWorkerRuntime = (
             extraChecks: [
               createStaleUnknownMonitorCheck({ olderThanHours: env.UNKNOWN_ATTEMPT_CASE_SLA_HOURS }),
               createUnscheduledRefundMonitorCheck(),
+              createCommunicationReadinessCheck(),
               ...(platformMonitorEnabled
                 ? [createObjectStorageMonitorCheck({ sdk: objectStorageSdk, prisma: options.db as unknown as PrismaClient })]
                 : []),
@@ -831,47 +830,20 @@ const toBuffer = (value: unknown): Buffer => {
   return Buffer.alloc(0);
 };
 
-let notificationVault: Vault | undefined;
 let automationVault: Vault | undefined;
-
-/**
- * Resolves the address a provider has to deliver a notification to.
- *
- * The address of a recipient is stored encrypted, so it is decrypted with the
- * platform vault. A recipient without an encrypted address (the development
- * setup) falls back to the masked address, which never leaves the platform as
- * a real contact point.
- */
-const resolveNotificationRecipient: NotificationRecipientResolver = async (notification) => {
-  const ciphertext = notification.addressCiphertext?.trim();
-  if (!ciphertext) {
-    return notification.addressMasked;
-  }
-  try {
-    notificationVault ??= new Vault();
-    return await notificationVault.decryptSecret(ciphertext);
-  } catch {
-    return notification.addressMasked;
-  }
-};
 
 /**
  * Chooses the notification transport of the platform.
  *
- * With a configured aggregator endpoint (`NOTIFICATION_WEBHOOK_URL`) the
- * platform talks to the real provider, without one it keeps working in
- * development through the log transport, which reports `SENT` instead of
- * `DELIVERED`.
+ * The default transport reads the current Platform Settings on every delivery (SMTP for EMAIL, the signed webhook
+ * for SMS), so an administrator can configure or rotate a provider without a restart. Tests may inject a transport.
  */
 export const resolveNotificationTransport = (
   options: ProductionWorkerRuntimeOptions,
 ): NotificationTransport =>
   options.notificationTransport
-  ?? createNotificationTransport({
-    webhookUrl: options.notificationTransportUrl ?? env.NOTIFICATION_WEBHOOK_URL ?? null,
-    timeoutMs: options.notificationTransportTimeoutMs ?? env.NOTIFICATION_WEBHOOK_TIMEOUT_MS,
-    masterKey: env.KMS_MASTER_KEY,
-    resolveRecipient: resolveNotificationRecipient,
+  ?? createRuntimeCommunicationTransport({
+    db: options.db as never,
   });
 
 export { toCamelRows };

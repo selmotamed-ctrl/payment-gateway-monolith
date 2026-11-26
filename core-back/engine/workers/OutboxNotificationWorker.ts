@@ -4,11 +4,18 @@ import { toCamelRows } from "../db/rawRows";
 import type { NotificationRow, Tx } from "../db/ports";
 import type { RenderedNotification } from "../notifications/NotificationTransport";
 import { BaseWorker, backoffDelayMs, type WorkerOptions } from "./workerRuntime";
+import { getCommunicationConfiguration, maskPhoneNumber } from "../../lib/communication/settings";
+import { shouldSendSms } from "../../lib/communication/policy";
+import { Vault } from "../crypto/Vault";
+
+const fanoutVault = new Vault();
 
 export interface NotificationSendResult {
   providerMessageId: string | null;
   status: "SENT" | "DELIVERED" | "FAILED";
   error?: string;
+  /** Configuration made the failure permanent; retrying cannot help. */
+  permanent?: boolean;
 }
 
 export interface NotificationSender {
@@ -21,6 +28,16 @@ export interface OutboxNotificationWorkerDeps extends WorkerOptions {
   maxBackoffMs?: number;
   maxAttempts?: number;
 }
+
+const redactDeliveryError = (reason: string): string =>
+  reason
+    .replace(/\b\d{6}\b/g, "******")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, (value) => {
+      const [local = "", domain = ""] = value.split("@");
+      return `${local.slice(0, 2)}***@${domain}`;
+    })
+    .replace(/\+\d{6,}/g, "*******")
+    .slice(0, 500);
 
 export class OutboxNotificationWorker extends BaseWorker {
   private readonly sender: NotificationSender | undefined;
@@ -64,6 +81,9 @@ export class OutboxNotificationWorker extends BaseWorker {
   }
 
   private async deliver(notification: NotificationRow, now: Date): Promise<void> {
+    if (notification.channel === "EMAIL") {
+      await this.fanOutSms(notification);
+    }
     const template = await this.repositories.notifications.findTemplate(
       this.db as Tx,
       notification.templateCode,
@@ -127,27 +147,106 @@ export class OutboxNotificationWorker extends BaseWorker {
         bodyTemplate: template.bodyTemplate,
       });
       if (result.status === "FAILED") {
+        if (result.permanent) {
+          await this.repositories.notifications.updateNotification(this.db as Tx, notification.id, {
+            status: "SUPPRESSED",
+            attempts: notification.attempts + 1,
+            nextAttemptAt: null,
+            lastError: result.error ?? "Delivery suppressed",
+          });
+          this.logger.warn("OutboxNotificationWorker: notification suppressed", {
+            notificationId: notification.id,
+            reason: result.error,
+          });
+          return;
+        }
         await this.fail(notification, now, result.error ?? "Sender reported failure", notification.attempts);
         return;
       }
+      const delivered = result.status === "DELIVERED";
       await this.repositories.notifications.updateNotification(this.db as Tx, notification.id, {
-        status: result.status === "DELIVERED" ? "DELIVERED" : "SENT",
+        status: delivered ? "DELIVERED" : "SENT",
         providerMessageId: result.providerMessageId,
         attempts: notification.attempts + 1,
         nextAttemptAt: null,
+        lastError: null,
+        sentAt: delivered ? undefined : now,
+        deliveredAt: delivered ? now : undefined,
       });
     } catch (error) {
       await this.fail(notification, now, (error as Error).message, notification.attempts);
     }
   }
 
-  private async fail(notification: NotificationRow, now: Date, reason: string, previousAttempts: number): Promise<void> {
-    const attempts = previousAttempts + 1;
+  /**
+   * Adds an SMS copy of an EMAIL notification when the channel policy marks the template as critical and the
+   * recipient has a phone. The SMS template must exist; a missing template is not an error (the email still goes).
+   * The event id mirrors the email's (`...:EMAIL` -> `...:SMS`), so `skipDuplicates` makes the fan-out idempotent
+   * and an OTP challenge that already queued both channels is not duplicated.
+   */
+  private async fanOutSms(notification: NotificationRow): Promise<void> {
+    if (notification.status !== "QUEUED") return;
+    try {
+      const config = await getCommunicationConfiguration(this.db as never);
+      if (!shouldSendSms(config.policy, notification.templateCode, config.sms.configured)) return;
+      const smsTemplate = await this.repositories.notifications.findTemplate(
+        this.db as Tx,
+        notification.templateCode,
+        "SMS",
+        notification.lang,
+      );
+      if (!smsTemplate) return;
+      let phone: string | null = null;
+      if (notification.recipientUserId && this.db.user?.findUnique) {
+        const user = await this.db.user.findUnique({
+          where: { id: notification.recipientUserId },
+          select: { phone: true },
+        });
+        phone = typeof user?.phone === "string" && user.phone.trim() ? user.phone.trim() : null;
+      }
+      if (!phone && notification.recipientMerchantId && this.db.merchant?.findUnique) {
+        const merchant = await this.db.merchant.findUnique({
+          where: { id: notification.recipientMerchantId },
+          select: { contactPhone: true },
+        });
+        phone = typeof merchant?.contactPhone === "string" && merchant.contactPhone.trim()
+          ? merchant.contactPhone.trim()
+          : null;
+      }
+      if (!phone) return;
+      const eventId = notification.eventId.endsWith(":EMAIL")
+        ? `${notification.eventId.slice(0, -":EMAIL".length)}:SMS`
+        : `${notification.eventId}:SMS`;
+      await this.db.notification.createMany({
+        data: [
+          {
+            eventId: eventId.slice(0, 191),
+            recipientUserId: notification.recipientUserId,
+            recipientMerchantId: notification.recipientMerchantId,
+            templateCode: notification.templateCode,
+            channel: "SMS",
+            lang: notification.lang,
+            payloadJson: notification.payloadJson,
+            addressMasked: maskPhoneNumber(phone),
+            addressCiphertext: await fanoutVault.encryptSecret(phone, "notification-address"),
+            status: "QUEUED",
+            attempts: 0,
+          },
+        ],
+        skipDuplicates: true,
+      });
+    } catch {
+      // The e-mail delivery must proceed even when the optional SMS fan-out cannot be prepared.
+    }
+  }
+
+  private async fail(notification: NotificationRow, now: Date, reason: string, previousAttempts: number): Promise<void> {    const attempts = previousAttempts + 1;
     if (attempts >= this.maxAttempts) {
       await this.repositories.notifications.updateNotification(this.db as Tx, notification.id, {
         status: "FAILED",
         attempts,
         nextAttemptAt: null,
+        lastError: redactDeliveryError(reason),
       });
       this.logger.error("OutboxNotificationWorker: notification permanently failed", {
         notificationId: notification.id,
@@ -160,6 +259,7 @@ export class OutboxNotificationWorker extends BaseWorker {
       status: "QUEUED",
       attempts,
       nextAttemptAt: new Date(now.getTime() + delay),
+      lastError: redactDeliveryError(reason),
     });
     this.logger.warn("OutboxNotificationWorker: notification delivery failed, will retry", {
       notificationId: notification.id,

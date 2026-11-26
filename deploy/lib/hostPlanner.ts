@@ -382,8 +382,34 @@ const sandboxCoreUrls = (config: DeployConfig): string[] => {
   return ip ? [`https://${ip}:${config.SANDBOX_CORE_PORT}`] : [];
 };
 
-const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> => {
-  const database = effectiveDatabase(config);
+const communicationEnv = (config: DeployConfig): Record<string, string> => ({
+  COMMUNICATION_BOOTSTRAP_ENABLED: config.COMMUNICATION_BOOTSTRAP_ENABLED ? "true" : "false",
+  COMMUNICATION_EMAIL_ENABLED: config.COMMUNICATION_EMAIL_ENABLED ? "true" : "false",
+  ...(config.SMTP_HOST ? { SMTP_HOST: config.SMTP_HOST } : {}),
+  SMTP_PORT: String(config.SMTP_PORT),
+  SMTP_SECURITY: config.SMTP_SECURITY,
+  ...(config.SMTP_USER ? { SMTP_USER: config.SMTP_USER } : {}),
+  ...(config.SMTP_PASSWORD ? { SMTP_PASSWORD: config.SMTP_PASSWORD } : {}),
+  ...(config.SMTP_FROM_EMAIL ? { SMTP_FROM_EMAIL: config.SMTP_FROM_EMAIL } : {}),
+  SMTP_FROM_NAME: config.SMTP_FROM_NAME,
+  ...(config.SMTP_REPLY_TO ? { SMTP_REPLY_TO: config.SMTP_REPLY_TO } : {}),
+  SMTP_TIMEOUT_MS: String(config.SMTP_TIMEOUT_MS),
+  SMTP_ALLOW_INSECURE: config.SMTP_ALLOW_INSECURE ? "true" : "false",
+  COMMUNICATION_SMS_ENABLED: config.COMMUNICATION_SMS_ENABLED ? "true" : "false",
+  ...(config.SMS_WEBHOOK_URL ? { SMS_WEBHOOK_URL: config.SMS_WEBHOOK_URL } : {}),
+  ...(config.SMS_WEBHOOK_SECRET ? { SMS_WEBHOOK_SECRET: config.SMS_WEBHOOK_SECRET } : {}),
+  ...(config.SMS_SENDER_ID ? { SMS_SENDER_ID: config.SMS_SENDER_ID } : {}),
+  SMS_TIMEOUT_MS: String(config.SMS_TIMEOUT_MS),
+  GOOGLE_AUTH_ENABLED: config.GOOGLE_AUTH_ENABLED ? "true" : "false",
+  ...(config.GOOGLE_CLIENT_ID ? { GOOGLE_CLIENT_ID: config.GOOGLE_CLIENT_ID } : {}),
+  ...(config.GOOGLE_CLIENT_SECRET ? { GOOGLE_CLIENT_SECRET: config.GOOGLE_CLIENT_SECRET } : {}),
+  ...(config.GOOGLE_HOSTED_DOMAIN ? { GOOGLE_HOSTED_DOMAIN: config.GOOGLE_HOSTED_DOMAIN } : {}),
+  ...(config.GOOGLE_REDIRECT_URI ? { GOOGLE_REDIRECT_URI: config.GOOGLE_REDIRECT_URI } : {}),
+  ...(config.PLATFORM_ALERT_EMAIL ? { PLATFORM_ALERT_EMAIL: config.PLATFORM_ALERT_EMAIL } : {}),
+  ...(config.PLATFORM_ALERT_SMS ? { PLATFORM_ALERT_SMS: config.PLATFORM_ALERT_SMS } : {}),
+});
+
+const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> => {  const database = effectiveDatabase(config);
   const redisNodes = parseNodeList(config.REDIS_NODES);
   const redisUrl = config.REDIS_URL
     ?? (redisNodes.length > 0
@@ -399,6 +425,7 @@ const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> 
     MTLS_SERVER_CERT_PATH: "shared/certs/core-back.crt",
     MTLS_SERVER_KEY_PATH: "shared/certs/core-back.key",
     KMS_MASTER_KEY: config.KMS_MASTER_KEY,
+    ...communicationEnv(config),
     STORAGE_SHARD_COUNT: String(config.STORAGE_SHARD_COUNT),
     LEDGER_STRICT_CONTEXT: "true",
     BASE_CURRENCY: config.BASE_CURRENCY,

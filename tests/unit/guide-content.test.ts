@@ -126,7 +126,7 @@ describe("guide content extractor", () => {
             (match) => match[1],
         );
         const unique = [...new Set(routeNames)].filter(
-            (name) => !["Login", "AcceptInvitation", "NotFound"].includes(name),
+            (name) => !["Login", "AcceptInvitation", "ForgotPassword", "ResetPassword", "NotFound"].includes(name),
         );
         const map = readJson<{
             fallbackScreenId: string;

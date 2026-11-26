@@ -76,7 +76,8 @@ describe("C2 MFA challenge is server-side, single-use and bounded", () => {
     expect(code).toMatch(/^\d{6}$/);
     const notification = fakeTable("notification")[0]!;
     expect(JSON.stringify(notification.payloadJson)).not.toContain(code);
-    expect(Object.keys(notification.payloadJson as object)).toEqual(["codeCiphertext"]);
+    expect(Object.keys(notification.payloadJson as object)).toContain("codeCiphertext");
+    expect(Object.keys(notification.payloadJson as object)).not.toContain("code");
     const row = fakeTable("mfaChallenge")[0]!;
     expect(row.id).toBe(challengeId);
     expect(row.codeHash).toBe(hashMfaCode(USER, code));
@@ -255,7 +256,7 @@ describe("C2 route wiring", () => {
       expect(body).toContain("assertLoginAllowed(");
       expect(body).toContain("verifyPasswordOrDummy(");
       expect(body).toContain("recordLoginFailure(");
-      expect(body).toContain("issueMfaChallenge(");
+      expect(body).toMatch(/issue(Admin)?LoginChallenge\(/);
     }
   });
 

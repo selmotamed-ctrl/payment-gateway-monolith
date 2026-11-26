@@ -243,7 +243,7 @@ bun run start
 The baseline seed creates administrator accounts but deliberately leaves their passwords unset. Activate one before signing in:
 
 ```bash
-ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com --phone +218911234567
+ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com
 ```
 
 `bun run start` listens on `HOST:PORT` (`127.0.0.1:4000` by default) with TLS 1.3 and requires a client certificate. `bun run dev` uses Bun watch mode.
@@ -362,12 +362,22 @@ The Vault also recognizes `KMS_KEYS_JSON` for multiple key ids; it is read outsi
 | `WORKER_BACKGROUND_JOBS_LEASE_SECONDS` | `300` | Claimed-job lease; an expired `RUNNING` job is re-queued. |
 | `WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS` | `300000` | `/health` degradation threshold. |
 
-### 6.5 Notifications
+### 6.5 Communication channels (email primary, SMS secondary)
 
 | Key | Default | Purpose |
 | :--- | :--- | :--- |
-| `NOTIFICATION_WEBHOOK_URL` | unset | SMS/email aggregator endpoint. Without it the log transport reports `SENT`. |
-| `NOTIFICATION_WEBHOOK_TIMEOUT_MS` | `5000` (max `120000`) | Delivery attempt timeout. |
+| `COMMUNICATION_BOOTSTRAP_ENABLED` | `true` | Copy the SMTP/SMS/Google environment values into Platform Settings on first run (never overwrites an admin value). |
+| `COMMUNICATION_EMAIL_ENABLED` | `false` | Enables SMTP. While email is not configured, merchant registration/sign-in show maintenance. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY` | unset / `587` / `STARTTLS` | SMTP mailbox and connection security (`TLS`, `STARTTLS`, `NONE`; `NONE` is development only). |
+| `SMTP_USER`, `SMTP_PASSWORD` | unset | Optional SMTP credentials (the password is sealed in the Vault). |
+| `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`, `SMTP_REPLY_TO` | unset / `Payment Gateway` / unset | Sender identity. `SMTP_FROM_EMAIL` is required when enabled. |
+| `SMTP_TIMEOUT_MS`, `SMTP_ALLOW_INSECURE` | `10000` / `false` | Delivery timeout and development-only TLS relaxation. |
+| `COMMUNICATION_SMS_ENABLED`, `SMS_WEBHOOK_URL`, `SMS_WEBHOOK_SECRET`, `SMS_SENDER_ID` | `false` / unset | Optional signed SMS aggregator; critical codes are also sent by SMS when configured. |
+| `GOOGLE_AUTH_ENABLED`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `GOOGLE_HOSTED_DOMAIN` | `false` / unset | Server-side Google OAuth 2.0 code + PKCE. The redirect URI must match Google Console exactly. |
+| `PLATFORM_ALERT_EMAIL`, `PLATFORM_ALERT_SMS` | unset | Optional fallback recipients for the "email not configured" alert. |
+| `NOTIFICATION_WEBHOOK_URL`, `NOTIFICATION_WEBHOOK_TIMEOUT_MS` | unset / `5000` | Legacy generic aggregator; the runtime now uses the settings-aware SMTP/SMS transports. |
+
+Local inbox: `bun run mail:dev` starts Maildev (SMTP `127.0.0.1:1025`, web `http://127.0.0.1:1080`). Configure `SMTP_HOST=127.0.0.1`, `SMTP_PORT=1025`, `SMTP_SECURITY=NONE`, `SMTP_FROM_EMAIL=no-reply@example.test` and `COMMUNICATION_EMAIL_ENABLED=true`. The `communication:bootstrap` command copies the environment into Platform Settings and prints a secret-free readiness summary.
 
 ### 6.6 Fake Rails and synthetic data
 
@@ -411,17 +421,19 @@ Keys read outside the env proxy include `KMS_KEYS_JSON`, `KYB_SCANNER_MODE` (uns
 | `bun run seed-fake-rails` | Point seeded gateways at the Fake Rails emulator and derive verification secrets. |
 | `bun run seed-synthetic-history` | Run the optional multi-year synthetic history seeder. |
 | `bun run seed-operator-case-showcase` | Add representative operational operator cases for every case group after a synthetic seed (idempotent). |
+| `bun run communication:bootstrap` | Copy the SMTP/SMS/Google environment into Platform Settings when no administrator has saved them. |
+| `bun run mail:dev` | Start a local Maildev SMTP catcher and web inbox. |
 | `./scripts/prepare-databases.sh` | Create the application/test databases and apply migrations. |
 
 ### 7.1 Administrator bootstrap
 
 ```bash
-ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com --phone +218911234567
-ADMIN_PASSWORD='<strong password>' bun run create-admin --email compliance@example.com --role COMPLIANCE --phone +218911234568
-ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com --no-mfa   # MFA is on by default and needs a phone
+ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com
+ADMIN_PASSWORD='<strong password>' bun run create-admin --email compliance@example.com --role COMPLIANCE --phone +218911234568  # optional: adds SMS as a second channel
+ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com --no-mfa   # break-glass only
 ```
 
-Environment equivalents: `ADMIN_EMAIL`, `ADMIN_PASSWORD` (the only way to supply the password: `--password` on the command line is rejected), `ADMIN_PHONE`, `ADMIN_ROLE`, `ADMIN_MFA=false` (MFA is on by default and requires a phone; `--no-mfa` also disables it). The password policy is 12-128 characters with a lowercase letter, an uppercase letter and a digit. The command is idempotent; it sets `ACTIVE`, clears a stale MFA secret and rotates the password. Roles are `GATEWAY_ADMIN`, `SECURITY_ADMIN`, `FINANCE`, `COMPLIANCE`, `MLRO`, `OPERATOR` and `SUPPORT`. The baseline seed creates the seeded accounts with no password and `INVITED` status on purpose.
+Environment equivalents: `ADMIN_EMAIL`, `ADMIN_PASSWORD` (the only way to supply the password: `--password` on the command line is rejected), `ADMIN_PHONE` (optional, adds SMS), `ADMIN_ROLE`, `ADMIN_MFA=false` (MFA is on by default and uses email; `--no-mfa` also disables it). The password policy is 12-128 characters with a lowercase letter, an uppercase letter and a digit. The command is idempotent; it sets `ACTIVE`, clears a stale MFA secret and rotates the password. Roles are `GATEWAY_ADMIN`, `SECURITY_ADMIN`, `FINANCE`, `COMPLIANCE`, `MLRO`, `OPERATOR` and `SUPPORT`. The baseline seed creates the seeded accounts with no password and `INVITED` status on purpose.
 
 ### 7.2 Development superusers
 

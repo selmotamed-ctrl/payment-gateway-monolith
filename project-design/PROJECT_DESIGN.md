@@ -1596,6 +1596,43 @@ New core keys: `EXECUTION_PLANE` (`LIVE`|`SANDBOX`, default `LIVE`), `PLANE_FENC
 - `BASE_CURRENCY` (default `LYD`) is the reporting/display default; ledger books remain per-currency and no FX conversion is implied.
 - `LEDGER_STRICT_CONTEXT=true` is written by the deploy engine so a currency-scoped account lookup without a currency fails with `MISSING_LEDGER_CURRENCY` instead of falling back to the first currency.
 
+## v46 communication configuration (2026-11-26)
+
+Email is the primary channel and SMS is an optional second channel for critical
+authentication messages. The configuration lives in the Platform Settings keys
+`communication.email`, `communication.sms`, `communication.policy` and
+`auth.google`; the environment is the first-run bootstrap and a per-field
+fallback for blank values. An explicit `enabled: false` saved by an administrator
+wins and is never overridden.
+
+Core keys: `COMMUNICATION_BOOTSTRAP_ENABLED` (default true),
+`COMMUNICATION_EMAIL_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY`
+(`TLS`|`STARTTLS`|`NONE`), `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`,
+`SMTP_FROM_NAME`, `SMTP_REPLY_TO`, `SMTP_TIMEOUT_MS`, `SMTP_ALLOW_INSECURE`,
+`COMMUNICATION_SMS_ENABLED`, `SMS_WEBHOOK_URL`, `SMS_WEBHOOK_SECRET`,
+`SMS_SENDER_ID`, `SMS_TIMEOUT_MS`, `GOOGLE_AUTH_ENABLED`, `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `GOOGLE_HOSTED_DOMAIN`,
+`PLATFORM_ALERT_EMAIL` and `PLATFORM_ALERT_SMS`. Secrets are sealed in
+`platform_setting_secrets` by the Vault; they are never returned by the settings
+API or included in a settings export.
+
+On startup `lib/communication/bootstrap.ts` copies the environment into version 1
+of the three settings (under an advisory lock) when no administrator has saved
+them. It updates only an `ENV_BOOTSTRAP` row; an `ADMIN` row is authoritative.
+Operators can run `bun run communication:bootstrap` and use
+`bun run mail:dev` (Maildev SMTP `127.0.0.1:1025`, web `127.0.0.1:1080`) for a
+local inbox.
+
+When email is not configured, merchant registration and sign-in return
+`503 AUTH_MAINTENANCE_EMAIL_NOT_CONFIGURED`; the public `GET
+/internal/merchant/auth/me` advertises the maintenance state, and the admin
+shell shows the security/administrator warning. The platform monitor opens
+`COMMUNICATION_UNCONFIGURED`, notifies authorised staff in-app and by SMS when
+SMS is configured, and clears the case automatically when email becomes ready.
+The deploy engine validates `SMTP_FROM_EMAIL`/`SMTP_HOST` when email is enabled,
+refuses `SMTP_SECURITY=NONE` and `SMTP_ALLOW_INSECURE=true` in production, and
+requires the SMS/Google fields when those channels are enabled.
+
 ---
 
 <a id="platformobservability"></a>
@@ -3197,6 +3234,33 @@ Dispute, adjustment and cash-out summaries return a `byCurrency` array in additi
 - `POST /aml/reports/:id/file` now calls `validateRegulatoryReportForSubmission` before creating the external submission or dispatching the adapter, so a `PROVISIONAL` reporting rule can never reach the authority. `submitRegulatoryReport` shares the same validator.
 - AML route access accepts `aml:read`/`aml:write` as well as `aml.read_confidential`, matching `hasConfidentialAmlAccess`; the admin route table lists both vocabularies.
 - Credential-set reads accept `credential:write`/`gateway:write` as well as the read names, so a default Security Admin can open the screen before re-seeding.
+
+## v46 authentication communication routes (2026-11-26)
+
+Merchant public: `POST /internal/merchant/auth/register` (email + password +
+full name only; no phone), `/auth/email/verify`, `/auth/email/resend`,
+`/auth/login` (returns `mfaRequired`, `challengeId`, `deliveryChannels` and
+`destinationMasked`), `/auth/mfa/resend`, `/auth/google/start`,
+`GET /auth/google/callback`, `/auth/google/exchange`,
+`/auth/password/forgot` and `/auth/password/reset`. `GET /auth/me` also returns
+the public communication/maintenance status and whether Google is enabled.
+Merchant register/login/Google/password routes return
+`503 AUTH_MAINTENANCE_EMAIL_NOT_CONFIGURED` while email is not configured.
+
+Admin public: `/auth/login` returns the same MFA channel metadata,
+`/auth/mfa/resend`, `/auth/password/forgot`, `/auth/password/reset`, and
+`/auth/accept-invitation` accepts an optional phone (email is the primary MFA
+channel). Admin protected: `GET /settings/communication/status`,
+`POST /settings/communication/test-email` and
+`POST /settings/communication/test-sms`.
+
+Login response codes: `EMAIL_NOT_VERIFIED` (403), `EMAIL_VERIFICATION_INVALID`
+(401), `PASSWORD_RESET_INVALID` (401), `GOOGLE_NOT_CONFIGURED` (503),
+`GOOGLE_STATE_INVALID`/`GOOGLE_TICKET_INVALID` (401) and
+`NO_DELIVERY_CHANNEL` (503). Settings reads mask known secrets
+(`smtpPassword`, `webhookSecret`, `clientSecret`) and expose `has<Field>` flags;
+exports redact them and restore keeps the previous ciphertext when a secret is
+not supplied.
 
 ---
 
@@ -5250,6 +5314,26 @@ PSP-M refunds, disputes opened/decided and cash-outs are grouped by currency and
 
 `postSettlementSweeps` still excludes a statement line tied to a known merchant-direct, internal or fee-at-source attempt. A **batch-net** source line with no local attempt (the gateway reports a settled batch total) is now swept again; previously the absence of an attempt skipped the whole batch and lost the clearing settlement. A test in `test/remediation-high.test.ts` covers the no-attempt batch case and the USD account selection.
 
+## v46 notification routing and readiness (2026-11-26)
+
+`OutboxNotificationWorker` now persists `last_error`, `sent_at` and
+`delivered_at`, marks a permanent configuration failure (`CHANNEL_NOT_CONFIGURED`,
+`RECIPIENT_ADDRESS_MISSING`) as `SUPPRESSED` instead of retrying eight times, and
+for an EMAIL row whose template policy allows SMS creates the mirrored
+`...:SMS` row once (idempotent by event id; the SMS template must exist). The
+runtime transport reads the current settings on every delivery: EMAIL goes to
+SMTP, SMS to the signed webhook, IN_APP is delivered by the row. The recipient
+resolver opens the sealed address or reads the user/merchant contact; it never
+sends to a masked value.
+
+`communication_readiness` is an extra `PlatformMonitorWorker` check. While email
+is unconfigured it raises the keyed case `platform.communication:email` and
+notifies active GATEWAY_ADMIN/SECURITY_ADMIN or `settings:write` users in-app,
+plus SMS when configured and the optional `PLATFORM_ALERT_SMS`; the daily event
+key prevents repeat spam. It also reports an enabled-but-incomplete SMS/Google
+configuration and repeated delivery failures. The case clears when email is
+configured.
+
 ---
 
 <a id="corestorage"></a>
@@ -6309,6 +6393,30 @@ health event per route. The required schema version is **40**.
 
 
 **SQL-only schema guard (GAP-076).** `core-back/prisma/sql-only-objects.allowlist.json` lists the 57 objects Prisma cannot model (composite tenant FKs, trigram/covering indexes, SQL defaults and `schema_versions`). `bun run schema:sql-only-check` runs `prisma migrate diff` and fails if a new object would be dropped or a reviewed object is missing. CI runs it after migrations. Definition changes that keep the same object name are not fingerprinted yet.
+
+## v46 communication channels (2026-11-26)
+
+`20261126100000_communication_channels` adds:
+
+- `platform_settings.source` (`ADMIN` | `ENV_BOOTSTRAP` | `SEED`) and the
+  `platform_setting_secrets` table (Vault ciphertext per key/scope/version/field,
+  cascading with the setting version).
+- `communication_channel_status` for last test/delivery outcome, consecutive
+  failures and the last alert timestamp.
+- `mfa_challenges.purpose` (`LOGIN_MFA` | `EMAIL_VERIFICATION` |
+  `PASSWORD_RESET`), `delivery_channels` and `destination_masked`.
+- `notifications.last_error`, `sent_at` and `delivered_at`.
+- `oauth_states` (hashed state, sealed PKCE verifier, nonce, mode, redirect URI,
+  expiry, single use) and `oauth_login_tickets` (hashed one-time ticket for the
+  merchant session exchange).
+- `users.sessions_invalid_before`: a password reset invalidates every session
+  issued before that instant, enforced by `authDoubleCheck`.
+
+The migration also backfills an EMAIL identity with `verified_at` for active
+users that only had a password (skipping the synthetic `@pending...` and
+`@invited...` addresses) and marks Google identities verified, so the new
+verification gate does not lock existing accounts out. Required schema version:
+**46**.
 
 ---
 
@@ -8691,6 +8799,16 @@ Schema version 41 (`20261116130000_case_management_taxonomy`) adds the columns a
 
 The catalog test covers classification, attempt-only actions, backup/regulatory readability and references; platform-monitor tests cover source-clear and recurrence; the admin Playwright suite covers the payment and backup cases; live verification covered the observed backup and PSP-M cases. The synthetic seeder and specialist live context presenters remain partial (see frontmatter gaps).
 
+## v46 communication readiness case (2026-11-26)
+
+The case catalog adds `COMMUNICATION_UNCONFIGURED` (group `PLATFORM`, domain
+`OPERATIONS`, source `PLATFORM_MONITOR`, subject `COMMUNICATION_CHANNEL`,
+auto-clear). `communication_readiness` raises the keyed case
+`platform.communication:email` while email is not configured; the case clears
+when the condition disappears. The admin Operator Cases screen maps it to
+Platform Settings → Communication, and authorised staff are notified in-app and
+by SMS when configured.
+
 ---
 
 <a id="edgeshared"></a>
@@ -9293,6 +9411,16 @@ read/write guards. `assetsRouter` additionally exposes binary
 validates the state/reason/expiry shape only; core remains the authority for
 maker-checker, expiry and probe execution.
 
+## v46 admin auth and communication settings forwarding (2026-11-26)
+
+The public auth router adds `/auth/password/forgot` and `/auth/password/reset`,
+and `/auth/accept-invitation` accepts an optional phone. The protected settings
+router adds `GET /settings/communication/status`,
+`POST /settings/communication/test-email` and
+`POST /settings/communication/test-sms`; the core settings:read/settings:write
+authorities remain authoritative. Login/MFA responses pass through
+`deliveryChannels` and `destinationMasked`.
+
 ---
 
 <a id="edgemerchant"></a>
@@ -9610,6 +9738,16 @@ The edge validates the catalog query shape and the public execute shape (`inputs
 ## v38-v39 sandbox namespace (2026-11-13)
 
 `/api/v1/merchant/sandbox/*` is a dedicated namespace forwarded only to `SANDBOX_CORE_BACK_URLS`. `/overview`, `/seed-demo`, `/seed-history`, `/reset`, `/wallets/:id/*`, `/payments/:id/*`, `/disputes/:id/resolve`, `/reconciliation/*`, `/fake-rails/*` and `/webhooks/test-ping` map to the sandbox control routes; list/create resources (`/wallets`, `/applications`, `/links`, `/payments`, `/tokens`) map to the sandbox core's `/internal/merchant/*` (same router, separate database). `/mirror/*` raw-forwards to `/internal/merchant/*` for Live-parity pages, including a dedicated multipart dispute-evidence route and the POS SSE stream. `/api/external/v1/*` accepts `pg_live_*` and `pg_test_*` and selects the Live or Sandbox pool from the prefix. The client keeps one pool per URL set, so failover cannot cross planes.
+
+## v46 merchant auth forwarding (2026-11-26)
+
+The public auth router adds `/auth/google/start`, `GET /auth/google/callback`
+(proxies the core result and redirects the browser to `redirectPath` or
+`errorPath`), `/auth/google/exchange`, `/auth/email/verify`,
+`/auth/email/resend`, `/auth/password/forgot`, `/auth/password/reset` and
+`/auth/mfa/resend`. The register body is email + password + full name; the
+legacy `/auth/google` path is an alias for the start endpoint. `/auth/me`
+continues to be public and now carries the maintenance/communication block.
 
 ---
 
@@ -10536,6 +10674,18 @@ The Dashboard Route health card shows forced and conflict counts. See
 - The Adjustments page consumes `?attemptId=` and `?merchantId=` and pre-fills the create form, so **Create refund/adjustment** from the Transaction drawer no longer opens an empty page.
 - The Jobs & Outbox type filter includes `REFUND_INQUIRY`.
 - The Journal Entries unbalanced tile includes entries with zero lines, not only entries whose lines do not sum to zero.
+
+## v46 authentication and communication settings routes (2026-11-26)
+
+Public admin routes `/forgot-password` and `/reset-password` complete the
+email-OTP reset flow. The login MFA copy uses the server's `deliveryChannels`,
+and the invitation page makes the phone optional. Platform Settings adds a
+**Communication** tab (`CommunicationTab`) with email/SMS/Google status,
+missing-field diagnostics, last test/delivery results and "send test" actions
+for `settings:write`; the shell shows a warning banner while merchant auth is in
+maintenance. Typed setting namespaces: `communication.email`,
+`communication.sms`, `communication.policy` and `auth.google`; secret fields are
+password controls with a stored placeholder and are never echoed by the API.
 
 ---
 
@@ -12112,6 +12262,20 @@ A "Sandbox Live Mirror" section reuses the Live pages under `/sandbox/mirror/*` 
 ## Second-pass sandbox visibility (2026-11-25)
 
 Sandbox menu entries are filtered with `canOpenRoute`; the route table now allows `gateways.edit`/`security:read` for the Sandbox Overview, Sandbox Merchants and Fake Rails screens, so the Gateway Admin and Security Admin roles named by the Guide can open them. The Sandbox Live Mirror is described as the same Live screens backed by sandbox data, not as read-only, because the proxy forwards the same methods.
+
+## v46 email/Google merchant authentication (2026-11-26)
+
+The landing page loads `GET /auth/me` and shows a maintenance banner when email
+delivery is not configured; `/login` and `/register` render a maintenance screen
+instead of their forms in that state. Registration asks for full name, email and
+password only (no phone) or Google; after registration the user verifies the
+six-digit email code on `/verify-email`. Login shows the channel copy from
+`deliveryChannels` (email, SMS when configured, or both), supports resend and
+links to `/forgot-password` and `/reset-password`. Google uses the server
+authorization-code + PKCE flow: the button receives `authorizationUrl`, the edge
+callback redirects to `/auth/google/finish?ticket=...`, and the page exchanges
+the one-time ticket for the normal session. All new pages are EN/AR and follow
+the existing AuthLayout/SurfaceCard/FormField system.
 
 ---
 
@@ -14720,6 +14884,22 @@ New keys: `SANDBOX_ENABLED` (default false), `SANDBOX_NODE`, `SANDBOX_CORE_PORT`
 ## Backup and object-storage input hardening (2026-11-23)
 
 `BUN_VERSION` defaults to the tested 1.4.x line (1.4.4) because the committed lockfiles are version 2. `BACKUP_PRIMARY_S3_ENDPOINT` must be an http(s) URL without whitespace or shell metacharacters; `BACKUP_PRIMARY_S3_BUCKET` accepts an S3 bucket/path (optional `s3://`) using safe characters only; `BACKUP_MINIO_VERSION` and `BACKUP_MINIO_BINARY_URL` are restricted to safe tags/URLs; `BACKUP_MINIO_DATA_DIR` uses the safe absolute-path schema and rejects system directories. `BACKUP_ALLOW_INSECURE_HTTP` remains a documented availability option and is rejected only where the object-storage production guard applies. The object-storage and backup certificate directories must be separate and non-nested.
+
+## v46 communication deployment keys (2026-11-26)
+
+The deploy config accepts `COMMUNICATION_BOOTSTRAP_ENABLED`,
+`COMMUNICATION_EMAIL_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY`,
+`SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`,
+`SMTP_REPLY_TO`, `SMTP_TIMEOUT_MS`, `SMTP_ALLOW_INSECURE`,
+`COMMUNICATION_SMS_ENABLED`, `SMS_WEBHOOK_URL`, `SMS_WEBHOOK_SECRET`,
+`SMS_SENDER_ID`, `SMS_TIMEOUT_MS`, `GOOGLE_AUTH_ENABLED`, `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `GOOGLE_HOSTED_DOMAIN`, `GOOGLE_REDIRECT_URI`,
+`PLATFORM_ALERT_EMAIL` and `PLATFORM_ALERT_SMS`. `coreEnv` forwards them to the
+core process; the core bootstrap copies them into Platform Settings when no
+administrator has saved them. Validation requires the host/from address when
+email is enabled, the webhook URL and secret when SMS is enabled, and the client
+ID/secret/redirect URI when Google is enabled; production refuses
+`SMTP_SECURITY=NONE` and `SMTP_ALLOW_INSECURE=true`.
 
 ---
 
@@ -18011,6 +18191,20 @@ New or extended DB-free suites:
 - `core-back/test/background-jobs.test.ts`, `core-back/test/refund-three-phase.test.ts` — fixtures now give the merchant ceiling headroom so the tests exercise the reserve/refund path rather than the ceiling guard.
 
 The final core run was 20,265 pass / 5,066 skip / 4 fail; the 4 failures are the known audit-chain/vault environment tests that need PostgreSQL and `KMS_MASTER_KEY`. Admin-back 835, merchant-back 157, checkout-back 275, deploy 685, backup-daemon 238, object-storage-daemon 16, fake-rails-back 113, root Vitest 534, admin-front 48, merchant-front 23, companion 27; all front builds pass.
+
+## v46 communication suites (2026-11-26)
+
+`core-back/test/communication-settings.test.ts` covers settings merge precedence,
+explicit disable, channel policy and masking; `communication-settings-secrets.test.ts`
+covers secret extraction/masking/export; `communication-transport.test.ts` covers
+SMTP payloads, the signed SMS webhook and the resolver's refusal to use a masked
+address; `communication-auth-pg.test.ts` drives registration → email verification
+→ password login → email+SMS OTP → password reset on PostgreSQL;
+`google-oauth-pg.test.ts` covers state/PKCE, single-use ticket and merchant
+provisioning. `tests/unit/i18n-catalogue.test.ts` guards the new EN/AR keys and
+`tests/e2e/merchant/auth.spec.ts` covers the no-phone registration, email MFA
+copy and maintenance screen. Deploy config tests cover the SMTP/SMS/Google
+validation.
 
 ---
 

@@ -666,6 +666,18 @@ The Dashboard Route health card shows forced and conflict counts. See
 - The Jobs & Outbox type filter includes `REFUND_INQUIRY`.
 - The Journal Entries unbalanced tile includes entries with zero lines, not only entries whose lines do not sum to zero.
 
+## v46 authentication and communication settings routes (2026-11-26)
+
+Public admin routes `/forgot-password` and `/reset-password` complete the
+email-OTP reset flow. The login MFA copy uses the server's `deliveryChannels`,
+and the invitation page makes the phone optional. Platform Settings adds a
+**Communication** tab (`CommunicationTab`) with email/SMS/Google status,
+missing-field diagnostics, last test/delivery results and "send test" actions
+for `settings:write`; the shell shows a warning banner while merchant auth is in
+maintenance. Typed setting namespaces: `communication.email`,
+`communication.sms`, `communication.policy` and `auth.google`; secret fields are
+password controls with a stored placeholder and are never echoed by the API.
+
 ## Tables Filters and Exports
 
 > Status: `partial` · Last verified: 2026-11-23

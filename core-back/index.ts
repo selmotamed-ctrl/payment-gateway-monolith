@@ -17,6 +17,7 @@ import { BlobStoreUnavailableError, ObjectStorageError } from "./lib/objectStora
 import { REPORT_ENGINE_JSON_LIMIT } from "./api/internal/adminReportEngine";
 import { reconcileReportChromeDefaults } from "./engine/reportStudio/reconcileChromeDefaults";
 import { verifyExecutionPlaneFenceOnBoot } from "./engine/PlaneFenceGuard";
+import { bootstrapCommunicationSettingsFromEnv } from "./lib/communication/bootstrap";
 
 /** Admin report-engine routes: authoring bodies carry the asset zip. */
 export const REPORT_ENGINE_BODY_PATH = /^\/internal\/(admin|merchant)\/report-engine(\/|$)/;
@@ -294,6 +295,21 @@ export const start = async () => {
   // The execution plane is a property of the process and its database. Prove
   // they match before Express listens or a worker ticks (v38).
   await verifyExecutionPlaneFenceOnBoot();
+  // First-run communication configuration: env values become Platform Settings
+  // only when no administrator has saved the key, so a deployment can be usable
+  // before anyone opens the settings screen.
+  try {
+    const bootstrapped = await bootstrapCommunicationSettingsFromEnv(client as never);
+    if (bootstrapped.created.length > 0 || bootstrapped.updated.length > 0) {
+      console.log(
+        `Communication settings bootstrapped from environment (created: ${bootstrapped.created.join(", ") || "none"}; updated: ${bootstrapped.updated.join(", ") || "none"})`,
+      );
+    }
+  } catch (error) {
+    console.warn(
+      `Communication settings bootstrap skipped: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   // The statement upload and the dispute intake are queue-only routes: the
   // service refuses to boot if nothing can drain the durable jobs.
   assertBackgroundJobQueueDrainable({

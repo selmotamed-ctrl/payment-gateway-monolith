@@ -38,7 +38,7 @@ export const ensureStaffInvitationTemplates = async (db: Delegates): Promise<voi
         lang: "EN",
         subjectTemplate: "You have been invited to the back office",
         bodyTemplate:
-          "You were invited to the payment gateway back office. Open the back office, choose \"Accept invitation\" and enter this invitation code: {{token}}. You will choose your own password and the phone number that receives your sign-in codes. The code works once and expires in 7 days. If you did not expect this, ignore this message.",
+          "You were invited to the payment gateway back office. Open the back office, choose \"Accept invitation\" and enter this invitation code: {{token}}. You will choose your own password. Sign-in codes are sent to this email address; a phone number is optional and adds SMS as a second channel. The code works once and expires in 7 days. If you did not expect this, ignore this message.",
       },
       {
         code: STAFF_INVITATION_TEMPLATE,
@@ -46,7 +46,7 @@ export const ensureStaffInvitationTemplates = async (db: Delegates): Promise<voi
         lang: "AR",
         subjectTemplate: "تمت دعوتك إلى لوحة الإدارة",
         bodyTemplate:
-          "تمت دعوتك إلى لوحة إدارة بوابة الدفع. افتح لوحة الإدارة واختر \"قبول الدعوة\" ثم أدخل رمز الدعوة التالي: {{token}}. ستختار كلمة المرور الخاصة بك ورقم الهاتف الذي يستقبل رموز الدخول. يعمل الرمز مرة واحدة وتنتهي صلاحيته بعد 7 أيام. إذا لم تتوقع هذه الدعوة فتجاهل هذه الرسالة.",
+          "تمت دعوتك إلى لوحة إدارة بوابة الدفع. افتح لوحة الإدارة واختر \"قبول الدعوة\" ثم أدخل رمز الدعوة التالي: {{token}}. ستختار كلمة المرور الخاصة بك. تُرسل رموز الدخول إلى هذا البريد الإلكتروني، ورقم الهاتف اختياري ويضيف الرسائل النصية كقناة ثانية. يعمل الرمز مرة واحدة وتنتهي صلاحيته بعد 7 أيام. إذا لم تتوقع هذه الدعوة فتجاهل هذه الرسالة.",
         confidentialityClass: "INTERNAL",
       },
     ].map((template) => ({ confidentialityClass: "INTERNAL", version: 1, active: true, ...template })),

@@ -77,7 +77,7 @@ describe("merchant write routes are translated into the canonical core payload",
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        phone: "0912345678",
+        email: "test@example.test",
         password: "Sup3rSecretPass",
         fullName: "Test User",
       }),
@@ -85,7 +85,7 @@ describe("merchant write routes are translated into the canonical core payload",
     expect(response.status).toBe(201);
     expect(forwarded()?.url).toBe("/internal/merchant/auth/register");
     expect(forwardedBody()).toEqual({
-      phone: "912345678",
+      email: "test@example.test",
       password: "Sup3rSecretPass",
       fullName: "Test User",
     });

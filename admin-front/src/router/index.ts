@@ -631,6 +631,18 @@ const router = createRouter({
             },
         },
         {
+            path: "/forgot-password",
+            name: "ForgotPassword",
+            component: () => import("@/pages/public/auth/forgot-password"),
+            meta: { requiresVisitor: true },
+        },
+        {
+            path: "/reset-password",
+            name: "ResetPassword",
+            component: () => import("@/pages/public/auth/reset-password"),
+            meta: { requiresVisitor: true },
+        },
+        {
             path: "/:pathMatch(.*)*",
             name: "NotFound",
             component: () => import("@/pages/public/not-found/index"),
@@ -656,7 +668,7 @@ router.beforeEach((to, from) => {
         if (alias && alias !== to.name) {
             return { name: alias, params: to.params, query: to.query };
         }
-        const publicRoute = ["Login", "AcceptInvitation", "NotFound", "Landing"].includes(String(to.name));
+        const publicRoute = ["Login", "AcceptInvitation", "ForgotPassword", "ResetPassword", "NotFound", "Landing"].includes(String(to.name));
         if (!publicRoute) {
             showSnackBar({ type: "primary", message: "This screen is not available in Sandbox. Use Exit sandbox to return to Live." });
             return false;
