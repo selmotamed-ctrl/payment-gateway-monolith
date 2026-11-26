@@ -3,6 +3,8 @@ export * from "./costModel";
 export * from "./routeScope";
 export * from "./maintenanceWindows";
 export * from "./settingsSchemas";
+export * from "./settingsCatalog";
+export * from "./settingsSearch";
 export * from "./parserConfig";
 export * from "./amlRules";
 export * from "./templateVariables";

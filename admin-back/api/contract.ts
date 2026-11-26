@@ -1684,5 +1684,8 @@ export const toCoreSettingsUpdate = (body: unknown): JsonRecord => {
   if (Array.isArray(source.checklist)) {
     result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
   }
+  if (typeof source.reason === "string" && source.reason.trim().length >= 3) {
+    result.reason = source.reason.trim().slice(0, 500);
+  }
   return result;
 };

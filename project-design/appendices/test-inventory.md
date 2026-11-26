@@ -26,7 +26,7 @@
 | `core-back/test/automation/aml-event-rescreening.test.ts` | 182 | 4 |
 | `core-back/test/automation/audit-chain-anchor.test.ts` | 213 | 10 |
 | `core-back/test/automation/backup-monitor.test.ts` | 191 | 9 |
-| `core-back/test/automation/business-time.test.ts` | 45 | 6 |
+| `core-back/test/automation/business-time.test.ts` | 51 | 7 |
 | `core-back/test/automation/commission-netting.test.ts` | 405 | 21 |
 | `core-back/test/automation/deadline-worker.test.ts` | 613 | 17 |
 | `core-back/test/automation/expiry-housekeeping.test.ts` | 423 | 9 |
@@ -275,7 +275,7 @@
 | `admin-back/test/core-contract.test.ts` | 1652 | 58 |
 | `admin-back/test/core-internal-client.test.ts` | 663 | 23 |
 | `admin-back/test/env-isolation.test.ts` | 24 | 1 |
-| `admin-back/test/helpers/core-schema.ts` | 911 | 0 |
+| `admin-back/test/helpers/core-schema.ts` | 912 | 0 |
 | `admin-back/test/helpers/core.ts` | 253 | 8 |
 | `admin-back/test/helpers/session.ts` | 135 | 0 |
 | `admin-back/test/helpers/upstream.ts` | 106 | 0 |
@@ -400,6 +400,7 @@
 | `tests/e2e/admin/merchants.spec.ts` | 90 | 2 |
 | `tests/e2e/admin/object-storage-style.spec.ts` | 81 | 1 |
 | `tests/e2e/admin/operator-cases.spec.ts` | 319 | 3 |
+| `tests/e2e/admin/platform-settings.spec.ts` | 211 | 7 |
 | `tests/e2e/admin/report-a4-layout.spec.ts` | 282 | 1 |
 | `tests/e2e/admin/shell.spec.ts` | 254 | 17 |
 | `tests/e2e/admin/table-and-padding-geometry.spec.ts` | 235 | 3 |
@@ -430,7 +431,7 @@
 | `tests/unit/audit-summary.test.ts` | 109 | 13 |
 | `tests/unit/authorities.test.ts` | 27 | 4 |
 | `tests/unit/builders-aml-templates.test.ts` | 165 | 15 |
-| `tests/unit/builders-api-error-i18n.test.ts` | 79 | 6 |
+| `tests/unit/builders-api-error-i18n.test.ts` | 80 | 6 |
 | `tests/unit/builders-route-models.test.ts` | 193 | 15 |
 | `tests/unit/builders-settings-parser.test.ts` | 206 | 18 |
 | `tests/unit/checklist-labels.test.ts` | 46 | 1 |
@@ -451,16 +452,17 @@
 | `tests/unit/guide-search.test.ts` | 80 | 9 |
 | `tests/unit/guide-widgets.test.ts` | 221 | 25 |
 | `tests/unit/helpers/i18nScan.ts` | 47 | 2 |
-| `tests/unit/i18n-catalogue.test.ts` | 78 | 2 |
+| `tests/unit/i18n-catalogue.test.ts` | 80 | 2 |
 | `tests/unit/json-diff-model.test.ts` | 182 | 20 |
 | `tests/unit/lab-draft-store.test.ts` | 51 | 4 |
 | `tests/unit/ledger-ops-ledger.test.ts` | 154 | 15 |
 | `tests/unit/ledger-ops-operations.test.ts` | 313 | 25 |
+| `tests/unit/platform-settings.test.ts` | 174 | 11 |
 | `tests/unit/report-engine-sdk-mirror.test.ts` | 32 | 1 |
 | `tests/unit/report-preview-print-reset.test.ts` | 25 | 2 |
 | `tests/unit/report-ui-styles.test.ts` | 41 | 2 |
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **457**
-- Total literal test declarations: **4498**
+- Total files: **459**
+- Total literal test declarations: **4517**

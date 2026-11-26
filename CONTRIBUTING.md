@@ -11,6 +11,10 @@
 
 `design/**` is historical/reference material only. Do not add new normative design there.
 
+### Platform settings
+
+Follow [`docs/developer/platform-settings.md`](docs/developer/platform-settings.md) when adding or changing a platform setting. Every setting must have a seed/default (when appropriate), a core reader with safe fallback, catalog metadata with a hint for every field, English/Arabic text, tests, and a dated `project-design/TRACKER.md` entry. A seeded key without a catalog entry fails the settings registry test.
+
 ## Generated files
 
 Do not hand-edit:

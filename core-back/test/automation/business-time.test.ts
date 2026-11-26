@@ -36,6 +36,12 @@ describe("Libyan business time", () => {
     expect(businessHoursBetween(at("2030-06-02T06:00:00Z"), at("2030-06-04T06:00:00Z"), { holidays })).toBeCloseTo(24, 6);
   });
 
+  test("the platform-setting object shape is accepted", () => {
+    expect([...parseHolidays({ holidays: ["2030-06-03", "bad"] })]).toEqual(["2030-06-03"]);
+    expect([...parseHolidays({ holidays: [], other: ["2030-06-04"] })]).toEqual([]);
+    expect([...parseHolidays({ notHolidays: ["2030-06-03"] })]).toEqual([]);
+  });
+
   test("zero or negative spans are zero, and the walk is bounded", () => {
     expect(businessHoursBetween(at("2030-06-02T06:00:00Z"), at("2030-06-02T06:00:00Z"))).toBe(0);
     expect(businessHoursBetween(at("2030-06-03T06:00:00Z"), at("2030-06-02T06:00:00Z"))).toBe(0);
