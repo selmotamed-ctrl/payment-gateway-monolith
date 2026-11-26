@@ -13,6 +13,7 @@ import {
   railWhitelistModeOf,
   splitDomainInput,
   tokenActionsFor,
+  tokenAllowlistState,
 } from "@/pages/applications/applicationActions";
 
 describe("wallet containment governance", () => {
@@ -65,6 +66,13 @@ describe("application / token / link / POS governance", () => {
     expect(tokenActionsFor("ACTIVE", true)[0]).toMatchObject({ mode: "immediate", irreversible: true, danger: true });
     expect(tokenActionsFor("REVOKED", true)).toEqual([]);
     expect(tokenActionsFor("ACTIVE", false)).toEqual([]);
+  });
+
+  test("an IP allowlist shows stored CIDRs even when the switch is off", () => {
+    expect(tokenAllowlistState({ ipWhitelistEnabled: true, cidrs: ["10.0.0.0/8"] })).toBe("ACTIVE");
+    expect(tokenAllowlistState({ ipWhitelistEnabled: true, cidrs: [] })).toBe("ACTIVE_EMPTY");
+    expect(tokenAllowlistState({ ipWhitelistEnabled: false, cidrs: ["10.0.0.0/8"] })).toBe("STORED_OFF");
+    expect(tokenAllowlistState({ ipWhitelistEnabled: false, cidrs: [] })).toBe("OFF");
   });
 
   test("only a pending payment link can be cancelled", () => {

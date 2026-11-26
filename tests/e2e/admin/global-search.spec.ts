@@ -46,7 +46,22 @@ test.describe("admin global deep search", () => {
     await expect(input).toBeHidden();
     await expect(trigger).toBeFocused();
 
-    await page.getByRole("button", { name: "Search guide…" }).click();
+    await page.getByRole("button", { name: /Search guide/ }).click();
+    await expect(page.getByRole("combobox", { name: /Search the guide/ })).toBeVisible();
+  });
+
+  test("Ctrl+K keeps the global palette on guide screens while Ctrl+Shift+K opens the guide palette", async ({ page }) => {
+    await page.goto("/guide");
+    await expect(page.getByRole("heading", { name: "Interactive Guide" })).toBeVisible();
+
+    await page.keyboard.press("Control+k");
+    const globalInput = page.getByRole("combobox", { name: /Search everything/ });
+    await expect(globalInput).toBeVisible();
+    await expect(globalInput).toBeFocused();
+    await expect(page.getByRole("combobox", { name: /Search the guide/ })).toBeHidden();
+
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Control+Shift+k");
     await expect(page.getByRole("combobox", { name: /Search the guide/ })).toBeVisible();
   });
 

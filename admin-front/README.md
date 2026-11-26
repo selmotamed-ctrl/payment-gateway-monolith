@@ -142,7 +142,7 @@ Public routes are `/login` (`Login`, visitor-only) and `/:pathMatch(.*)*` (`NotF
 
 ### Global search
 
-- `Ctrl+K` (`Cmd+K` on macOS) opens the global search palette across platform records, admin pages and guide entries. The drawer search pill opens the guide-only modal.
+- `Ctrl+K` (`Cmd+K` on macOS) opens the global search palette across platform records, admin pages and guide entries on every route. `Ctrl+Shift+K` (`Cmd+Shift+K`) opens the guide-only modal, as does the drawer search pill.
 - Record search calls `POST v1/admin/search`; the palette requires at least two characters for record search, aborts stale requests, uses an 8-second timeout and caches non-partial responses for 60 seconds.
 - Search types include merchants, payment attempts, join requests, KYB documents, users, approvals, audit logs, AML cases/screenings/rules/reports, operator cases, gateway inquiries, disputes, adjustments, cash-outs, reconciliation runs, gateways, rails and routes.
 - Deep links open the relevant record drawer where the target page supports it. The guide tab or guide modal routes to `/guide` with the selected entry.
@@ -178,7 +178,7 @@ Public routes are `/login` (`Login`, visitor-only) and `/:pathMatch(.*)*` (`NotF
 ### Guide and academy
 
 - `/guide` is the Admin Interactive Guide v1.0: 14 books, 135 articles, 151 glossary terms, 25 safeguard cards, 32 situations, 8 reading paths, 58 quick answers, 19 error codes and a 140-case edge-case catalogue, extracted deterministically from `design/07-guides-and-academy/guide_system_design_and_content.md` into `src/content/guide/generated/` (`bun run content:guide`). Eight routes (home, book, article, glossary, tools, playbook, cards, edge cases), a MiniSearch command palette, five client-only simulators and per-article read tracking stored in the shared Academy progress JSON. Canonical part: [Admin Guide v2](../project-design/parts/03-admin-front/06-guide-v2.md).
-- Guide search is MiniSearch over articles, glossary, cards, situations, FAQ and error codes with Arabic-aware normalisation; `Ctrl+K` also searches platform records and admin pages.
+- Guide search is MiniSearch over articles, glossary, cards, situations, FAQ and error codes with Arabic-aware normalisation; `Ctrl+Shift+K` opens the guide palette, while `Ctrl+K` opens the global palette, which also searches platform records and admin pages.
 - `/academy` is the Employee Academy: 8 tracks (Foundation plus one per role), 11 modules, 49 lessons with 98 practice checks, 15 labs (86 tasks), 218 exam-pool questions (40 critical) and 8 server-graded exams. Content is extracted from the design file (`bun scripts/extract-academy-content.ts`); exam answer keys live only in `core-back`. The UI is full-width and built from the shared admin primitives plus `src/styles/academy/*.css` and `src/components/academy/ui/*` (visual system v2, [Admin Guide and Academy §7.6](../project-design/parts/03-admin-front/03-guide-and-academy.md)).
 - Mastery is computed client-side: all lessons complete, the lab passed and a 100% quiz. Badges are derived, not manually granted. The backend stores progress JSON but does not independently validate answers, labs or mastery.
 - Academy self-progress and exams are available to any authenticated back-office user. The team view is gated to the `SECURITY_ADMIN` role in the router, `admin-back` and `core-back`.
