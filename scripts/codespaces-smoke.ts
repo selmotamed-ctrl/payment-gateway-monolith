@@ -47,8 +47,11 @@ const PERSONA_MOBILE = "0910000001";
 const UNKNOWN_MOBILE = "0919999999";
 
 type Json = Record<string, any>;
+/** Every probe is bounded: a hung edge must fail the smoke test, not hang CI. */
+const fetchWithTimeout = (url: string, init: RequestInit = {}): Promise<Response> =>
+  fetch(url, { ...init, signal: AbortSignal.timeout(15_000) });
 const call = async (method: string, url: string, headers: Record<string, string> = {}, body?: unknown) => {
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method,
     headers: { "content-type": "application/json", ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -83,29 +86,36 @@ console.log("Payment gateway smoke test");
 
 console.log("\nServices");
 await check("merchant-back /health", async () => {
-  const r = await fetch(`${MERCHANT.replace("/api/v1", "")}/health`);
+  const r = await fetchWithTimeout(`${MERCHANT.replace("/api/v1", "")}/health`);
   assert(r.status === 200, `status ${r.status}`);
 });
 await check("checkout-back /health", async () => {
-  const r = await fetch(`${CHECKOUT.replace("/api/v1", "")}/health`);
+  const r = await fetchWithTimeout(`${CHECKOUT.replace("/api/v1", "")}/health`);
   assert(r.status === 200, `status ${r.status}`);
 });
 await check("fake-rails-back /health", async () => {
-  const r = await fetch(`${FAKE}/health`);
+  const r = await fetchWithTimeout(`${FAKE}/health`);
   assert(r.status === 200, `status ${r.status}`);
 });
 for (const [name, p] of PORTALS) {
   await check(`${name} served on :${p}`, async () => {
-    const r = await fetch(`http://127.0.0.1:${p}/`);
+    const r = await fetchWithTimeout(`http://127.0.0.1:${p}/`);
     assert(r.status === 200 && (await r.text()).toLowerCase().includes("<html"), `status ${r.status}`);
   });
 }
+// The browser talks to the portal origin and Vite preview proxies `/api` to
+// the edge. A portal that serves HTML but not the proxy would look healthy
+// while every sign-in fails.
+await check("merchant portal proxies /api to the merchant edge", async () => {
+  const r = await fetchWithTimeout(`http://127.0.0.1:${port("MERCHANT_FRONT_PORT", 5102)}/api/v1/merchant/sandbox/payments`);
+  assert(r.status === 401 || r.status === 403, `status ${r.status} (expected the edge's 401/403, not the portal shell)`);
+});
 
 console.log("\nSecurity");
 await check("core-back refuses a client without a certificate (mTLS enforced)", async () => {
   let accepted = false;
   try {
-    const r = await fetch(`${CORE_URL}/health`, { tls: { rejectUnauthorized: false } } as RequestInit);
+    const r = await fetchWithTimeout(`${CORE_URL}/health`, { tls: { rejectUnauthorized: false } } as RequestInit);
     accepted = r.status < 500;
   } catch {
     accepted = false; // handshake rejected - what we want
@@ -208,7 +218,7 @@ await check("a wrong OTP does not complete a payment", async () => {
   const key = link.body.key as string;
   const init = await call("POST", `${CHECKOUT}/pay/${key}/initiate`, {}, {
     railCode: "edfali",
-    formData: { customer_mobile: UNKNOWN_MOBILE.replace(/^0919/, "0910"), otp: "0000" },
+    formData: { customer_mobile: UNKNOWN_MOBILE, otp: "0000" },
     idempotencyKey: `smoke-neg-init-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   });
   assert(init.status === 201, `initiate ${init.status}`);
@@ -216,7 +226,7 @@ await check("a wrong OTP does not complete a payment", async () => {
     otp: "0000",
     idempotencyKey: `smoke-neg-conf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   });
-  assert(confirm.body.status !== "SUCCEEDED", `a made-up OTP produced ${confirm.body.status}`);
+  assert(typeof confirm.body.status === "string" && confirm.body.status !== "SUCCEEDED", `a made-up OTP produced ${confirm.body.status ?? confirm.status}`);
   return `status ${confirm.body.status}`;
 });
 

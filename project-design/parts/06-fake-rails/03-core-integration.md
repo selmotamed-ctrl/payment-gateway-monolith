@@ -40,7 +40,7 @@ gaps:
   - Default webhook URLs are routed to the wrong core path.
   - Embedded widget loading is blocked by the checkout CSP and renderer allowlist.
   - seedFakeRails creates a DEMO credential manifest only on empty platform credential sets (names the ApiConsumer looks up plus each crypto-profile secretKeyRef); the two MUTUAL_TLS gateways stay unconfigured and non-empty sets are never rewritten except for crypto-profile secrets.
-  - Only the OTP-pull rails (edfali, sadad) were verified to settle SUCCEEDED end to end on the Sandbox plane; redirect/QR/push/embedded rails initiate but several FAIL at initiate (HTTP 404 / missing mutual-TLS material) or need tester actions, and the redirect URL is not surfaced in the initiate client action (GAP-079).
+  - Only the OTP-pull rails (edfali, sadad) were verified to settle SUCCEEDED end to end on the Sandbox plane; redirect/QR/push/embedded rails initiate but several FAIL at initiate (HTTP 404 / missing mutual-TLS material) or need tester actions, and the redirect URL is not surfaced in the initiate client action (GAP-080).
 ---
 
 # Core Integration and Deployment
@@ -98,11 +98,13 @@ No other widget is changed.
 HMAC-SHA256(seederToken, "fake-rails:<gatewayCode>:<purpose>")
 ```
 
-where purpose is `webhook` if any matching profile is `INBOUND_VERIFY`, otherwise `sign`.
+where purpose is `webhook` if any matching profile is `INBOUND_VERIFY`, otherwise `sign`. The derived value is encrypted through `Vault.encryptSecret(secret, "credential-set")`, the entry is marked secret, its `secretVersion` is incremented and the set is marked `VERIFIED`. Entries with no matching profile are left untouched.
 
-**Demo credential manifest (2026-11-26).** A freshly seeded platform credential set has `entriesCiphertext = []` (real secrets are only written through the credential API), so every emulated gateway failed at the first authenticated step with `API_KEY credential is missing`. When a `PLATFORM` set for a `VERIFIED`/`UNTESTED` status is empty, `updateCredentialSecrets()` now creates entries `apiKey`, `token`, `username`, `password`, `secret`, `clientId`, `clientSecret` (HMAC-derived, vault-encrypted, `secretVersion` 1) plus one entry per distinct crypto-profile `secretKeyRef` (key = the ref verbatim, derived with the same `webhook`/`sign` purpose rule). The emulator never checks key values, so this is sufficient for the test tier. Sets that already have entries are not touched except for the crypto-profile secrets above.
+**Demo credential manifest (2026-11-26).** A freshly seeded platform credential set has `entriesCiphertext = []` (real secrets are only written through the credential API), so every emulated gateway failed at the first authenticated step with `API_KEY credential is missing`. When a `PLATFORM` set for a `VERIFIED`/`UNTESTED` status is empty, `updateCredentialSecrets()` now creates entries `apiKey`, `token`, `username`, `password`, `secret`, `clientId`, `clientSecret` (HMAC-derived, vault-encrypted, `secretVersion` 1) plus one entry per distinct crypto-profile `secretKeyRef` (key = the ref verbatim, derived with the same `webhook`/`sign` purpose rule). The emulator never checks key values, so this is sufficient for the test tier. MUTUAL_TLS sets are left empty because the manifest cannot invent a client certificate. Sets that already have entries are not touched except for the crypto-profile secrets above.
 
-**Browser-facing base URL.** `FAKE_RAILS_BROWSER_BASE_URL` (default `FAKE_RAILS_PUBLIC_BASE_URL`) is used only for widget script URLs and widget allowed origins. It lets core keep calling the emulator on a private address (`http://127.0.0.1:4104`) while a payer's browser loads the SDK from a forwarded URL (GitHub Codespaces). The derived secret is encrypted through `Vault.encryptSecret(secret, "credential-set")`, the entry is marked secret and its `secretVersion` is incremented. Entries with no matching profile are left untouched. The credential set is marked `VERIFIED`.
+**Browser-facing base URL.** `FAKE_RAILS_BROWSER_BASE_URL` (default `FAKE_RAILS_PUBLIC_BASE_URL`) is used only for widget script URLs and widget allowed origins. It lets core keep calling the emulator on a private address (`http://127.0.0.1:4104`) while a payer's browser loads the SDK from a forwarded URL (GitHub Codespaces).
+
+**Attempt environment.** `StepExecutor` adds `x-pg-environment: <attempt.env>` only when the target is the allow-listed Fake Rails host. `resolveOrCreateTransaction()` prefers that header over the body `env` field and defaults to `SANDBOX`; the stored value is echoed as `env`/`environment` in the confirm, success, awaiting and **inquiry** bodies. Without the header a LIVE attempt was stored as SANDBOX, so both the trusted-success environment fact and the webhook `/live` path were wrong.
 
 **Environment mode.** `ensureEnvironmentSetting()` upserts `server.environment_mode = { mode: "TEST_SANDBOX" }`.
 
@@ -295,7 +297,7 @@ bun run deploy.ts --only=fake-rails
 - Webhook token/path mismatch.
 - Embedded widget blocked by CSP and renderer allowlist.
 - Credential coverage: demo manifest on empty sets only; MUTUAL_TLS gateways unconfigured.
-- Only OTP-pull rails verified to settle; the initiate response omits the hosted redirect URL (`clientAction` has `kind: HTTP_REDIRECT` without `url`) and several rails fail at initiate (GAP-079).
+- Only OTP-pull rails verified to settle; the initiate response omits the hosted redirect URL (`clientAction` has `kind: HTTP_REDIRECT` without `url`) and several rails fail at initiate (GAP-080).
 - Fake inbound requests are not verified.
 - Statement channels not connected to a fetch flow.
 

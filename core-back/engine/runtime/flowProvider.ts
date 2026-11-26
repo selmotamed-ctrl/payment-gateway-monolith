@@ -196,8 +196,11 @@ const CONTENT_TYPE_MIME: Record<string, string> = {
 
 export const toMimeContentType = (value: unknown): string | undefined => {
   if (value === undefined || value === null) return undefined;
-  const text = String(value);
-  return CONTENT_TYPE_MIME[text] ?? text;
+  const text = String(value).trim();
+  if (!text) return undefined;
+  // Enum names are uppercase; stored MIME strings are lower case. Normalise
+  // both so a hand-edited row cannot bypass the StepExecutor's substring test.
+  return CONTENT_TYPE_MIME[text.toUpperCase()] ?? text.toLowerCase();
 };
 
 /**

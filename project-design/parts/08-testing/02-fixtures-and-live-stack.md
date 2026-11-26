@@ -33,7 +33,7 @@ gaps:
   - The live stack has no automated provisioning for the external host used by e2e-live.
   - The cross-service journey suite skips unless E2E_LIVE=1 and a payment link key are supplied.
   - Most UI fixtures mock every API and do not exercise real backends.
-  - `scripts/codespaces-smoke.ts` (17 real HTTP checks incl. a simulated Edfali payment) needs a running launcher stack and is not part of any workflow that boots the Sandbox plane; the CI `codespaces` job only boots the `core` profile.
+  - `scripts/codespaces-smoke.ts` (18 real HTTP checks incl. a simulated Edfali payment and the portal proxy) needs a running launcher stack and is not part of any workflow that boots the Sandbox plane; the CI `codespaces` job only boots the `core` profile.
 ---
 
 # Fixtures, Mock API and Live Stack
@@ -66,8 +66,8 @@ The live environment is expected to be provisioned by the deploy engine, not by 
 
 | Variable | Default / precedence | Consumer |
 | :--- | :--- | :--- |
-| `DATABASE_URL` | `postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test` in `test/setup.ts` | Core integration/e2e tests |
-| `POSTGRES_TEST_DATABASE_URL` | preferred by `core-back/test/e2e/postgres-payment.test.ts` | Payment E2E |
+| `DATABASE_URL` | fallback (`postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test`) in `test/setup.ts` | Core integration/e2e tests |
+| `POSTGRES_TEST_DATABASE_URL` | preferred by `test/setup.ts` and `core-back/test/e2e/postgres-payment.test.ts`; the dev container sets it so tests never touch the development database | Payment E2E / all DB suites |
 | `EXHAUSTIVE_DATABASE_URL` | preferred; then `POSTGRES_TEST_DATABASE_URL`; then `postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test` | Exhaustive harness |
 | `STORAGE_TEST_DATABASE_URL` | preferred; then `DATABASE_URL`; then `postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test` | Storage helpers |
 | `STORAGE_TEST_REDIS_URL` | `redis://127.0.0.1:56379` | Storage cache/velocity |
@@ -310,7 +310,7 @@ bun run test:live
 - `tests/playwright*.config.ts` define the web servers and projects.
 - `scripts/deploy-localhost.sh` is executable and was read for this part; it was not run.
 - `tests/e2e-live/live.spec.ts` contains the hard-coded defaults.
-- `scripts/codespaces-smoke.ts` (run through `./scripts/codespaces-start.sh smoke`) is the first live check that performs initiate -> OTP confirm -> merchant-visible `SUCCEEDED` through the seeded Edfali gateway, plus mTLS-rejection, unauthenticated-merchant-API and wrong-OTP negative checks. Verified 17/17 on 2026-11-26 against the `merchant-demo` profile.
+- `scripts/codespaces-smoke.ts` (run through `./scripts/codespaces-start.sh smoke`) is the first live check that performs initiate -> OTP confirm -> merchant-visible `SUCCEEDED` through the seeded Edfali gateway, plus mTLS-rejection, unauthenticated-merchant-API, portal-proxy and wrong-OTP negative checks. Verified 18/18 on 2026-11-26 against the `merchant-demo` profile.
 
 No test in this part verifies the fixture itself. The fixture is exercised indirectly by every mocked Playwright suite.
 

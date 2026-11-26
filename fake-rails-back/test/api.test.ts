@@ -130,6 +130,64 @@ describe("fake-rails-back API", () => {
     expect(status.status).toBe("PAID");
   });
 
+  test("an OTP rail echoes invoice_no and the attempt environment in its success body", async () => {
+    const reference = "INV-OTP-ECHO-1";
+    const verify = await request("/rails/edfali/verify", {
+      method: "POST",
+      body: { invoice_no: reference, amount: "25.00", mobile_number: "0910000001", env: "SANDBOX" },
+    });
+    expect(verify.status).toBe(200);
+    const verification = (await verify.json()) as { otp: string };
+
+    const confirm = await request("/rails/edfali/confirm", {
+      method: "POST",
+      body: { invoice_no: reference, otp: verification.otp },
+    });
+    expect(confirm.status).toBe(200);
+    const confirmed = (await confirm.json()) as {
+      reference: string;
+      env: string;
+      environment: string;
+      status: string;
+    };
+    expect(confirmed.status).toBe("PAID");
+    expect(confirmed.reference).toBe(reference);
+    expect(confirmed.env).toBe("SANDBOX");
+    expect(confirmed.environment).toBe("SANDBOX");
+
+    const inquiry = await request(`/rails/edfali/status/${reference}`);
+    const inquired = (await inquiry.json()) as { env: string; environment: string };
+    expect(inquired.env).toBe("SANDBOX");
+    expect(inquired.environment).toBe("SANDBOX");
+  });
+
+  test("the core's x-pg-environment header selects the LIVE transaction plane", async () => {
+    const reference = "INV-OTP-LIVE-1";
+    const verify = await request("/rails/edfali/verify", {
+      method: "POST",
+      headers: { "x-pg-environment": "LIVE" },
+      body: { invoice_no: reference, amount: "15.00", mobile_number: "0910000001" },
+    });
+    expect(verify.status).toBe(200);
+    const verification = (await verify.json()) as { otp: string };
+
+    const confirm = await request("/rails/edfali/confirm", {
+      method: "POST",
+      headers: { "x-pg-environment": "LIVE" },
+      body: { invoice_no: reference, otp: verification.otp },
+    });
+    expect(confirm.status).toBe(200);
+    const confirmed = (await confirm.json()) as { env: string; environment: string; status: string };
+    expect(confirmed.status).toBe("PAID");
+    expect(confirmed.env).toBe("LIVE");
+    expect(confirmed.environment).toBe("LIVE");
+
+    const inquiry = await request(`/rails/edfali/status/${reference}`);
+    const inquired = (await inquiry.json()) as { env: string; environment: string };
+    expect(inquired.env).toBe("LIVE");
+    expect(inquired.environment).toBe("LIVE");
+  });
+
   test("a wrong OTP keeps the attempt awaiting the customer", async () => {
     await request("/rails/edfali/verify", {
       method: "POST",

@@ -32,6 +32,7 @@ STATE="$ROOT/.local/codespaces"
 LOGS="$STATE/logs"
 PIDS="$STATE/pids"
 SECRETS_FILE="${CODESPACES_SECRETS_FILE:-$STATE/secrets.env}"
+KMS_FINGERPRINT_FILE="$STATE/kms.fingerprint"
 CERTS="$ROOT/core-back/certs"
 umask 077
 mkdir -p "$LOGS" "$PIDS"
@@ -60,6 +61,13 @@ SANDBOX_DB_NAME="${SANDBOX_DB_NAME:-${DB_NAME}_sandbox}"
 step() { printf '\n\033[1;36m== %s ==\033[0m\n' "$1"; }
 info() { printf '   %s\n' "$1"; }
 die() { printf '\033[1;31mERROR:\033[0m %s\n' "$1" >&2; exit 1; }
+# These names are interpolated into SQL identifiers and a DROP path; never
+# accept quotes, semicolons or whitespace from the environment.
+validate_db_name() {
+  [[ "$1" =~ ^[A-Za-z0-9_]+$ ]] || die "invalid database name '$1' (only letters, digits and underscore are allowed)"
+}
+validate_db_name "$DB_NAME"
+validate_db_name "$SANDBOX_DB_NAME"
 
 usage() { sed -n '3,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
@@ -93,7 +101,6 @@ profile_services() {
 ALL_SERVICES="core-back core-sandbox fake-rails-back admin-back merchant-back checkout-back admin-front merchant-front checkout-front fake-rails-front"
 
 # ── secrets ──────────────────────────────────────────────────────────────────────────────────
-NEW_KMS_KEY=0
 init_secrets() {
   command -v openssl >/dev/null 2>&1 || die "openssl is required to generate development secrets"
   touch "$SECRETS_FILE"; chmod 600 "$SECRETS_FILE"
@@ -104,6 +111,12 @@ init_secrets() {
   ensure_secret FAKE_RAILS_ADMIN_PASSWORD
   ensure_secret FAKE_RAILS_JWT_SECRET
   ensure_secret FAKE_RAILS_SEEDER_TOKEN
+  # The vault objects are encrypted with this KEK, not with the KMS key. A lost
+  # secrets file must not silently generate a new KEK over existing blobs.
+  if [[ -z "${OBJECT_STORAGE_KEK_KEYRING:-}" && -d "$STATE/object-storage" ]] \
+    && [[ -n "$(find "$STATE/object-storage" -type f -print -quit 2>/dev/null)" ]]; then
+    die "the object-storage directory holds data but no OBJECT_STORAGE_KEK_KEYRING was found in ${SECRETS_FILE#"$ROOT"/}. Restore the old secrets file, or remove ${STATE#"$ROOT"/}/object-storage and reset the development database."
+  fi
   ensure_secret OBJECT_STORAGE_KEK_KEYRING
   # Shared secret of the core <-> Fake Rails control plane (persona accounts, scenarios); mandatory in production mode.
   ensure_secret FAKE_RAILS_CONTROL_TOKEN
@@ -121,13 +134,24 @@ ensure_secret() {
       value="$(openssl rand -hex 24 | cut -c1-40)"
     fi
     printf -v "$name" '%s' "$value"
+  else
+    value="${!name}"
+  fi
+  # Persist ambient values too: `credentials` and `smoke` read this file, and a
+  # later run without the ambient variable must not generate a different key.
+  if ! grep -q "^${name}=" "$SECRETS_FILE" 2>/dev/null; then
     printf '%s=%q\n' "$name" "$value" >> "$SECRETS_FILE"
-    [[ "$name" == "KMS_MASTER_KEY" ]] && NEW_KMS_KEY=1
+    chmod 600 "$SECRETS_FILE"
   fi
   return 0
 }
 
-url_encode() { node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$1"; }
+kms_fingerprint() { printf '%s' "$1" | openssl dgst -sha256 | awk '{print $NF}'; }
+
+url_encode() {
+  # stdin, not argv: the database password must not appear in `ps`.
+  printf '%s' "$1" | node -e 'let s="";process.stdin.on("data",(d)=>s+=d).on("end",()=>process.stdout.write(encodeURIComponent(s)))'
+}
 
 build_database_url() {
   if [[ -n "${DATABASE_URL:-}" ]]; then return; fi
@@ -141,25 +165,92 @@ build_database_url() {
 # Sandbox plane database. The v38 migration stamps a fresh database LIVE unless the migration session
 # carries app.execution_plane=SANDBOX, so the migration URL passes that setting as a connection option.
 build_sandbox_database_url() {
-  if [[ -n "${SANDBOX_DATABASE_URL:-}" ]]; then return; fi
-  if [[ -n "$DB_PASSWORD" ]]; then
-    SANDBOX_DATABASE_URL="postgresql://${DB_USER}:$(url_encode "$DB_PASSWORD")@${DB_HOST}:${DB_PORT}/${SANDBOX_DB_NAME}"
-  else
-    SANDBOX_DATABASE_URL="postgresql://${DB_USER}@${DB_HOST}:${DB_PORT}/${SANDBOX_DB_NAME}"
+  if [[ -z "${SANDBOX_DATABASE_URL:-}" ]]; then
+    if [[ -n "$DB_PASSWORD" ]]; then
+      SANDBOX_DATABASE_URL="postgresql://${DB_USER}:$(url_encode "$DB_PASSWORD")@${DB_HOST}:${DB_PORT}/${SANDBOX_DB_NAME}"
+    else
+      SANDBOX_DATABASE_URL="postgresql://${DB_USER}@${DB_HOST}:${DB_PORT}/${SANDBOX_DB_NAME}"
+    fi
   fi
-  SANDBOX_MIGRATE_URL="${SANDBOX_DATABASE_URL}?options=-c%20app.execution_plane%3DSANDBOX"
+  # A supplied SANDBOX_DATABASE_URL must still carry the plane GUC for the
+  # migration session (otherwise v38 stamps the database LIVE). Keep an
+  # explicit options= parameter intact; otherwise add it.
+  if [[ -z "${SANDBOX_MIGRATE_URL:-}" ]]; then
+    if [[ "$SANDBOX_DATABASE_URL" == *"options="* ]]; then
+      SANDBOX_MIGRATE_URL="$SANDBOX_DATABASE_URL"
+    elif [[ "$SANDBOX_DATABASE_URL" == *"?"* ]]; then
+      SANDBOX_MIGRATE_URL="${SANDBOX_DATABASE_URL}&options=-c%20app.execution_plane%3DSANDBOX"
+    else
+      SANDBOX_MIGRATE_URL="${SANDBOX_DATABASE_URL}?options=-c%20app.execution_plane%3DSANDBOX"
+    fi
+  fi
+  SANDBOX_DB_NAME="$(SANDBOX_URL="$SANDBOX_DATABASE_URL" node -e 'try { const u = new URL(process.env.SANDBOX_URL); process.stdout.write(decodeURIComponent(u.pathname.replace(/^\/+/, ""))) } catch { process.exit(1) }')" \
+    || die "could not read the database name from SANDBOX_DATABASE_URL"
+  validate_db_name "$SANDBOX_DB_NAME"
 }
 
 psql_admin() { PGPASSWORD="$DB_PASSWORD" psql --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" "$@"; }
 
+# 0/1 without assuming the migration has created the tables yet. PostgreSQL
+# cannot short-circuit a CASE around a missing relation at plan time, so probe
+# to_regclass first and query the counts only when the table exists.
+database_seed_state() {
+  local db="$1" has
+  has="$(psql_admin --dbname="$db" -tAc "SELECT to_regclass('public.platform_settings') IS NOT NULL" 2>/dev/null | tr -d '[:space:]' || true)"
+  case "$has" in
+    t) ;;
+    f) printf '0'; return 0 ;;
+    *) return 1 ;;
+  esac
+  psql_admin --dbname="$db" -tAc 'SELECT CASE WHEN (SELECT count(*) FROM platform_settings) > 0 AND (SELECT count(*) FROM gateways) > 0 THEN 1 ELSE 0 END' 2>/dev/null | tr -d '[:space:]'
+}
+
 # ── process helpers ──────────────────────────────────────────────────────────────────────────
 pid_file() { printf '%s/%s.pid' "$PIDS" "$1"; }
+# Both cores run from core-back; every other service name is its directory.
+service_dir() {
+  case "$1" in
+    core-back|core-sandbox) printf 'core-back' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+# A pid file can survive a container restart, and the OS may reuse the pid for
+# an unrelated process. Never treat such a pid as one of our services: `stop`
+# would otherwise kill a stranger. Linux uses /proc, macOS uses lsof.
+pid_belongs_to_service() {
+  local name="$1" pid="$2" expected cwd
+  expected="$(cd "$ROOT/$(service_dir "$name")" 2>/dev/null && pwd -P || printf '%s' "$ROOT/$(service_dir "$name")")"
+  if [[ -d "/proc/$pid" ]]; then
+    cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
+  elif command -v lsof >/dev/null 2>&1; then
+    cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)"
+  else
+    # No portable way to inspect the process; keep the old (pid-only) behaviour.
+    return 0
+  fi
+  [[ -n "$cwd" && ( "$cwd" == "$expected" || "$cwd" == "$expected/"* ) ]]
+}
 is_running() {
-  local file pid
-  file="$(pid_file "$1")"
+  local name="$1" file pid
+  file="$(pid_file "$name")"
   [[ -f "$file" ]] || return 1
   pid="$(cat "$file" 2>/dev/null || true)"
-  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null || return 1
+  if pid_belongs_to_service "$name" "$pid"; then
+    return 0
+  fi
+  # Stale pid file pointing at an unrelated process: forget it, never signal it.
+  rm -f "$file"
+  return 1
+}
+
+port_in_use() { (exec 3<>"/dev/tcp/127.0.0.1/$1") >/dev/null 2>&1; }
+check_port_free() {
+  local name="$1" port="$2"
+  is_running "$name" && return 0
+  if port_in_use "$port"; then
+    die "port $port for '$name' is already in use by another process. Stop it, then retry (ports are defined at the top of this script)."
+  fi
 }
 
 # start_service <name> <cwd> <command...>   (environment is taken from the calling subshell)
@@ -242,7 +333,7 @@ cmd_start() {
     case "$1" in
       --rebuild) rebuild=1 ;;
       core|merchant-demo|full) profile="$1" ;;
-      --profile) shift; profile="${1:-}" ;;
+      --profile) shift; [[ -n "${1:-}" ]] || die "--profile needs a value (core, merchant-demo or full)"; profile="$1" ;;
       --profile=*) profile="${1#--profile=}" ;;
       *) die "unknown option '$1' (see: $0 help)" ;;
     esac
@@ -256,7 +347,7 @@ cmd_start() {
   fi
 
   step "Checking tools"
-  for tool in bun node openssl curl psql pg_isready; do
+  for tool in bun node openssl curl psql pg_isready cksum; do
     command -v "$tool" >/dev/null 2>&1 || die "'$tool' is not installed or not on PATH"
   done
   info "bun $(bun --version), node $(node --version)"
@@ -275,6 +366,22 @@ cmd_start() {
     info "created database ${DB_NAME}"
   fi
   info "server_version_num=$version_num, database ${DB_NAME} ready"
+
+  step "Port check"
+  # A foreign listener on one of these ports would otherwise make the service
+  # crash (EADDRINUSE) after migrations, seeds and builds.
+  want core-back && check_port_free core-back "$CORE_PORT"
+  want core-sandbox && check_port_free core-sandbox "$SANDBOX_CORE_PORT"
+  want fake-rails-back && check_port_free fake-rails-back "$FAKE_RAILS_BACK_PORT"
+  want admin-back && check_port_free admin-back "$ADMIN_BACK_PORT"
+  want merchant-back && check_port_free merchant-back "$MERCHANT_BACK_PORT"
+  want checkout-back && check_port_free checkout-back "$CHECKOUT_BACK_PORT"
+  want admin-front && check_port_free admin-front "$ADMIN_FRONT_PORT"
+  want merchant-front && check_port_free merchant-front "$MERCHANT_FRONT_PORT"
+  want checkout-front && check_port_free checkout-front "$CHECKOUT_FRONT_PORT"
+  want fake-rails-front && check_port_free fake-rails-front "$FAKE_RAILS_FRONT_PORT"
+  info "ports are free"
+
   if want core-sandbox; then
     build_sandbox_database_url
     if ! psql_admin --dbname=postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '${SANDBOX_DB_NAME}'" | grep -q 1; then
@@ -311,15 +418,35 @@ cmd_start() {
   (cd "$ROOT/core-back" && DATABASE_URL="$DATABASE_URL" bun run migrate-deploy 2>&1 | tail -2)
 
   # Every seed step is guarded and idempotent, so a failed or interrupted first run resumes cleanly and
-  # a normal restart never touches existing data.
-  local seeded dev_admin
-  seeded="$(psql_admin --dbname="$DB_NAME" -tAc 'SELECT count(*) FROM platform_settings' 2>/dev/null | tr -d '[:space:]' || echo 0)"
-  if [[ "${seeded:-0}" != "0" && "$NEW_KMS_KEY" == "1" ]]; then
-    die "The database already holds encrypted data but no KMS master key was found in ${SECRETS_FILE#"$ROOT"/}. Restore the old secrets file, or reset the development database with: $0 reset-db --yes-delete-dev-database"
+  # a normal restart never touches existing data. A completed baseline needs both the settings and the
+  # gateways/blueprints; settings alone can be a partial seed.
+  local seeded seeded_sandbox dev_admin
+  seeded="$(database_seed_state "$DB_NAME")"
+  [[ "$seeded" =~ ^[01]$ ]] || die "could not read the seed state from ${DB_NAME}; check the migrations and the database credentials"
+  seeded_sandbox=0
+  if want core-sandbox; then
+    # The sandbox database may not have been migrated yet on a first run.
+    seeded_sandbox="$(database_seed_state "$SANDBOX_DB_NAME")"
+    [[ "$seeded_sandbox" =~ ^[01]$ ]] || die "could not read the seed state from ${SANDBOX_DB_NAME}; check the sandbox migrations"
+  fi
+
+  # A key identity that is recorded independently of the secrets file. Without
+  # it, deleting secrets.env and rerunning would generate a new KMS key over
+  # already-encrypted rows and only warn on the first attempt.
+  local kms_fp
+  kms_fp="$(kms_fingerprint "$KMS_MASTER_KEY")"
+  if [[ "${seeded:-0}" != "0" || "${seeded_sandbox:-0}" != "0" ]]; then
+    [[ -f "$KMS_FINGERPRINT_FILE" ]] || die "The database holds encrypted data but ${KMS_FINGERPRINT_FILE#"$ROOT"/} is missing. Restore the original secrets file, or reset the development database with: $0 reset-db --yes-delete-dev-database"
+    [[ "$(cat "$KMS_FINGERPRINT_FILE")" == "$kms_fp" ]] || die "The KMS master key does not match the key that encrypted this database. Restore the original secrets file, or reset the development database with: $0 reset-db --yes-delete-dev-database"
+  else
+    printf '%s\n' "$kms_fp" > "$KMS_FINGERPRINT_FILE"
+    chmod 600 "$KMS_FINGERPRINT_FILE"
   fi
   step "Seed data (only what is missing)"
-  if [[ "${seeded:-0}" == "0" ]]; then
+  local seed_marker="$STATE/seed.done"
+  if [[ "${seeded:-0}" == "0" || ! -f "$seed_marker" ]]; then
     core_env_run -- bun run db-seed >/dev/null
+    : > "$seed_marker"
     info "baseline seed applied (chart of accounts, blueprints, platform settings)"
   else
     info "baseline seed already present"
@@ -356,9 +483,12 @@ cmd_start() {
     local sandbox_plane sandbox_seeded
     sandbox_plane="$(psql_admin --dbname="$SANDBOX_DB_NAME" -tAc 'SELECT plane FROM system_execution_plane WHERE id = 1' 2>/dev/null | tr -d '[:space:]' || true)"
     [[ "$sandbox_plane" == "SANDBOX" ]] || die "${SANDBOX_DB_NAME} is stamped '${sandbox_plane:-unknown}', not SANDBOX. Drop it (./scripts/codespaces-start.sh reset-db --yes-delete-dev-database) so it is migrated with the sandbox plane setting."
-    sandbox_seeded="$(psql_admin --dbname="$SANDBOX_DB_NAME" -tAc 'SELECT count(*) FROM platform_settings' 2>/dev/null | tr -d '[:space:]' || echo 0)"
-    if [[ "${sandbox_seeded:-0}" == "0" ]]; then
+    sandbox_seeded="$(psql_admin --dbname="$SANDBOX_DB_NAME" -tAc 'SELECT CASE WHEN (SELECT count(*) FROM platform_settings) > 0 AND (SELECT count(*) FROM gateways) > 0 THEN 1 ELSE 0 END' 2>/dev/null | tr -d '[:space:]' || true)"
+    [[ "$sandbox_seeded" =~ ^[01]$ ]] || die "could not read the sandbox seed state from ${SANDBOX_DB_NAME}"
+    local sandbox_seed_marker="$STATE/seed.sandbox.done"
+    if [[ "${sandbox_seeded:-0}" == "0" || ! -f "$sandbox_seed_marker" ]]; then
       core_env_run DATABASE_URL="$SANDBOX_DATABASE_URL" EXECUTION_PLANE=SANDBOX SANDBOX_DB_NAME="$SANDBOX_DB_NAME" -- bun run db-seed >/dev/null
+      : > "$sandbox_seed_marker"
       info "sandbox baseline seed applied"
     else
       info "sandbox baseline seed already present"
@@ -407,6 +537,8 @@ cmd_start() {
 
   step "Starting services ($profile)"
   export_edge_env() { # name port cert  (call inside a subshell)
+    # Never let an ambient secret leak into an edge process.
+    unset DATABASE_URL KMS_MASTER_KEY DB_PASSWORD FAKE_RAILS_SEEDER_TOKEN FAKE_RAILS_CONTROL_TOKEN OBJECT_STORAGE_KEK_KEYRING
     export NODE_ENV=production PORT="$2" BIND_HOST=127.0.0.1 LOG_LEVEL=info
     export CORE_BACK_URL="https://127.0.0.1:$CORE_PORT"
     # `sbx_*` links and SANDBOX webhooks are routed to the Sandbox plane core (never silently to Live).
@@ -419,14 +551,19 @@ cmd_start() {
       export NODE_ENV=production DATABASE_URL KMS_MASTER_KEY PORT=$CORE_PORT HOST=127.0.0.1 LOG_LEVEL=info
       export MTLS_CA_CERT_PATH="$CERTS/internal-ca.crt" MTLS_SERVER_CERT_PATH="$CERTS/core-back.crt" MTLS_SERVER_KEY_PATH="$CERTS/core-back.key"
       export WORKER_ENABLED=true WORKER_BACKGROUND_JOBS_ENABLED=true WORKER_RETENTION_ENABLED=true
-      export OBJECT_STORAGE_KEK_KEYRING OBJECT_STORAGE_ROOT_DIR="$STATE/object-storage"; mkdir -p "$OBJECT_STORAGE_ROOT_DIR"
+      # The KEK is required for boot in production mode; the launcher does not
+      # start the shared object-storage daemon, so object operations fail
+      # closed. Use the real deploy for KYB/report-asset flows.
+      export OBJECT_STORAGE_KEK_KEYRING
       export FAKE_RAILS_ENABLED=true FAKE_RAILS_ALLOW_IN_PRODUCTION=true ALLOW_FAKE_RAILS_HOSTS=true
       # Development deployment only: the emulator normally belongs to the Sandbox plane (PlaneFenceGuard).
       export EXECUTION_PLANE=LIVE PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE=true
       export FAKE_RAILS_ALLOWED_HOSTS="127.0.0.1,localhost" FAKE_RAILS_PUBLIC_BASE_URL="http://127.0.0.1:$FAKE_RAILS_BACK_PORT"
       export FAKE_RAILS_SEEDER_TOKEN
-      # Both cores share the object-storage vault: only one plane may sweep orphans.
-      if want core-sandbox; then export OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED=false; fi
+      # The launcher has no shared object-storage daemon and the Live core may
+      # start without the Sandbox core while both use the same default root:
+      # never let a plane-local orphan sweep touch a shared vault.
+      export OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED=false
       [[ -n "${REDIS_URL:-}" ]] && export REDIS_URL
       start_service core-back "$ROOT/core-back" bun run index.ts
     )
@@ -440,7 +577,7 @@ cmd_start() {
       export NODE_ENV=production DATABASE_URL="$SANDBOX_DATABASE_URL" KMS_MASTER_KEY PORT=$SANDBOX_CORE_PORT HOST=127.0.0.1 LOG_LEVEL=info
       export MTLS_CA_CERT_PATH="$CERTS/internal-ca.crt" MTLS_SERVER_CERT_PATH="$CERTS/core-back.crt" MTLS_SERVER_KEY_PATH="$CERTS/core-back.key"
       export WORKER_ENABLED=true WORKER_BACKGROUND_JOBS_ENABLED=true WORKER_RETENTION_ENABLED=true NODE_ID=sandbox-1
-      export OBJECT_STORAGE_KEK_KEYRING OBJECT_STORAGE_ROOT_DIR="$STATE/object-storage" OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED=false
+      export OBJECT_STORAGE_KEK_KEYRING OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED=false
       export EXECUTION_PLANE=SANDBOX SANDBOX_DB_NAME="$SANDBOX_DB_NAME" PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE=false
       export FAKE_RAILS_ENABLED=true FAKE_RAILS_ALLOW_IN_PRODUCTION=true ALLOW_FAKE_RAILS_HOSTS=true
       export FAKE_RAILS_ALLOWED_HOSTS="127.0.0.1,localhost" FAKE_RAILS_PUBLIC_BASE_URL="http://127.0.0.1:$FAKE_RAILS_BACK_PORT"
@@ -487,6 +624,7 @@ cmd_start() {
   start_front() { # name port api-port
     local name="$1" port="$2" api="$3"
     (
+      unset DATABASE_URL KMS_MASTER_KEY DB_PASSWORD FAKE_RAILS_SEEDER_TOKEN FAKE_RAILS_CONTROL_TOKEN OBJECT_STORAGE_KEK_KEYRING
       export NODE_ENV=production VITE_API_URL="http://127.0.0.1:$api" VITE_FAKE_RAILS_API="http://127.0.0.1:$api"
       # Vite's host check: only this portal's own forwarded host (plus loopback) may be served.
       export VITE_MY_TAILSCALE="$(public_host "$port")"
@@ -579,7 +717,15 @@ TXT
 
 cmd_smoke() {
   command -v bun >/dev/null 2>&1 || die "bun is required for the smoke test"
-  CODESPACES_SECRETS_FILE="$SECRETS_FILE" bun "$ROOT/scripts/codespaces-smoke.ts"
+  # Pass the launcher's effective ports explicitly: a caller-exported
+  # MERCHANT_BACK_PORT (or a relabelled copy of this script) must not make the
+  # smoke test probe a different stack than the one this script started.
+  CODESPACES_SECRETS_FILE="$SECRETS_FILE" \
+    CORE_PORT="$CORE_PORT" SANDBOX_CORE_PORT="$SANDBOX_CORE_PORT" \
+    MERCHANT_BACK_PORT="$MERCHANT_BACK_PORT" CHECKOUT_BACK_PORT="$CHECKOUT_BACK_PORT" \
+    FAKE_RAILS_BACK_PORT="$FAKE_RAILS_BACK_PORT" MERCHANT_FRONT_PORT="$MERCHANT_FRONT_PORT" \
+    CHECKOUT_FRONT_PORT="$CHECKOUT_FRONT_PORT" FAKE_RAILS_FRONT_PORT="$FAKE_RAILS_FRONT_PORT" \
+    bun "$ROOT/scripts/codespaces-smoke.ts"
 }
 
 cmd_logs() {
@@ -590,13 +736,18 @@ cmd_logs() {
 
 cmd_reset_db() {
   [[ "${1:-}" == "--yes-delete-dev-database" ]] || die "this DROPS the development database '${DB_NAME}' and its seeds. Re-run with --yes-delete-dev-database to confirm."
-  [[ "$DB_NAME" != *_test ]] || die "refusing to reset a test database from this script"
+  [[ "$DB_NAME" != *_test && "$SANDBOX_DB_NAME" != *_test ]] || die "refusing to reset a test database from this script"
   cmd_stop
   build_database_url
+  build_sandbox_database_url
   psql_admin --dbname=postgres -c "DROP DATABASE IF EXISTS \"${DB_NAME}\" WITH (FORCE)" >/dev/null
   psql_admin --dbname=postgres -c "DROP DATABASE IF EXISTS \"${SANDBOX_DB_NAME}\" WITH (FORCE)" >/dev/null
-  rm -f "$SECRETS_FILE" "$STATE"/*.stamp
-  info "dropped ${DB_NAME} and ${SANDBOX_DB_NAME} and removed the generated secrets; the next start creates and seeds everything again"
+  rm -f "$SECRETS_FILE" "$KMS_FINGERPRINT_FILE" "$STATE"/*.stamp "$STATE"/seed*.done
+  # These are encrypted/stateful and belong to the deleted database. The KEK
+  # and the Fake Rails state would otherwise be silently reused (or become
+  # undecryptable) by the next seed.
+  rm -rf "$STATE/object-storage" "$STATE/fake-rails-data"
+  info "dropped ${DB_NAME} and ${SANDBOX_DB_NAME}, removed the generated secrets and the object/Fake Rails state; the next start creates and seeds everything again"
 }
 
 main() {

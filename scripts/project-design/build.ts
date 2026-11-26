@@ -259,7 +259,7 @@ const blueprintGroups: Array<{ path: string; ids: string[] }> = [
   { path: "checkout-front/blueprint.md", ids: ["checkout-ui.flow", "checkout-ui.help"] },
   { path: "fake-rails-back/blueprint.md", ids: ["fake-rails.backend", "fake-rails.protocol", "fake-rails.chaos", "fake-rails.integration"] },
   { path: "fake-rails-front/blueprint.md", ids: ["fake-rails.chaos", "fake-rails.integration"] },
-  { path: "deploy/blueprint.md", ids: ["deploy.topology", "deploy.planner", "deploy.pki", "deploy.firewall", "deploy.pipeline", "deploy.storage", "deploy.backup", "deploy.health"] },
+  { path: "deploy/blueprint.md", ids: ["deploy.topology", "deploy.planner", "deploy.pki", "deploy.firewall", "deploy.pipeline", "deploy.storage", "deploy.backup", "deploy.health", "deploy.codespaces"] },
   { path: "deploy/backup-daemon/blueprint.md", ids: ["deploy.backup"] },
 ];
 

@@ -14,4 +14,5 @@ RUN apt-get update \
 USER vscode
 ENV BUN_INSTALL=/home/vscode/.bun
 ENV PATH=/home/vscode/.bun/bin:${PATH}
-RUN curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"
+RUN bash -o pipefail -c 'curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"' \
+ && /home/vscode/.bun/bin/bun --version

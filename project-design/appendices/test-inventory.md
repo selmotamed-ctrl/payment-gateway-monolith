@@ -80,12 +80,12 @@
 | `core-back/test/engine/governance.test.ts` | 262 | 15 |
 | `core-back/test/engine/guards-and-workers.test.ts` | 254 | 21 |
 | `core-back/test/engine/ledger.test.ts` | 558 | 33 |
-| `core-back/test/engine/multipart-and-content-type.test.ts` | 90 | 5 |
+| `core-back/test/engine/multipart-and-content-type.test.ts` | 181 | 9 |
 | `core-back/test/engine/operator-cases-and-broadcast.test.ts` | 208 | 4 |
 | `core-back/test/engine/pre-initiate.test.ts` | 164 | 5 |
 | `core-back/test/engine/repositories.test.ts` | 256 | 13 |
 | `core-back/test/engine/shard-scaler.test.ts` | 611 | 57 |
-| `core-back/test/engine/step-executor.test.ts` | 325 | 19 |
+| `core-back/test/engine/step-executor.test.ts` | 353 | 20 |
 | `core-back/test/engine/suspense-settlement.test.ts` | 554 | 9 |
 | `core-back/test/engine/transform-pipeline.test.ts` | 225 | 33 |
 | `core-back/test/engine/visible-rails.test.ts` | 307 | 15 |
@@ -236,7 +236,7 @@
 | `core-back/test/security-regressions/m9-m12-upload-kyb.test.ts` | 121 | 7 |
 | `core-back/test/security-regressions/review-2026-11-16.test.ts` | 195 | 16 |
 | `core-back/test/session-revocation-durability.test.ts` | 64 | 4 |
-| `core-back/test/setup.ts` | 39 | 0 |
+| `core-back/test/setup.ts` | 45 | 0 |
 | `core-back/test/spec-importer.test.ts` | 268 | 25 |
 | `core-back/test/spec-materializer.test.ts` | 211 | 4 |
 | `core-back/test/staff-invitation.test.ts` | 219 | 10 |
@@ -311,7 +311,7 @@
 | `checkout-back/test/sandbox-routing.test.ts` | 54 | 2 |
 | `checkout-back/test/security-regressions.test.ts` | 231 | 13 |
 | `fake-rails-back/test/accountsAndInspector.test.ts` | 318 | 8 |
-| `fake-rails-back/test/api.test.ts` | 373 | 14 |
+| `fake-rails-back/test/api.test.ts` | 431 | 16 |
 | `fake-rails-back/test/chaos.test.ts` | 66 | 7 |
 | `fake-rails-back/test/crypto.test.ts` | 53 | 5 |
 | `fake-rails-back/test/exhaustive/05-api-matrix/fake-rails-portal-and-chaos-api.test.ts` | 364 | 30 |
@@ -458,4 +458,4 @@
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
 - Total files: **452**
-- Total literal test declarations: **4458**
+- Total literal test declarations: **4465**

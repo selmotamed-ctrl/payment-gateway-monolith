@@ -28,6 +28,8 @@ const awaitingBody = (context: RailRequestContext, extra: Record<string, unknown
       status: "AWAITING_CUSTOMER",
       amount: context.transaction.normalized_amount_lyd,
       currency: context.transaction.currency,
+      env: context.transaction.env,
+      environment: context.transaction.env,
       // The tester portal shows the OTP; it is also returned on the sandbox
       // wire so an automated sandbox runner can complete the flow.
       otp: context.transaction.expected_otp,
@@ -97,6 +99,8 @@ export const redirectInitiate: RailHandler = (context) => {
       provider_reference: context.transaction.provider_reference,
       transaction_id: context.transaction.provider_reference,
       status: "AWAITING_CUSTOMER",
+      env: context.transaction.env,
+      environment: context.transaction.env,
       redirect_url: redirectUrl,
       return_url: context.transaction.return_url,
       cancel_url: context.transaction.cancel_url,
@@ -125,6 +129,10 @@ export const inquiry: RailHandler = (context) => {
       },
       amount: context.transaction.settled_amount_lyd ?? context.transaction.normalized_amount_lyd,
       currency: context.transaction.currency,
+      // Same trusted-success fact as the confirm/webhook bodies: an inquiry
+      // that omits it can never settle a redirect/poll attempt.
+      env: context.transaction.env,
+      environment: context.transaction.env,
       ActionCode: paid ? "00" : status === "FAILED" ? "05" : "09",
     },
   };

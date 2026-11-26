@@ -1,5 +1,9 @@
 # Keep shell scripts, the dev container and the generated design docs on LF even when a Windows
 # checkout has core.autocrlf=true (CRLF breaks bash scripts and the project-design generator).
 *.sh text eol=lf
+gradlew text eol=lf
+scripts/project-design/build.ts text eol=lf
 .devcontainer/** text eol=lf
 project-design/** text eol=lf
+# Generated workspace blueprints live outside project-design/.
+blueprint.md text eol=lf

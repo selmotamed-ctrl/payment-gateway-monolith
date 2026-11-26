@@ -22,7 +22,9 @@ services:
       DB_USER: postgres
       DB_NAME: payment_gateway_monolith
       REDIS_URL: redis://redis:6379
-      # Isolated database for `bun test` (never the development database)
+      # Isolated database for `bun test` (never the development database).
+      # test/setup.ts prefers this over DATABASE_URL, so the launcher can keep
+      # using the development database in the same container.
       POSTGRES_TEST_DATABASE_URL: postgresql://postgres@db:5432/payment_gateway_monolith_test
       STORAGE_TEST_DATABASE_URL: postgresql://postgres@db:5432/payment_gateway_monolith_test
       EXHAUSTIVE_DATABASE_URL: postgresql://postgres@db:5432/payment_gateway_monolith_test

@@ -34,6 +34,19 @@ gen_secret() { openssl rand -hex 24 | cut -c1-40; }
 # create-dev-users enforces a password policy (12+ chars with lowercase, uppercase and a digit), which a
 # plain hex string never satisfies; keep 128 bits of randomness and add the required character classes.
 gen_password() { printf 'Dp1-%s' "$(openssl rand -hex 16)"; }
+password_policy_ok() {
+  [[ ${#1} -ge 12 && "$1" == *[a-z]* && "$1" == *[A-Z]* && "$1" == *[0-9]* ]]
+}
+rewrite_secret() { # name value
+  local name="$1" value="$2" line tmp
+  tmp="$(mktemp "${SECRETS_FILE}.XXXXXX")"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" == "$name="* ]] || printf '%s\n' "$line"
+  done < "$SECRETS_FILE" > "$tmp"
+  printf '%s=%q\n' "$name" "$value" >> "$tmp"
+  mv "$tmp" "$SECRETS_FILE"
+  chmod 600 "$SECRETS_FILE"
+}
 ensure_secret() {
   local name="$1"
   if [[ -z "${!name:-}" ]]; then
@@ -91,6 +104,20 @@ DATABASE_URL="${DATABASE_URL:-postgresql://${DB_USER}:$(url_encode "$DB_PASSWORD
 
 ensure_secret KMS_MASTER_KEY
 ensure_secret DEV_PASSWORD
+# An existing .local/secrets.env may still hold the old hex password that the
+# create-dev-users policy rejects. Regenerate it once instead of failing later.
+if ! password_policy_ok "$DEV_PASSWORD"; then
+  echo "The stored DEV_PASSWORD does not satisfy the create-dev-users policy; generating a new one." >&2
+  DEV_PASSWORD="$(gen_password)"
+  rewrite_secret DEV_PASSWORD "$DEV_PASSWORD"
+fi
+# A lost KEK would make every encrypted object unreadable; refuse to generate a
+# new one over existing data rather than silently orphaning the vault.
+if [[ -z "${OBJECT_STORAGE_KEK_KEYRING:-}" && -d "$LOCAL/object-storage" ]] \
+  && [[ -n "$(find "$LOCAL/object-storage" -type f -print -quit 2>/dev/null)" ]]; then
+  echo "Object storage contains data but no OBJECT_STORAGE_KEK_KEYRING is available in ${SECRETS_FILE}. Restore it, or remove ${LOCAL}/object-storage and re-seed." >&2
+  exit 1
+fi
 # core-back refuses the development fallback KEK when NODE_ENV=production (see objectStorageSdk/crypto.ts).
 ensure_secret OBJECT_STORAGE_KEK_KEYRING
 FAKE_RAILS_BASE_URL="${FAKE_RAILS_BASE_URL:-$(deploy_value FAKE_RAILS_PUBLIC_BASE_URL http://127.0.0.1:4104)}"
@@ -186,8 +213,9 @@ const commonCore = {
   NODE_ENV: "production",
   DATABASE_URL: "$DATABASE_URL",
   KMS_MASTER_KEY: "$KMS_MASTER_KEY",
+  // Required for boot in production mode. This local PM2 stack does not run the
+  // shared object-storage daemon, so object operations fail closed.
   OBJECT_STORAGE_KEK_KEYRING: "$OBJECT_STORAGE_KEK_KEYRING",
-  OBJECT_STORAGE_ROOT_DIR: path.join(root, ".local/object-storage"),
   MTLS_CA_CERT_PATH: path.join(core, "certs/internal-ca.crt"),
   MTLS_SERVER_CERT_PATH: path.join(core, "certs/core-back.crt"),
   MTLS_SERVER_KEY_PATH: path.join(core, "certs/core-back.key"),

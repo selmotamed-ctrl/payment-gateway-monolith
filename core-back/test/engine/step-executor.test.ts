@@ -187,6 +187,34 @@ describe("StepExecutor step types", () => {
     expect(result.status).toBe("SUCCEEDED");
   });
 
+  test("a JSON GET carries no body and no content-type", async () => {
+    let captured: RequestInit | undefined;
+    const executor = new StepExecutor({
+      dnsLookup: async () => ["93.184.216.34"],
+      fetch: (async (_url: string, init: RequestInit) => {
+        captured = init;
+        return jsonResponse({ ok: true });
+      }) as unknown as typeof fetch,
+    });
+    const step: FlowStep = {
+      id: "http-get-json",
+      type: "HTTP",
+      method: "GET",
+      url_template: "https://gateway.example.com/ping",
+      content_type: "application/json",
+      parameters: [{
+        place: "BODY",
+        key: "amount",
+        source: "CONSTANT",
+        constant_value: "1.00",
+      }],
+    };
+    const result = await executor.execute(step);
+    expect(result.status).toBe("SUCCEEDED");
+    expect(captured?.body).toBeUndefined();
+    expect(new Headers(captured?.headers).get("content-type")).toBeNull();
+  });
+
   test("rejects a CRLF header injection attempt", async () => {
     const executor = new StepExecutor({
       dnsLookup: async () => ["93.184.216.34"],

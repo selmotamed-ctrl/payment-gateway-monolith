@@ -179,7 +179,8 @@ jobs:
 
   # One-command Codespaces launcher: validate the dev container files and really boot the `core`
   # profile (PostgreSQL 18, mTLS certificates, migrations, seeds, core-back over mTLS) so the
-  # Codespaces path cannot silently rot. The full portal profiles are covered by the jobs above.
+  # Codespaces path cannot silently rot. The portal profiles are not booted here; run
+  # `./scripts/codespaces-start.sh smoke` manually in a Codespace (TRACKER GAP-079).
   codespaces:
     runs-on: ubuntu-latest
     timeout-minutes: 25

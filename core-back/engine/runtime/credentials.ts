@@ -49,6 +49,14 @@ export const resolveCredentialValues = async (
     }
     values[entry.key] = value;
     values[entry.key.toLowerCase()] = value;
+    // Crypto profiles address a credential as `CREDENTIAL.<Name>`, while the
+    // compute registry reads the bare `<Name>` (e.g. Moamalat's
+    // `CREDENTIAL.MerchantSecretKey`). Keep both spellings resolvable.
+    if (entry.key.toUpperCase().startsWith("CREDENTIAL.")) {
+      const bare = entry.key.slice("CREDENTIAL.".length);
+      values[bare] = value;
+      values[bare.toLowerCase()] = value;
+    }
   }
   return values;
 };

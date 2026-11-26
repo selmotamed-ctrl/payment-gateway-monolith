@@ -665,7 +665,7 @@ Found by driving a real Edfali (OTP-pull, `multipart/form-data`) payment through
 2. `ApiConsumer.send` copied any object body with `{ ...body }`, which turns a `FormData` into `{}`.
 3. `ApiConsumer.serializeBody` JSON-stringified whatever was not a string/`URLSearchParams`/`ArrayBuffer`.
 
-Fixes: `toMimeContentType()` in `engine/runtime/flowProvider.ts`; `FormData` excluded from the spread and returned as-is (with the `Content-Type` header removed) in `ApiConsumer`. Pinned by `core-back/test/engine/multipart-and-content-type.test.ts`. Fake Rails was changed alongside so the loop closes (reference keys `invoice_no`/`merchantRef`, `env` echoed in success bodies, see `fake-rails.integration`).
+Fixes: `toMimeContentType()` in `engine/runtime/flowProvider.ts`; `FormData` excluded from the spread and returned as-is (with the `Content-Type` header removed) in `ApiConsumer`. Pinned by `core-back/test/engine/multipart-and-content-type.test.ts`, which now also exercises `PrismaFlowProvider.getSteps` (the actual call site). Fake Rails was changed alongside so the loop closes (reference keys `invoice_no`/`merchantRef`; `env` echoed in success **and inquiry** bodies; the core sends the attempt environment on the Fake-Rails-only `x-pg-environment` header, see `fake-rails.integration`).
 
 ## 9. Source references
 

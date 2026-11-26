@@ -755,7 +755,10 @@ export class StepExecutor {
       if (parameter.place === "HEADERS") {
         const text = String(value);
         assertNoControlCharacters(text, "header");
-        headers[parameter.key] = text;
+        // HTTP header names are case-insensitive; normalising lets the body
+        // builder see an explicit Content-Type parameter instead of replacing
+        // it with a second, differently-cased header.
+        headers[parameter.key.toLowerCase()] = text;
       } else if (parameter.place === "QUERY") {
         mergeMaps(query, sourceMap(parameter, value) as Record<string, QueryValue>);
       } else if (parameter.place === "PATH") {
@@ -785,18 +788,22 @@ export class StepExecutor {
     }
 
     let requestBody: FetchBody | undefined;
-    if (step.content_type?.includes("json")) {
+    // A GET/DELETE carries no body (ApiConsumer/fetch drop it). Setting a
+    // content-type header without a body makes strict gateways and
+    // header-inclusive signature verifiers reject an otherwise valid request.
+    const sendsBody = (step.method ?? "POST") !== "GET" && (step.method ?? "POST") !== "DELETE";
+    if (sendsBody && step.content_type?.includes("json")) {
       requestBody = JSON.stringify(body ?? {});
-      headers["content-type"] = step.content_type;
-    } else if (step.content_type?.includes("x-www-form-urlencoded")) {
+      headers["content-type"] = headers["content-type"] ?? step.content_type;
+    } else if (sendsBody && step.content_type?.includes("x-www-form-urlencoded")) {
       requestBody = new URLSearchParams(Object.fromEntries(Object.entries(form).map(([key, value]) => [key, String(value)])));
-      headers["content-type"] = step.content_type;
-    } else if (step.content_type?.includes("multipart")) {
+      headers["content-type"] = headers["content-type"] ?? step.content_type;
+    } else if (sendsBody && step.content_type?.includes("multipart")) {
       requestBody = multipart;
-    } else if (step.content_type?.includes("xml")) {
+    } else if (sendsBody && step.content_type?.includes("xml")) {
       requestBody = xml;
-      headers["content-type"] = step.content_type;
-    } else if (body !== undefined) {
+      headers["content-type"] = headers["content-type"] ?? step.content_type;
+    } else if (sendsBody && body !== undefined) {
       requestBody = JSON.stringify(body);
       headers["content-type"] = headers["content-type"] ?? "application/json";
     }
@@ -823,8 +830,13 @@ export class StepExecutor {
       const attempt = (context.attempt ?? {}) as Record<string, unknown>;
       const merchantId = String(attempt.merchantId ?? attempt.merchant_id ?? "");
       const credentialSetId = String(attempt.credentialSetId ?? "");
+      const environment = String(attempt.env ?? "").toUpperCase();
       if (/^[0-9a-f-]{36}$/i.test(merchantId)) headers["x-pg-merchant-id"] = merchantId;
       if (/^[0-9a-f-]{36}$/i.test(credentialSetId)) headers["x-pg-credential-set-id"] = credentialSetId;
+      // The emulator persists this and echoes it in every success/inquiry body;
+      // without it a LIVE attempt is recorded as SANDBOX and the engine's
+      // trusted-success environment fact (and the webhook env path) is wrong.
+      if (environment === "LIVE" || environment === "SANDBOX") headers["x-pg-environment"] = environment;
     }
     const url = compileUrl(step.url_template, query, {
       allowedHosts: this.options.allowedHosts,
@@ -966,9 +978,17 @@ export class StepExecutor {
     const abort = (): void => controller.abort(external?.reason);
     external?.addEventListener("abort", abort, { once: true });
     try {
+      const directHeaders = { ...request.headers };
+      if (typeof FormData !== "undefined" && request.body instanceof FormData) {
+        // The direct path has no ApiConsumer to add the multipart boundary;
+        // a stale boundary-less header would hide every field.
+        for (const key of Object.keys(directHeaders)) {
+          if (key.toLowerCase() === "content-type") delete directHeaders[key];
+        }
+      }
       const init: RequestInit = {
         method: request.method,
-        headers: request.headers,
+        headers: directHeaders,
         redirect: "manual",
         signal: controller.signal,
       };

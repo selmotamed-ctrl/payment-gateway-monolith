@@ -119,7 +119,7 @@ The repository ships a dev container (`.devcontainer/`) with PostgreSQL 18, Bun 
 ./scripts/codespaces-start.sh stop
 ```
 
-It generates every secret and the mTLS certificates into git-ignored folders (`.local/codespaces/`, `core-back/certs/`), migrates and seeds the databases, creates development users and starts the services of the chosen profile (`core`, `merchant-demo`, `full`). Only the portals and the edge APIs are forwarded; the core mTLS API (4000/4005) is never forwarded. Re-running it never resets data; `reset-db --yes-delete-dev-database` is the only destructive command and must be typed explicitly. Full guide, port-visibility table and limits: [`project-design/parts/07-deploy/08-codespaces.md`](project-design/parts/07-deploy/08-codespaces.md).
+It generates every secret and the mTLS certificates into git-ignored folders (`.local/codespaces/`, `core-back/certs/`), migrates and seeds the databases, creates development users and starts the services of the chosen profile (`core`, `merchant-demo`, `full`). Only the portals and the merchant edge API (4102) are forwarded; the core mTLS API (4000/4005) and the admin/checkout edges stay private behind the Vite preview proxy. Re-running it does not drop or re-seed the database. It does re-point the emulated gateways/widgets/webhooks at the current Codespace URL and refresh their derived crypto-profile secrets when that URL or the seeder changes; `reset-db --yes-delete-dev-database` is the only command that drops the database and must be typed explicitly. Full guide, port-visibility table and limits: [`project-design/parts/07-deploy/08-codespaces.md`](project-design/parts/07-deploy/08-codespaces.md).
 
 ### 2. Core service only
 

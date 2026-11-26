@@ -516,6 +516,8 @@ export class ApiConsumer {
     if (rawBody !== undefined && rawBody !== null && typeof rawBody === "object"
       && !(rawBody instanceof URLSearchParams) && !(rawBody instanceof ArrayBuffer)
       && !(typeof FormData !== "undefined" && rawBody instanceof FormData)
+      && !(typeof Blob !== "undefined" && rawBody instanceof Blob)
+      && !Array.isArray(rawBody)
       && !ArrayBuffer.isView(rawBody)) {
       rawBody = { ...(rawBody as Record<string, unknown>) };
     }
@@ -616,6 +618,11 @@ export class ApiConsumer {
     if (ArrayBuffer.isView(body)) {
       return body as FetchBody;
     }
+    if (typeof Blob !== "undefined" && body instanceof Blob) {
+      // A Blob has no own enumerable fields either; spreading it produced "{}".
+      // fetch sets `content-type` from the Blob type when the caller did not.
+      return body as FetchBody;
+    }
     if (typeof FormData !== "undefined" && body instanceof FormData) {
       // The multipart boundary only exists once fetch serialises the form: an explicit
       // `Content-Type: multipart/form-data` without it makes the gateway reject (or ignore) the body, and
@@ -649,6 +656,12 @@ export class ApiConsumer {
       if (apply === "QUERY") {
         url.searchParams.set(this.config.auth.query_name ?? "api_key", value);
       } else if (apply === "BODY") {
+        if (typeof FormData !== "undefined" && body instanceof FormData) {
+          throw new Error("API_KEY body authentication cannot add a field to a multipart FormData body; use a header or query parameter");
+        }
+        if (typeof Blob !== "undefined" && body instanceof Blob) {
+          throw new Error("API_KEY body authentication cannot add a field to a Blob body");
+        }
         if (!body || typeof body !== "object" || Array.isArray(body)) {
           throw new Error("API_KEY body authentication requires an object body");
         }
@@ -680,6 +693,12 @@ export class ApiConsumer {
       const secret = firstCredential(this.credentials, ["secret", "signingSecret", "signatureSecret", "apiSecret"]);
       if (!secret) {
         throw new Error("Request signature secret is missing");
+      }
+      if (typeof FormData !== "undefined" && body instanceof FormData) {
+        throw new Error("REQUEST_SIGNATURE cannot sign a multipart FormData body; send a pre-serialized payload or use a header-based signature");
+      }
+      if (typeof Blob !== "undefined" && body instanceof Blob) {
+        throw new Error("REQUEST_SIGNATURE cannot sign a Blob body; send a pre-serialized payload");
       }
       const timestamp = String(Math.floor(Date.now() / 1000));
       const signedPayload = payloadToString(body);

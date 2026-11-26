@@ -147,7 +147,7 @@ const updateCredentialSecrets = async (): Promise<number> => {
   if (!FAKE_RAILS_SEEDER_TOKEN) return 0;
   const vault = new Vault();
   const versions = await client.gatewayVersion.findMany({
-    include: { gateway: true, cryptoProfiles: true },
+    include: { gateway: true, cryptoProfiles: true, auth: true },
   });
   let updated = 0;
   for (const version of versions) {
@@ -161,12 +161,18 @@ const updateCredentialSecrets = async (): Promise<number> => {
         : [];
       let changed = false;
       const next = [];
+      const authForEnv = version.auth.find((entry) => entry.env === set.env) ?? version.auth[0];
+      // MUTUAL_TLS needs a client certificate, which this demo manifest cannot
+      // invent; leave those sets empty rather than pretending the credentials
+      // are complete.
+      const requiresMtls = String(authForEnv?.method ?? "") === "MUTUAL_TLS";
 
       // A freshly seeded platform set has no entries (real secrets are only written through the credential
       // API), so no emulated gateway could authenticate. The emulator does not check key values, so create
       // a demo manifest of well-known entry names, with secrets derived from the seeder token. Existing
-      // entries are never replaced, and gateways that need real certificates (MUTUAL_TLS) stay unconfigured.
-      if (entries.length === 0 && ["VERIFIED", "UNTESTED"].includes(String(set.status))) {
+      // entries are not replaced here; the crypto-profile refresh below still refreshes its own keys.
+      if (!requiresMtls && entries.length === 0 && ["VERIFIED", "UNTESTED"].includes(String(set.status))) {
+        const demoKeys = new Set<string>(DEMO_CREDENTIAL_KEYS);
         for (const key of DEMO_CREDENTIAL_KEYS) {
           const value = await vault.encryptSecret(deriveFakeRailsSecret(code, `demo:${key}`), "credential-set");
           next.push({ key, type: "HEADER", value, isSecret: true, secretVersion: 1 });
@@ -174,6 +180,7 @@ const updateCredentialSecrets = async (): Promise<number> => {
         // Signing / webhook secrets referenced by the gateway's crypto profiles (key = the profile's secretKeyRef).
         const refs = [...new Set(version.cryptoProfiles.map((profile) => profile.secretKeyRef).filter((ref): ref is string => Boolean(ref)))];
         for (const ref of refs) {
+          if (demoKeys.has(ref)) continue;
           const purpose = version.cryptoProfiles.some((profile) => profile.secretKeyRef === ref && profile.purpose === "INBOUND_VERIFY") ? "webhook" : "sign";
           const value = await vault.encryptSecret(deriveFakeRailsSecret(code, purpose), "credential-set");
           next.push({ key: ref, type: "HEADER", value, isSecret: true, secretVersion: 1 });

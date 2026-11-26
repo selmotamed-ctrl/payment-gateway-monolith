@@ -23,7 +23,18 @@ echo "== Installing workspace dependencies (frozen lockfiles)"
 workspaces=(core-back admin-back merchant-back checkout-back fake-rails-back
             admin-front merchant-front checkout-front fake-rails-front
             deploy deploy/backup-daemon deploy/object-storage-daemon tests)
-printf '%s\n' "${workspaces[@]}" | xargs -P 4 -I{} bash -c 'cd "$1/{}" && bun install --frozen-lockfile >/dev/null 2>&1 && echo "   installed {}" || echo "   FAILED {}"' _ "$ROOT"
+# Do not swallow an install failure: a partially installed workspace would make
+# the launcher fail later with a misleading error. xargs exits non-zero (123)
+# when any command fails, and `set -e` aborts the post-create step.
+printf '%s\n' "${workspaces[@]}" | xargs -P 4 -I{} bash -c 'cd "$1/{}" && bun install --frozen-lockfile >/dev/null 2>&1 && echo "   installed {}" || { echo "   FAILED {} (run bun install in that workspace to see why)" >&2; exit 1; }' _ "$ROOT"
+
+echo "== Preparing the test database"
+test_url="${POSTGRES_TEST_DATABASE_URL:-postgresql://postgres@db:5432/payment_gateway_monolith_test}"
+(cd "$ROOT/core-back" && DATABASE_URL="$test_url" bun run migrate-deploy 2>&1 | tail -2)
+(cd "$ROOT/core-back" && bun run migrate-generate >/dev/null)
+
+echo "== Preparing internal mTLS certificates"
+(cd "$ROOT/core-back" && [[ -f certs/core-back.crt ]] || bun run generate-mtls-certs >/dev/null)
 
 for portal in admin-front merchant-front checkout-front fake-rails-front; do
   if [[ -f "$portal/.env.example" && ! -f "$portal/.env" ]]; then cp "$portal/.env.example" "$portal/.env"; fi

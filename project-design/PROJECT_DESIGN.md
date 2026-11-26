@@ -3805,7 +3805,7 @@ Found by driving a real Edfali (OTP-pull, `multipart/form-data`) payment through
 2. `ApiConsumer.send` copied any object body with `{ ...body }`, which turns a `FormData` into `{}`.
 3. `ApiConsumer.serializeBody` JSON-stringified whatever was not a string/`URLSearchParams`/`ArrayBuffer`.
 
-Fixes: `toMimeContentType()` in `engine/runtime/flowProvider.ts`; `FormData` excluded from the spread and returned as-is (with the `Content-Type` header removed) in `ApiConsumer`. Pinned by `core-back/test/engine/multipart-and-content-type.test.ts`. Fake Rails was changed alongside so the loop closes (reference keys `invoice_no`/`merchantRef`, `env` echoed in success bodies, see `fake-rails.integration`).
+Fixes: `toMimeContentType()` in `engine/runtime/flowProvider.ts`; `FormData` excluded from the spread and returned as-is (with the `Content-Type` header removed) in `ApiConsumer`. Pinned by `core-back/test/engine/multipart-and-content-type.test.ts`, which now also exercises `PrismaFlowProvider.getSteps` (the actual call site). Fake Rails was changed alongside so the loop closes (reference keys `invoice_no`/`merchantRef`; `env` echoed in success **and inquiry** bodies; the core sends the attempt environment on the Fake-Rails-only `x-pg-environment` header, see `fake-rails.integration`).
 
 ## 9. Source references
 
@@ -14114,11 +14114,13 @@ No other widget is changed.
 HMAC-SHA256(seederToken, "fake-rails:<gatewayCode>:<purpose>")
 ```
 
-where purpose is `webhook` if any matching profile is `INBOUND_VERIFY`, otherwise `sign`.
+where purpose is `webhook` if any matching profile is `INBOUND_VERIFY`, otherwise `sign`. The derived value is encrypted through `Vault.encryptSecret(secret, "credential-set")`, the entry is marked secret, its `secretVersion` is incremented and the set is marked `VERIFIED`. Entries with no matching profile are left untouched.
 
-**Demo credential manifest (2026-11-26).** A freshly seeded platform credential set has `entriesCiphertext = []` (real secrets are only written through the credential API), so every emulated gateway failed at the first authenticated step with `API_KEY credential is missing`. When a `PLATFORM` set for a `VERIFIED`/`UNTESTED` status is empty, `updateCredentialSecrets()` now creates entries `apiKey`, `token`, `username`, `password`, `secret`, `clientId`, `clientSecret` (HMAC-derived, vault-encrypted, `secretVersion` 1) plus one entry per distinct crypto-profile `secretKeyRef` (key = the ref verbatim, derived with the same `webhook`/`sign` purpose rule). The emulator never checks key values, so this is sufficient for the test tier. Sets that already have entries are not touched except for the crypto-profile secrets above.
+**Demo credential manifest (2026-11-26).** A freshly seeded platform credential set has `entriesCiphertext = []` (real secrets are only written through the credential API), so every emulated gateway failed at the first authenticated step with `API_KEY credential is missing`. When a `PLATFORM` set for a `VERIFIED`/`UNTESTED` status is empty, `updateCredentialSecrets()` now creates entries `apiKey`, `token`, `username`, `password`, `secret`, `clientId`, `clientSecret` (HMAC-derived, vault-encrypted, `secretVersion` 1) plus one entry per distinct crypto-profile `secretKeyRef` (key = the ref verbatim, derived with the same `webhook`/`sign` purpose rule). The emulator never checks key values, so this is sufficient for the test tier. MUTUAL_TLS sets are left empty because the manifest cannot invent a client certificate. Sets that already have entries are not touched except for the crypto-profile secrets above.
 
-**Browser-facing base URL.** `FAKE_RAILS_BROWSER_BASE_URL` (default `FAKE_RAILS_PUBLIC_BASE_URL`) is used only for widget script URLs and widget allowed origins. It lets core keep calling the emulator on a private address (`http://127.0.0.1:4104`) while a payer's browser loads the SDK from a forwarded URL (GitHub Codespaces). The derived secret is encrypted through `Vault.encryptSecret(secret, "credential-set")`, the entry is marked secret and its `secretVersion` is incremented. Entries with no matching profile are left untouched. The credential set is marked `VERIFIED`.
+**Browser-facing base URL.** `FAKE_RAILS_BROWSER_BASE_URL` (default `FAKE_RAILS_PUBLIC_BASE_URL`) is used only for widget script URLs and widget allowed origins. It lets core keep calling the emulator on a private address (`http://127.0.0.1:4104`) while a payer's browser loads the SDK from a forwarded URL (GitHub Codespaces).
+
+**Attempt environment.** `StepExecutor` adds `x-pg-environment: <attempt.env>` only when the target is the allow-listed Fake Rails host. `resolveOrCreateTransaction()` prefers that header over the body `env` field and defaults to `SANDBOX`; the stored value is echoed as `env`/`environment` in the confirm, success, awaiting and **inquiry** bodies. Without the header a LIVE attempt was stored as SANDBOX, so both the trusted-success environment fact and the webhook `/live` path were wrong.
 
 **Environment mode.** `ensureEnvironmentSetting()` upserts `server.environment_mode = { mode: "TEST_SANDBOX" }`.
 
@@ -14311,7 +14313,7 @@ bun run deploy.ts --only=fake-rails
 - Webhook token/path mismatch.
 - Embedded widget blocked by CSP and renderer allowlist.
 - Credential coverage: demo manifest on empty sets only; MUTUAL_TLS gateways unconfigured.
-- Only OTP-pull rails verified to settle; the initiate response omits the hosted redirect URL (`clientAction` has `kind: HTTP_REDIRECT` without `url`) and several rails fail at initiate (GAP-079).
+- Only OTP-pull rails verified to settle; the initiate response omits the hosted redirect URL (`clientAction` has `kind: HTTP_REDIRECT` without `url`) and several rails fail at initiate (GAP-080).
 - Fake inbound requests are not verified.
 - Statement channels not connected to a fetch flow.
 
@@ -17070,12 +17072,12 @@ This part documents the **development / demonstration** environment that lets a 
 ./scripts/codespaces-start.sh            # default profile: merchant-demo
 ```
 
-It is **not** a deployment path. Nothing is published outside the machine; production and multi-host deployment remain the job of `deploy/` (see `deploy.topology`, `deploy.pipeline`). `scripts/deploy-localhost.sh` (PM2, Arch Linux workstation) is unchanged in purpose; the launcher exists because Codespaces has no PM2 and no systemd/sudo, uses containers for PostgreSQL and Redis, and reaches every portal through *forwarded* URLs instead of loopback.
+It is **not** a deployment path. Nothing is published outside the machine; production and multi-host deployment remain the job of `deploy/` (see `deploy.topology`, `deploy.pipeline`). `scripts/deploy-localhost.sh` (PM2, Arch Linux workstation) is unchanged in purpose; the launcher exists because Codespaces has no systemd, does not run PM2, and reaches every portal through *forwarded* URLs instead of loopback. It deliberately does not require root or a process manager: each service is a plain background process with a pid file and a log.
 
 ## 2. Design intent
 
 - **One clear command.** Idempotent: a second run reuses the database, secrets, certificates and portal builds and only starts what is not running.
-- **Nothing destructive by default.** The launcher never resets a database. Seeds are individually guarded (baseline seed only when `platform_settings` is empty; dev users only when missing; Fake Rails gateway re-pointing only when the forwarded URL or the seeder script changed). The only destructive path is `reset-db --yes-delete-dev-database`, which refuses `*_test` databases.
+- **Nothing drops the database by default.** Seeds are individually guarded (baseline seed when the settings/gateways are missing or its completion marker is absent; dev users only when missing; Fake Rails re-pointing only when the forwarded URL or the seeder script changed). Re-pointing overwrites gateway base URLs/widgets/webhook tokens and refreshes crypto-profile secrets, so export developer-customised gateway config before changing the forwarded URL. The only command that drops data is `reset-db --yes-delete-dev-database`, which refuses `*_test` databases (including the sandbox database), and removes the matching object-storage and Fake Rails state so the next seed starts clean.
 - **No hard-coded secrets.** `KMS_MASTER_KEY`, `OBJECT_STORAGE_KEK_KEYRING`, the development password, the Fake Rails admin password, JWT secret, seeder token and control token are generated with `openssl rand` into `.local/codespaces/secrets.env` (mode 0600, git-ignored). The development password satisfies the `create-dev-users` policy (12+ characters with lowercase, uppercase and a digit). It is shown only by `./scripts/codespaces-start.sh credentials`.
 - **Security posture unchanged.** mTLS (TLS 1.3, one client common name per namespace) stays enforced between edges and cores; the launcher only generates the same local CA/certificates as `bun run generate-mtls-certs`. `core-back`, `core-sandbox`, PostgreSQL and Redis are never forwarded; every service binds to `127.0.0.1`; edges never receive `DATABASE_URL` or `KMS_MASTER_KEY`.
 
@@ -17088,9 +17090,9 @@ It is **not** a deployment path. Nothing is published outside the machine; produ
 | `devcontainer.json` | Compose-based container, Node 22 feature, `hostRequirements` 4 CPU / 8 GB, `forwardPorts` and labels, VS Code extensions, `postCreateCommand`. |
 | `docker-compose.yml` | `app` (workspace), `db` (`postgres:18`, named volume `pg18-data` at `/var/lib/postgresql`), `redis` (`redis:7`). `db` and `redis` publish no ports; trust authentication is therefore reachable only from `app` on the private compose network. |
 | `Dockerfile` | `devcontainers/base:ubuntu-24.04` + `postgresql-client`, `redis-tools`, `openssl`, `curl`, Bun (pinned `BUN_VERSION`, tested with 1.4.2). |
-| `post-create.sh` | Waits for PostgreSQL, creates `payment_gateway_monolith` and `payment_gateway_monolith_test`, installs every workspace with `--frozen-lockfile`, copies the portals' `.env.example`. It starts nothing and seeds nothing. |
+| `post-create.sh` | Waits for PostgreSQL, creates `payment_gateway_monolith` and `payment_gateway_monolith_test`, installs all Bun workspaces except the offline `companion-app` with `--frozen-lockfile`, fails loudly if an install fails, migrates/generates the test database schema, generates the internal mTLS certificates, and copies the portals' `.env.example`. It starts nothing and seeds nothing. |
 
-The compose environment points the Redis-backed and PostgreSQL-backed test suites at an isolated `payment_gateway_monolith_test` database, never at the development database.
+The compose environment sets `POSTGRES_TEST_DATABASE_URL`, `STORAGE_TEST_DATABASE_URL` and `EXHAUSTIVE_DATABASE_URL` to an isolated `payment_gateway_monolith_test` database (never the development database); `core-back/test/setup.ts` prefers `POSTGRES_TEST_DATABASE_URL` over `DATABASE_URL`, and `post-create.sh` migrates that database and generates the Prisma client before the Codespace reports ready. The launcher keeps its own `DATABASE_URL` on the development database in the same container.
 
 ### 3.2 Launcher (`scripts/codespaces-start.sh`)
 
@@ -17114,20 +17116,22 @@ Start sequence: tool check → secrets → PostgreSQL 18 version gate (`server_v
 
 ### 3.3 Why a Sandbox plane
 
-Fake Rails answers with `env: "SANDBOX"` and the engine's trusted-success check requires the response environment to equal the attempt's. Fake Rails payments therefore only settle on **Sandbox-plane** attempts (`sbx_*` links), as designed in `platform.sandbox`. The `merchant-demo` and `full` profiles start a second `core-back` (`EXECUTION_PLANE=SANDBOX`, port 4005) on its own database `<DB_NAME>_sandbox`, migrated with `?options=-c app.execution_plane=SANDBOX` (otherwise v38 stamps the database LIVE), and give the edges `SANDBOX_CORE_BACK_URL`. The Live core runs with `PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE=true` (a development deployment only) and `OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED=false` when both planes share the vault.
+Fake Rails defaults an unlabelled transaction to `env: "SANDBOX"` and the engine's trusted-success check requires the response environment to equal the attempt's. The core now sends `x-pg-environment` (the attempt's `LIVE`/`SANDBOX`) on every Fake-Rails-targeted request; the emulator persists and echoes it in success **and inquiry** bodies, so a LIVE attempt in the local stack can also settle. The normal demo still exercises the **Sandbox plane** (`sbx_*` links), as designed in `platform.sandbox`. The `merchant-demo` and `full` profiles start a second `core-back` (`EXECUTION_PLANE=SANDBOX`, port 4005) on its own database `<DB_NAME>_sandbox`, migrated with `?options=-c app.execution_plane=SANDBOX` (otherwise v38 stamps the database LIVE), and give the edges `SANDBOX_CORE_BACK_URL`. The Live core runs with `PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE=true` (a development deployment only) and `OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED=false` unconditionally: the launcher has no shared object-storage daemon, and a plane-local sweep must never touch a vault another plane may use.
 
 ### 3.4 Fake Rails wiring specific to this launcher
 
 - Core reaches the emulator at `http://127.0.0.1:4104` (seeded as the gateway base URL, `FAKE_RAILS_PUBLIC_BASE_URL` of the core), while the payer's browser uses the forwarded Fake Rails *portal* origin: `fake-rails-back` is started with `FAKE_RAILS_PUBLIC_BASE_URL=<forwarded 5104>` (hosted redirect pages live in the portal) and `seedFakeRails.ts` accepts `FAKE_RAILS_BROWSER_BASE_URL` for widget SDK script URLs / allowed origins.
-- `seedFakeRails.ts` now creates a demo credential manifest (`apiKey`, `token`, `username`, `password`, `secret`, `clientId`, `clientSecret`, plus every crypto profile `secretKeyRef`) on **empty** platform credential sets, values derived from the seeder token. The emulator never checks key values; existing entries are never replaced; mutual-TLS gateways stay unconfigured.
+- `seedFakeRails.ts` now creates a demo credential manifest (`apiKey`, `token`, `username`, `password`, `secret`, `clientId`, `clientSecret`, plus every crypto profile `secretKeyRef`) on **empty** platform credential sets, values derived from the seeder token. The emulator never checks key values; entries whose key matches a crypto profile are refreshed with the derived signing/webhook secret, and mutual-TLS gateways are left empty because the manifest cannot invent a client certificate.
 - `FAKE_RAILS_CONTROL_TOKEN` is generated and shared by the sandbox core and `fake-rails-back` (required in production mode by the control plane).
 - The dev merchant is created with `DEV_MERCHANT_UNSCOPED=true` so it is not restricted to the single Live application and can use Sandbox Studio.
 
 ## 4. Contracts and invariants
 
 - The launcher refuses `NODE_ENV=production` unless `LOCAL_TARGET=1`.
+- Before starting, every port in the chosen profile is checked; a foreign listener stops the run with a clear message instead of an `EADDRINUSE` crash after seeding.
+- A pid file is trusted only while the process still runs in that service's workspace directory (`/proc`, or `lsof` on macOS). A recycled pid is forgotten, never signalled.
 - Every service log is `.local/codespaces/logs/<service>.log`; pids in `.local/codespaces/pids`.
-- Changing the key material after seeding is refused: if encrypted data exists but no KMS key is found in the secrets file the launcher stops and explains how to restore it or reset.
+- Changing the key material after seeding is refused: `.local/codespaces/kms.fingerprint` records the key identity, and a database with data but no matching fingerprint/key stops the launcher with instructions to restore the secrets or reset. Ambient secrets supplied in the environment are persisted into `secrets.env` so a later run cannot generate a different key.
 - `.gitattributes` forces LF for `*.sh`, `.devcontainer/**` and `project-design/**` so a Windows checkout with `core.autocrlf=true` does not break the scripts or the design generator.
 
 ## 5. Data / API / config / deployment surface
@@ -17147,7 +17151,7 @@ Forwarded ports (private by default): 5102 merchant portal, 5103 checkout, 5104 
 
 ```bash
 ./scripts/codespaces-start.sh               # start
-./scripts/codespaces-start.sh smoke         # 17 real HTTP checks incl. a simulated payment and mTLS enforcement
+./scripts/codespaces-start.sh smoke         # 18 real HTTP checks incl. a simulated payment, mTLS enforcement and the portal proxy
 ./scripts/codespaces-start.sh credentials   # development logins
 ./scripts/codespaces-start.sh stop
 ```
@@ -17162,6 +17166,7 @@ CI (`codespaces` job) validates the shell syntax, parses `devcontainer.json`, va
 
 - Dev container, launcher with three profiles, Sandbox plane wiring, guarded seeds, generated secrets, mTLS probes, smoke test, CI job.
 - Verified locally (Windows host, WSL PostgreSQL 18.6, Bun 1.4.2): fresh first start of `merchant-demo`, idempotent restart, the 17-check smoke test, an Edfali and a Sadad OTP payment settling `SUCCEEDED`.
+- Re-verified 2026-11-26 on Linux (Bun 1.4.4, PostgreSQL 18.6): fresh `merchant-demo` start, 18/18 smoke checks including the portal proxy, a **Live** Edfali payment settling `SUCCEEDED` through Fake Rails (env header), a second start with no reseed/rebuild, KMS-fingerprint refusal and port-conflict refusal.
 
 ### Partial
 
@@ -17170,8 +17175,10 @@ CI (`codespaces` job) validates the shell syntax, parses `devcontainer.json`, va
 
 ### Known bugs / risks
 
-- Code gap: Windows Bun 1.4.2 crashes/hangs in `test/admin-slice/report-engine-migration.test.ts`; verified on Linux (CI) only.
-- Documentation gap closed in this change: `deploy-localhost.sh` could not start core (missing `OBJECT_STORAGE_KEK_KEYRING`, plane-fence flag) and its dev password never satisfied the user policy; both fixed.
+- The launcher does not start the shared object-storage daemon. Core boots with `OBJECT_STORAGE_KEK_KEYRING` (required in production mode) but every object-storage operation fails closed (`UnavailableBlobStore`); KYB uploads and report asset bundles need the real deploy stack (TRACKER GAP-083).
+- `FAKE_RAILS_BROWSER_BASE_URL` fixes the widget script origin, but the emitted Fake Rails SDK has no SRI hash and the checkout embed policy only exempts loopback HTTP. An embedded widget loaded from a forwarded HTTPS Codespace origin is therefore still rejected; OTP-pull/redirect rails are unaffected (TRACKER GAP-080).
+- Code gap: Windows Bun 1.4.2 hangs in `test/automation/audit-chain-anchor.test.ts` and intermittently segfaults in `test/storage-engine/audit-chain.test.ts`; the suites are verified on Linux (CI) only.
+- Documentation gap closed in this change: `deploy-localhost.sh` could not start core (missing `OBJECT_STORAGE_KEK_KEYRING`, plane-fence flag) and its dev password never satisfied the user policy. It now generates a compliant password, regenerates an existing policy-invalid `DEV_PASSWORD` once, and refuses to generate a new KEK when object-storage data already exists.
 
 ---
 
@@ -18041,8 +18048,8 @@ The live environment is expected to be provisioned by the deploy engine, not by 
 
 | Variable | Default / precedence | Consumer |
 | :--- | :--- | :--- |
-| `DATABASE_URL` | `postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test` in `test/setup.ts` | Core integration/e2e tests |
-| `POSTGRES_TEST_DATABASE_URL` | preferred by `core-back/test/e2e/postgres-payment.test.ts` | Payment E2E |
+| `DATABASE_URL` | fallback (`postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test`) in `test/setup.ts` | Core integration/e2e tests |
+| `POSTGRES_TEST_DATABASE_URL` | preferred by `test/setup.ts` and `core-back/test/e2e/postgres-payment.test.ts`; the dev container sets it so tests never touch the development database | Payment E2E / all DB suites |
 | `EXHAUSTIVE_DATABASE_URL` | preferred; then `POSTGRES_TEST_DATABASE_URL`; then `postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test` | Exhaustive harness |
 | `STORAGE_TEST_DATABASE_URL` | preferred; then `DATABASE_URL`; then `postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test` | Storage helpers |
 | `STORAGE_TEST_REDIS_URL` | `redis://127.0.0.1:56379` | Storage cache/velocity |
@@ -18285,7 +18292,7 @@ bun run test:live
 - `tests/playwright*.config.ts` define the web servers and projects.
 - `scripts/deploy-localhost.sh` is executable and was read for this part; it was not run.
 - `tests/e2e-live/live.spec.ts` contains the hard-coded defaults.
-- `scripts/codespaces-smoke.ts` (run through `./scripts/codespaces-start.sh smoke`) is the first live check that performs initiate -> OTP confirm -> merchant-visible `SUCCEEDED` through the seeded Edfali gateway, plus mTLS-rejection, unauthenticated-merchant-API and wrong-OTP negative checks. Verified 17/17 on 2026-11-26 against the `merchant-demo` profile.
+- `scripts/codespaces-smoke.ts` (run through `./scripts/codespaces-start.sh smoke`) is the first live check that performs initiate -> OTP confirm -> merchant-visible `SUCCEEDED` through the seeded Edfali gateway, plus mTLS-rejection, unauthenticated-merchant-API, portal-proxy and wrong-OTP negative checks. Verified 18/18 on 2026-11-26 against the `merchant-demo` profile.
 
 No test in this part verifies the fixture itself. The fixture is exercised indirectly by every mocked Playwright suite.
 

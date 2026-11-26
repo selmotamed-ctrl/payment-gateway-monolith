@@ -206,7 +206,14 @@ export const resolveOrCreateTransaction = (input: {
     id: uuidv7(),
     gateway_code: descriptor.gatewayCode,
     rail_code: descriptor.railCode,
-    env: (deepFind(body, ["env", "environment"]) ?? "SANDBOX").toUpperCase().includes("LIVE") ? "LIVE" : "SANDBOX",
+    // Core sends the attempt's environment on a Fake-Rails-only header; the
+    // body field remains for manual tester calls. Defaulting to SANDBOX keeps
+    // an unlabelled test out of the Live plane.
+    env: (
+      request.header("x-pg-environment")
+      ?? deepFind(body, ["env", "environment"])
+      ?? "SANDBOX"
+    ).toUpperCase().includes("LIVE") ? "LIVE" : "SANDBOX",
     our_reference: reference,
     provider_reference: `FK-${descriptor.railCode.toUpperCase().replace(/[^A-Z0-9]/g, "")}-${Date.now()}-${Math.floor(Math.random() * 10000).toString().padStart(4, "0")}`,
     network_reference: ["moamalat", "ly_pay", "onepay", "mpgs"].includes(descriptor.railCode)
