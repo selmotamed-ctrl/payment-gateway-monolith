@@ -172,7 +172,7 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Install the frontends whose sources the unit tests import
         run: |
-          for workspace in admin-front merchant-front checkout-front; do
+          for workspace in admin-front merchant-front checkout-front fake-rails-front; do
             (cd "$workspace" && bun install --frozen-lockfile)
           done
       - name: Root Vitest suite
