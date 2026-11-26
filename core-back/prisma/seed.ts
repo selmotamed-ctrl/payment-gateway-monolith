@@ -8,7 +8,6 @@ import { seedDefaultChromeSpecs } from "../engine/reportStudio/seedDefaultChrome
 import { ensureCommunicationTemplates } from "../lib/communication/templates";
 import { platformSettings } from "./platformSettingsSeed";
 
-
 const adminUsers = [
   {
     email: "gateway-admin@payment-gateway.internal",
