@@ -92,6 +92,8 @@ export const urlsMap = {
     applicationsSummary: "v1/admin/applications/summary",
     applicationDetail: (id: string) => `v1/admin/applications/${id}`,
     applicationRevokeToken: (id: string, tokenId: string) => `v1/admin/applications/${id}/tokens/${tokenId}/revoke`,
+    accessTokensList: "v1/admin/access-tokens",
+    accessTokensSummary: "v1/admin/access-tokens/summary",
     paymentLinksList: "v1/admin/payment-links",
     paymentLinkState: (id: string) => `v1/admin/payment-links/${id}/state`,
     posTerminalsList: "v1/admin/pos-terminals",

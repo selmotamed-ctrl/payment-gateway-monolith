@@ -19,6 +19,8 @@ const WALLET_STATUS = ["PENDING", "ACTIVE", "FROZEN", "CLOSED"];
 const APPLICATION_STATUS = ["DRAFT", "PENDING", "ACTIVE", "SUSPENDED", "CLOSED"];
 const PAYMENT_LINK_STATE = ["PENDING", "COMPLETED", "EXPIRED", "CANCELLED"];
 const POS_STATUS = ["ACTIVE", "INACTIVE", "BLOCKED"];
+const ACCESS_TOKEN_STATUS = ["ACTIVE", "REVOKED", "EXPIRED"];
+const TOKEN_ENVIRONMENT = ["LIVE", "SANDBOX"];
 
 export const commerceTables: Record<string, TableServerConfig> = {
     Wallets: {
@@ -38,6 +40,19 @@ export const commerceTables: Record<string, TableServerConfig> = {
         filters: [
             { key: "status", label: "Status", type: "data-autocomplete", options: options(APPLICATION_STATUS), multiple: true },
             { key: "merchantId", label: "Merchant", type: "api-autocomplete", load: merchants },
+            { key: "date", label: "Created", type: "date" },
+        ],
+        defaultSort: { key: "createdAt", direction: "desc" },
+    },
+    ApplicationTokens: {
+        url: urlsMap.accessTokensList,
+        listKey: "accessTokens",
+        filters: [
+            { key: "status", label: "Status", type: "data-autocomplete", options: options(ACCESS_TOKEN_STATUS), multiple: true },
+            { key: "env", label: "Environment", type: "data-autocomplete", options: options(TOKEN_ENVIRONMENT), multiple: true },
+            { key: "ipWhitelistEnabled", label: "IP allowlist", type: "boolean", trueLabel: "Restricted", falseLabel: "Not restricted" },
+            { key: "merchantId", label: "Merchant", type: "api-autocomplete", load: merchants },
+            { key: "applicationId", label: "Application", type: "api-autocomplete", load: applications },
             { key: "date", label: "Created", type: "date" },
         ],
         defaultSort: { key: "createdAt", direction: "desc" },

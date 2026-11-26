@@ -302,7 +302,7 @@ New `coreForward` routes (new files `wallets.ts`, `applications.ts` (application
 
 | Mount | Read | Write |
 | :--- | :--- | :--- |
-| `/wallets` (+ `/:id/statement`, `/:id/audit-events`), `/applications`, `/payment-links`, `/pos-terminals` | `merchant:read` | `merchant:write` |
+| `/wallets` (+ `/:id/statement`, `/:id/audit-events`), `/applications`, `/access-tokens` (+ `/summary`), `/payment-links`, `/pos-terminals` | `merchant:read` | `merchant:write` |
 | `/transactions` | `attempt:read`, `merchant:read`, `finance:read` | n/a |
 | `/inbound-events` | `attempt:read`, `case:read` | n/a |
 | `/system/*` (jobs-outbox, jobs, outbox, audit-outbox, notifications), mounted after `/system/backups` | `security:read` | `security:write` |

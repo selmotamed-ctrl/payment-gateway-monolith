@@ -9,7 +9,7 @@
 | `core-back/test/academy-exam-engine.test.ts` | 839 | 54 |
 | `core-back/test/academy-progress.test.ts` | 476 | 32 |
 | `core-back/test/academy-team.test.ts` | 270 | 31 |
-| `core-back/test/admin-commerce.test.ts` | 879 | 24 |
+| `core-back/test/admin-commerce.test.ts` | 918 | 25 |
 | `core-back/test/admin-slice/admin-ledger.test.ts` | 376 | 9 |
 | `core-back/test/admin-slice/admin-operations.test.ts` | 329 | 7 |
 | `core-back/test/admin-slice/admin-rails-routes.test.ts` | 167 | 3 |
@@ -264,7 +264,7 @@
 | `core-back/test/worker-runtime-health.test.ts` | 153 | 8 |
 | `admin-back/test/academy-progress.test.ts` | 240 | 13 |
 | `admin-back/test/admin-surface.test.ts` | 1756 | 89 |
-| `admin-back/test/admin-ui-completion.test.ts` | 453 | 29 |
+| `admin-back/test/admin-ui-completion.test.ts` | 455 | 29 |
 | `admin-back/test/auth-account-limiters.test.ts` | 97 | 3 |
 | `admin-back/test/backups.test.ts` | 457 | 21 |
 | `admin-back/test/core-contract.test.ts` | 1652 | 58 |
@@ -379,6 +379,7 @@
 | `tests/e2e/admin/academy-learning.spec.ts` | 88 | 2 |
 | `tests/e2e/admin/academy-live.ts` | 238 | 1 |
 | `tests/e2e/admin/academy-team.spec.ts` | 98 | 3 |
+| `tests/e2e/admin/application-tokens.spec.ts` | 111 | 2 |
 | `tests/e2e/admin/auth.spec.ts` | 50 | 2 |
 | `tests/e2e/admin/backups.spec.ts` | 133 | 2 |
 | `tests/e2e/admin/chrome-layout.spec.ts` | 176 | 1 |
@@ -386,9 +387,9 @@
 | `tests/e2e/admin/commerce-governance.spec.ts` | 148 | 4 |
 | `tests/e2e/admin/create.spec.ts` | 155 | 5 |
 | `tests/e2e/admin/finance.spec.ts` | 47 | 1 |
-| `tests/e2e/admin/global-search.spec.ts` | 124 | 5 |
+| `tests/e2e/admin/global-search.spec.ts` | 139 | 6 |
 | `tests/e2e/admin/guide-context.spec.ts` | 128 | 2 |
-| `tests/e2e/admin/guide-palette.spec.ts` | 32 | 1 |
+| `tests/e2e/admin/guide-palette.spec.ts` | 42 | 2 |
 | `tests/e2e/admin/guide-reader.spec.ts` | 116 | 5 |
 | `tests/e2e/admin/guide-safeguard.spec.ts` | 104 | 1 |
 | `tests/e2e/admin/jobs-outbox.spec.ts` | 57 | 2 |
@@ -431,7 +432,7 @@
 | `tests/unit/builders-settings-parser.test.ts` | 206 | 18 |
 | `tests/unit/checklist-labels.test.ts` | 46 | 1 |
 | `tests/unit/checkout-redirect.test.ts` | 34 | 5 |
-| `tests/unit/commerce-actions.test.ts` | 177 | 21 |
+| `tests/unit/commerce-actions.test.ts` | 185 | 22 |
 | `tests/unit/commerce-governance.test.ts` | 144 | 14 |
 | `tests/unit/commerce-i18n.test.ts` | 127 | 7 |
 | `tests/unit/commerce-owners-revalidation.test.ts` | 103 | 12 |
@@ -459,5 +460,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **454**
-- Total literal test declarations: **4483**
+- Total files: **455**
+- Total literal test declarations: **4489**

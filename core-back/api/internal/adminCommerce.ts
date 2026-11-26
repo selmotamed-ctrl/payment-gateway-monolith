@@ -52,6 +52,8 @@ const WALLET_STATUSES = ["PENDING", "ACTIVE", "FROZEN", "CLOSED"] as const;
 const APPLICATION_STATUSES = ["DRAFT", "PENDING", "ACTIVE", "SUSPENDED", "CLOSED"] as const;
 const PAYMENT_LINK_STATES = ["PENDING", "COMPLETED", "EXPIRED", "CANCELLED"] as const;
 const POS_STATUSES = ["ACTIVE", "INACTIVE", "BLOCKED"] as const;
+const ACCESS_TOKEN_STATUSES = ["ACTIVE", "REVOKED", "EXPIRED"] as const;
+const TOKEN_ENVIRONMENTS = ["LIVE", "SANDBOX"] as const;
 const PENDING_CASHOUT_STATES = ["PENDING", "PROCESSING"] as const;
 const APPROVAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -630,7 +632,24 @@ const applicationListSelect = {
 
 type ApplicationListRow = Prisma.ApplicationGetPayload<{ select: typeof applicationListSelect }>;
 
-const serializeApplicationRow = (application: ApplicationListRow, flags: Flags) => {
+/** Token lifecycle and IP-allowlist summary shown on the application list. */
+type ApplicationTokenStats = {
+  active: number;
+  revoked: number;
+  expired: number;
+  ipRestricted: number;
+  cidrs: number;
+};
+
+const emptyTokenStats = (): ApplicationTokenStats => ({ active: 0, revoked: 0, expired: 0, ipRestricted: 0, cidrs: 0 });
+
+const tokenStatus = (token: { revokedAt: Date | null; expiresAt: Date | null }): "ACTIVE" | "REVOKED" | "EXPIRED" => {
+  if (token.revokedAt) return "REVOKED";
+  if (token.expiresAt && token.expiresAt.getTime() <= Date.now()) return "EXPIRED";
+  return "ACTIVE";
+};
+
+const serializeApplicationRow = (application: ApplicationListRow, flags: Flags, tokenStats: ApplicationTokenStats = emptyTokenStats()) => {
   const railWhitelist = stringList(application.railWhitelist);
   const redirectDomains = stringList(application.redirectDomainAllowlist) ?? [];
   const redacted: string[] = [];
@@ -650,12 +669,65 @@ const serializeApplicationRow = (application: ApplicationListRow, flags: Flags) 
     railWhitelistCount: railWhitelist?.length ?? 0,
     redirectDomains: flags.canSensitive ? redirectDomains : [],
     accessTokenCount: application._count.accessTokens,
+    tokenActiveCount: tokenStats.active,
+    tokenRevokedCount: tokenStats.revoked,
+    tokenExpiredCount: tokenStats.expired,
+    tokenIpRestrictedCount: tokenStats.ipRestricted,
+    tokenCidrCount: tokenStats.cidrs,
     paymentLinkCount: application._count.paymentLinks,
     posTerminalCount: application._count.posTerminals,
     createdAt: application.createdAt,
     updatedAt: application.updatedAt,
     redactedFields: redacted,
   };
+};
+
+/**
+ * One bounded query per page for the token/allowlist summary. The token rows
+ * themselves stay in the global `/access-tokens` list and the application
+ * detail, so a merchant with many tokens never inflates this payload.
+ */
+const loadApplicationTokenStats = async (applicationIds: string[]): Promise<Map<string, ApplicationTokenStats>> => {
+  const stats = new Map<string, ApplicationTokenStats>();
+  if (applicationIds.length === 0) return stats;
+  const rows = await client.accessToken.findMany({
+    where: { applicationId: { in: applicationIds } },
+    select: {
+      applicationId: true,
+      ipWhitelistEnabled: true,
+      revokedAt: true,
+      expiresAt: true,
+      _count: { select: { ips: true } },
+    },
+  });
+  for (const row of rows) {
+    const current = stats.get(row.applicationId) ?? emptyTokenStats();
+    const status = tokenStatus(row);
+    if (status === "ACTIVE") current.active += 1;
+    else if (status === "REVOKED") current.revoked += 1;
+    else current.expired += 1;
+    if (row.ipWhitelistEnabled) {
+      current.ipRestricted += 1;
+      current.cidrs += row._count.ips;
+    }
+    stats.set(row.applicationId, current);
+  }
+  return stats;
+};
+
+const tokenStatsOf = (tokens: ReadonlyArray<{ ipWhitelistEnabled: boolean; revokedAt: Date | null; expiresAt: Date | null; ips: Array<{ cidr: string }> }>): ApplicationTokenStats => {
+  const stats = emptyTokenStats();
+  for (const token of tokens) {
+    const status = tokenStatus(token);
+    if (status === "ACTIVE") stats.active += 1;
+    else if (status === "REVOKED") stats.revoked += 1;
+    else stats.expired += 1;
+    if (token.ipWhitelistEnabled) {
+      stats.ipRestricted += 1;
+      stats.cidrs += token.ips.length;
+    }
+  }
+  return stats;
 };
 
 const withoutWhitelistWhere = {
@@ -690,8 +762,15 @@ router.get("/applications", async (request: Request, response: Response) => {
     }),
     client.application.count({ where: built.where as never }),
   ]);
+  const tokenStats = await loadApplicationTokenStats(applications.map((application) => application.id));
   response.json(
-    listResponse("applications", applications.map((application) => serializeApplicationRow(application, flags)), total, built, applications),
+    listResponse(
+      "applications",
+      applications.map((application) => serializeApplicationRow(application, flags, tokenStats.get(application.id))),
+      total,
+      built,
+      applications,
+    ),
   );
 });
 
@@ -707,30 +786,37 @@ router.get("/applications/summary", async (request: Request, response: Response)
   response.json({ total, active, suspended, pending, withoutWhitelist });
 });
 
-const tokenStatus = (token: { revokedAt: Date | null; expiresAt: Date | null }): "ACTIVE" | "REVOKED" | "EXPIRED" => {
-  if (token.revokedAt) return "REVOKED";
-  if (token.expiresAt && token.expiresAt.getTime() <= Date.now()) return "EXPIRED";
-  return "ACTIVE";
-};
-
-const serializeToken = (token: {
+type TokenRecord = {
   id: string;
   name: string;
   lastFour: string;
   scopes: unknown;
+  env: string | null;
   ipWhitelistEnabled: boolean;
   lastUsedAt: Date | null;
   expiresAt: Date | null;
   revokedAt: Date | null;
   createdAt: Date;
+  merchantId: string | null;
+  applicationId: string | null;
+  application?: { id: string; name: string } | null;
+  merchant?: { id: string; legalName: string; tradeName: string } | null;
   ips?: Array<{ cidr: string }>;
-}) => ({
+};
+
+const serializeToken = (token: TokenRecord) => ({
   id: token.id,
   name: token.name,
   lastFour: token.lastFour,
   scopes: stringList(token.scopes) ?? [],
+  env: token.env ?? "LIVE",
   ipWhitelistEnabled: token.ipWhitelistEnabled,
   cidrs: (token.ips ?? []).map((entry) => entry.cidr),
+  ipCount: token.ips?.length ?? 0,
+  merchantId: token.merchantId,
+  applicationId: token.applicationId,
+  application: token.application ? { id: token.application.id, name: token.application.name } : null,
+  merchant: token.merchant ? merchantRef(token.merchant) : null,
   lastUsedAt: token.lastUsedAt,
   expiresAt: token.expiresAt,
   revokedAt: token.revokedAt,
@@ -755,11 +841,14 @@ router.get("/applications/:id", async (request: Request, response: Response) => 
         name: true,
         lastFour: true,
         scopes: true,
+        env: true,
         ipWhitelistEnabled: true,
         lastUsedAt: true,
         expiresAt: true,
         revokedAt: true,
         createdAt: true,
+        merchantId: true,
+        applicationId: true,
         ips: { select: { cidr: true } },
       },
     }),
@@ -769,7 +858,7 @@ router.get("/applications/:id", async (request: Request, response: Response) => 
   ]);
   response.json({
     application: {
-      ...serializeApplicationRow(application, flags),
+      ...serializeApplicationRow(application, flags, tokenStatsOf(tokens)),
       accessTokens: tokens.map(serializeToken),
       paymentLinks: links.map(serializePaymentLink),
       posTerminals: terminals.map(serializePosTerminal),
@@ -1009,6 +1098,100 @@ router.post("/applications/:id/tokens/:tokenId/revoke", async (request: Request,
   response.json({
     token: { id: token.id, name: token.name, lastFour: token.lastFour, revokedAt, status: "REVOKED" as const },
   });
+});
+
+/* -------------------------------------------------------------------------- */
+/* API access tokens (platform-wide)                                           */
+/* -------------------------------------------------------------------------- */
+
+const accessTokenStatusWhere = (value: unknown): Record<string, unknown> | undefined => {
+  const statuses = csv(typeof value === "string" ? value : undefined);
+  if (statuses.length === 0) return undefined;
+  const now = new Date();
+  const clauses = statuses.map((status) => {
+    if (status === "REVOKED") return { revokedAt: { not: null } };
+    if (status === "EXPIRED") return { revokedAt: null, expiresAt: { lte: now } };
+    return { revokedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] };
+  });
+  return clauses.length === 1 ? clauses[0]! : { OR: clauses };
+};
+
+const accessTokenListSelect = {
+  id: true,
+  name: true,
+  lastFour: true,
+  scopes: true,
+  env: true,
+  ipWhitelistEnabled: true,
+  lastUsedAt: true,
+  expiresAt: true,
+  revokedAt: true,
+  createdAt: true,
+  merchantId: true,
+  applicationId: true,
+  application: { select: { id: true, name: true } },
+  merchant: { select: merchantSelect },
+  ips: { select: { cidr: true } },
+} as const;
+
+router.get("/access-tokens", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:read"]);
+  assertEnumFilter(request.query.status, ACCESS_TOKEN_STATUSES, "status");
+  assertEnumFilter(request.query.env, TOKEN_ENVIRONMENTS, "env");
+  assertUuidFilter(request.query.applicationId, "applicationId");
+  assertUuidFilter(request.query.merchantId, "merchantId");
+  if (request.query.ipWhitelistEnabled !== undefined && request.query.ipWhitelistEnabled !== "" && request.query.ipWhitelistEnabled !== "true" && request.query.ipWhitelistEnabled !== "false") {
+    throw new ApiError(400, "INVALID_FILTER", "ipWhitelistEnabled must be true or false");
+  }
+  const built = buildListQuery(request.query, {
+    search: ["name", "lastFour", "application.name", "merchant.legalName", "merchant.tradeName"],
+    equals: { applicationId: "applicationId", merchantId: "merchantId" },
+    in: { env: "env" },
+    booleans: { ipWhitelistEnabled: "ipWhitelistEnabled" },
+    dates: {
+      createdAt: { path: "createdAt" },
+      lastUsedAt: { path: "lastUsedAt" },
+      expiresAt: { path: "expiresAt" },
+    },
+    sortable: {
+      name: "name",
+      lastFour: "lastFour",
+      createdAt: "createdAt",
+      lastUsedAt: "lastUsedAt",
+      expiresAt: "expiresAt",
+    },
+    defaultSort: { createdAt: "desc" },
+    defaultPageSize: 25,
+  });
+  const statusWhere = accessTokenStatusWhere(request.query.status);
+  const where = statusWhere ? { AND: [built.where, statusWhere] } : built.where;
+  const [tokens, total] = await Promise.all([
+    client.accessToken.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      skip: built.skip,
+      take: built.take,
+      select: accessTokenListSelect,
+    }),
+    client.accessToken.count({ where: where as never }),
+  ]);
+  response.json(
+    listResponse("accessTokens", tokens.map((token) => serializeToken(token)), total, built, tokens),
+  );
+});
+
+router.get("/access-tokens/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:read"]);
+  const now = new Date();
+  const [total, active, revoked, expired, ipRestricted, ipCidrs] = await Promise.all([
+    client.accessToken.count(),
+    client.accessToken.count({ where: { revokedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] } }),
+    client.accessToken.count({ where: { revokedAt: { not: null } } }),
+    client.accessToken.count({ where: { revokedAt: null, expiresAt: { lte: now } } }),
+    client.accessToken.count({ where: { ipWhitelistEnabled: true } }),
+    client.accessTokenIp.count(),
+  ]);
+  response.json({ total, active, revoked, expired, ipRestricted, ipCidrs });
 });
 
 /* -------------------------------------------------------------------------- */
