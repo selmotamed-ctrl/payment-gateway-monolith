@@ -84,6 +84,10 @@ const REFERENCE_KEYS = [
   "custom_ref", "order_id", "orderId", "merchant_order_id", "merchantTransInfo",
   "external_reference", "externalReference", "request_id", "requestId", "idempotency_key",
   "client_reference", "transaction_id", "transactionId", "uuid", "ref", "store_order_id",
+  // Names the seeded core-back blueprints use for the attempt reference (OTP-pull rails send `invoice_no`,
+  // one hosted rail sends `merchantRef`). Without them the emulator invents its own reference and the engine's
+  // trusted-success check (response reference === attempt reference) fails.
+  "invoice_no", "merchantRef",
 ];
 
 const AMOUNT_KEYS = [
@@ -318,6 +322,9 @@ const successBase = (context: RailRequestContext): Record<string, unknown> => ({
   amount: context.transaction.normalized_amount_lyd,
   currency: context.transaction.currency,
   process_id: context.transaction.provider_reference,
+  // core-back's trusted-success check also requires the response to carry the environment the attempt ran in.
+  env: context.transaction.env,
+  environment: context.transaction.env,
 });
 
 const failureBody = (

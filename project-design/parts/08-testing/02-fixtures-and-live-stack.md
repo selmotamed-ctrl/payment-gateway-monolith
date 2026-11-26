@@ -3,8 +3,8 @@ id: testing.fixtures
 title: Fixtures, Mock API and Live Stack
 status: partial
 confidence: high
-last_verified: 2026-11-03
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-26
+verified_against: efb90c8+working-tree
 code:
   - tests/e2e/fixtures.ts
   - tests/playwright.config.ts
@@ -13,6 +13,8 @@ code:
   - tests/e2e-live/live.spec.ts
   - tests/e2e/exhaustive/full-platform-lifecycle-journeys.spec.ts
   - scripts/deploy-localhost.sh
+  - scripts/codespaces-start.sh
+  - scripts/codespaces-smoke.ts
   - core-back/test/setup.ts
   - core-back/test/exhaustive/_harness.ts
   - core-back/test/storage-engine/helpers/db.ts
@@ -23,6 +25,7 @@ tests:
   - tests/e2e/fixtures.ts
   - tests/e2e-live/live.spec.ts
   - tests/e2e/exhaustive/full-platform-lifecycle-journeys.spec.ts
+  - scripts/codespaces-smoke.ts
   - core-back/test/exhaustive/_harness.ts
   - core-back/test/storage-engine/helpers/db.ts
 gaps:
@@ -30,6 +33,7 @@ gaps:
   - The live stack has no automated provisioning for the external host used by e2e-live.
   - The cross-service journey suite skips unless E2E_LIVE=1 and a payment link key are supplied.
   - Most UI fixtures mock every API and do not exercise real backends.
+  - `scripts/codespaces-smoke.ts` (17 real HTTP checks incl. a simulated Edfali payment) needs a running launcher stack and is not part of any workflow that boots the Sandbox plane; the CI `codespaces` job only boots the `core` profile.
 ---
 
 # Fixtures, Mock API and Live Stack
@@ -306,6 +310,7 @@ bun run test:live
 - `tests/playwright*.config.ts` define the web servers and projects.
 - `scripts/deploy-localhost.sh` is executable and was read for this part; it was not run.
 - `tests/e2e-live/live.spec.ts` contains the hard-coded defaults.
+- `scripts/codespaces-smoke.ts` (run through `./scripts/codespaces-start.sh smoke`) is the first live check that performs initiate -> OTP confirm -> merchant-visible `SUCCEEDED` through the seeded Edfali gateway, plus mTLS-rejection, unauthenticated-merchant-API and wrong-OTP negative checks. Verified 17/17 on 2026-11-26 against the `merchant-demo` profile.
 
 No test in this part verifies the fixture itself. The fixture is exercised indirectly by every mocked Playwright suite.
 
@@ -339,3 +344,4 @@ No test in this part verifies the fixture itself. The fixture is exercised indir
 ## 10. Change history
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
+- 2026-11-26: added the Codespaces launcher and its smoke test (see `deploy.codespaces`).

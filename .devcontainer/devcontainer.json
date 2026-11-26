@@ -1,0 +1,64 @@
+// GitHub Codespaces / Dev Containers configuration for the Payment Gateway monorepo.
+//
+// Open the repository on GitHub -> Code -> Codespaces -> Create codespace on master, wait for the
+// "Ready" message in the creation log, then run in the terminal:
+//
+//     ./scripts/codespaces-start.sh
+//
+// Nothing here deploys to an external host: everything runs inside the Codespace and is reached
+// through Codespaces port forwarding (private by default).
+{
+  "name": "Payment Gateway (Codespaces)",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "shutdownAction": "stopCompose",
+
+  // The default 2-core Codespace is too small to build four Vue portals and run PostgreSQL, Redis,
+  // core-back, three edges and Fake Rails; ask for 4 cores / 8 GB.
+  "hostRequirements": { "cpus": 4, "memory": "8gb", "storage": "32gb" },
+
+  "features": {
+    // Vue/Vite toolchain needs Node ^20.19 or >=22.12.
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" }
+  },
+
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+
+  // Only the user-facing ports are forwarded. core-back (4000), admin-back (4101), checkout-back (4103),
+  // PostgreSQL and Redis stay private inside the container: the portals reach their edge through the
+  // Vite preview proxy on the same origin.
+  "forwardPorts": [5102, 5103, 5104, 4102, 5101],
+  "portsAttributes": {
+    "5102": { "label": "Merchant portal", "onAutoForward": "notify" },
+    "5103": { "label": "Checkout (payer)", "onAutoForward": "notify" },
+    "5104": { "label": "Fake Rails portal", "onAutoForward": "notify" },
+    "4102": { "label": "Merchant API (pg_live_)", "onAutoForward": "silent" },
+    "5101": { "label": "Admin portal (full profile only)", "onAutoForward": "silent" }
+  },
+  "otherPortsAttributes": { "onAutoForward": "ignore" },
+
+  "remoteEnv": {
+    // Used by scripts/codespaces-start.sh when run from a VS Code terminal that lacks them.
+    "BUN_INSTALL": "/home/vscode/.bun"
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "oven.bun-vscode",
+        "Vue.volar",
+        "dbaeumer.vscode-eslint",
+        "oxc.oxc-vscode",
+        "Prisma.prisma",
+        "ms-playwright.playwright",
+        "ckolkman.vscode-postgres"
+      ],
+      "settings": {
+        "typescript.tsdk": "node_modules/typescript/lib",
+        "files.eol": "\n",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  }
+}

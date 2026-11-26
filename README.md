@@ -107,6 +107,20 @@ It serves:
 
 The script reads `deploy/deploy.env` when present and lets explicit environment variables win. It refuses `NODE_ENV=production` unless `LOCAL_TARGET=1`, requires `DB_PASSWORD`, and no longer ships default secrets: random secrets are generated with `openssl rand` into a mode 0600 `.local/secrets.env` (or the file named by `LOCAL_SECRETS_FILE`). Frontends read `.env`; on a fresh clone run `cp .env.example .env` in `admin-front`, `merchant-front` and `checkout-front` (the real `.env` files are no longer tracked).
 
+### 1b. GitHub Codespaces (one command, no local install)
+
+The repository ships a dev container (`.devcontainer/`) with PostgreSQL 18, Bun and Node. In a Codespace run:
+
+```bash
+./scripts/codespaces-start.sh           # profile merchant-demo (default); `start full` adds the admin portal
+./scripts/codespaces-start.sh urls      # forwarded URLs
+./scripts/codespaces-start.sh credentials
+./scripts/codespaces-start.sh smoke     # real HTTP checks incl. a simulated Sandbox payment and mTLS
+./scripts/codespaces-start.sh stop
+```
+
+It generates every secret and the mTLS certificates into git-ignored folders (`.local/codespaces/`, `core-back/certs/`), migrates and seeds the databases, creates development users and starts the services of the chosen profile (`core`, `merchant-demo`, `full`). Only the portals and the edge APIs are forwarded; the core mTLS API (4000/4005) is never forwarded. Re-running it never resets data; `reset-db --yes-delete-dev-database` is the only destructive command and must be typed explicitly. Full guide, port-visibility table and limits: [`project-design/parts/07-deploy/08-codespaces.md`](project-design/parts/07-deploy/08-codespaces.md).
+
 ### 2. Core service only
 
 ```bash

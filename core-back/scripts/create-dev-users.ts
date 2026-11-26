@@ -11,6 +11,10 @@
  * On a test server that runs NODE_ENV=production:
  *
  *   DEV_USERS_ALLOW_PRODUCTION=true DEV_PASSWORD='DevPassword123!' bun run create-dev-users
+ *
+ * DEV_MERCHANT_UNSCOPED=true leaves the merchant admin unrestricted (every application,
+ * including the Sandbox plane's own applications, which a user scoped to the Live
+ * "Development Store" application would never see).
  */
 import "dotenv/config";
 import {
@@ -161,7 +165,9 @@ const main = async (): Promise<void> => {
       });
     }
 
-    const merchantRow = await upsertUser(merchantUser, merchant.id, [application.id]);
+    // An empty scope means "all applications" (see appScopeOf in api/internal/merchant.ts).
+    const merchantScope = process.env.DEV_MERCHANT_UNSCOPED === "true" ? [] : [application.id];
+    const merchantRow = await upsertUser(merchantUser, merchant.id, merchantScope);
 
     return { adminRow, checkerRow, merchantRow, merchant, wallet, application };
   });

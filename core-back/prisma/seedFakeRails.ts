@@ -24,6 +24,14 @@ const json = (value: unknown): Prisma.InputJsonValue => value as unknown as Pris
 
 const FAKE_RAILS_PUBLIC_BASE_URL =
   process.env.FAKE_RAILS_PUBLIC_BASE_URL ?? "http://127.0.0.1:8444";
+/**
+ * Origin the payer's BROWSER loads the emulator SDK from (widget script URLs + allowed origins).
+ * Defaults to `FAKE_RAILS_PUBLIC_BASE_URL`. Set it separately when core reaches the emulator on a
+ * private address (e.g. `http://127.0.0.1:4104`) but browsers only reach it through a forwarded
+ * URL (GitHub Codespaces).
+ */
+const FAKE_RAILS_BROWSER_BASE_URL =
+  process.env.FAKE_RAILS_BROWSER_BASE_URL?.trim() || FAKE_RAILS_PUBLIC_BASE_URL;
 const FAKE_RAILS_SEEDER_TOKEN = process.env.FAKE_RAILS_SEEDER_TOKEN ?? "";
 const FAKE_RAILS_ALLOWED_HOSTS = (process.env.FAKE_RAILS_ALLOWED_HOSTS ?? "")
   .split(",")
@@ -93,13 +101,13 @@ const updateWidgets = async (): Promise<number> => {
     const code = widget.route.gateway.code;
     const script = SDK_BY_GATEWAY[code];
     if (!script) continue;
-    const scriptUrl = `${FAKE_RAILS_PUBLIC_BASE_URL.replace(/\/$/, "")}/sdk/${script}`;
+    const scriptUrl = `${FAKE_RAILS_BROWSER_BASE_URL.replace(/\/$/, "")}/sdk/${script}`;
     await client.widgetDefinition.update({
       where: { id: widget.id },
       data: {
         scriptUrls: json([scriptUrl]),
         scriptSriHashes: json([]),
-        allowedOrigins: json([FAKE_RAILS_PUBLIC_BASE_URL.replace(/\/$/, "")]),
+        allowedOrigins: json([FAKE_RAILS_BROWSER_BASE_URL.replace(/\/$/, "")]),
       },
     });
     updated += 1;
@@ -132,6 +140,9 @@ const updateWebhookChannels = async (): Promise<number> => {
   return updated;
 };
 
+/** Entry names the ApiConsumer looks up (apiKey / token / username+password / secret / OAuth client). */
+const DEMO_CREDENTIAL_KEYS = ["apiKey", "token", "username", "password", "secret", "clientId", "clientSecret"] as const;
+
 const updateCredentialSecrets = async (): Promise<number> => {
   if (!FAKE_RAILS_SEEDER_TOKEN) return 0;
   const vault = new Vault();
@@ -150,6 +161,26 @@ const updateCredentialSecrets = async (): Promise<number> => {
         : [];
       let changed = false;
       const next = [];
+
+      // A freshly seeded platform set has no entries (real secrets are only written through the credential
+      // API), so no emulated gateway could authenticate. The emulator does not check key values, so create
+      // a demo manifest of well-known entry names, with secrets derived from the seeder token. Existing
+      // entries are never replaced, and gateways that need real certificates (MUTUAL_TLS) stay unconfigured.
+      if (entries.length === 0 && ["VERIFIED", "UNTESTED"].includes(String(set.status))) {
+        for (const key of DEMO_CREDENTIAL_KEYS) {
+          const value = await vault.encryptSecret(deriveFakeRailsSecret(code, `demo:${key}`), "credential-set");
+          next.push({ key, type: "HEADER", value, isSecret: true, secretVersion: 1 });
+        }
+        // Signing / webhook secrets referenced by the gateway's crypto profiles (key = the profile's secretKeyRef).
+        const refs = [...new Set(version.cryptoProfiles.map((profile) => profile.secretKeyRef).filter((ref): ref is string => Boolean(ref)))];
+        for (const ref of refs) {
+          const purpose = version.cryptoProfiles.some((profile) => profile.secretKeyRef === ref && profile.purpose === "INBOUND_VERIFY") ? "webhook" : "sign";
+          const value = await vault.encryptSecret(deriveFakeRailsSecret(code, purpose), "credential-set");
+          next.push({ key: ref, type: "HEADER", value, isSecret: true, secretVersion: 1 });
+        }
+        changed = true;
+      }
+
       for (const entry of entries) {
         const profiles = version.cryptoProfiles.filter((profile) => profile.secretKeyRef === entry.key);
         if (profiles.length === 0) {

@@ -29,7 +29,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun scripts/project-design/build.ts --check
       - run: bun scripts/project-design/check.ts
-      - run: git show --check --pretty=format: HEAD
+      - run: "git show --check --pretty=format: HEAD"
 
   core-back:
     runs-on: ubuntu-latest
@@ -176,3 +176,57 @@ jobs:
       - name: Build
         working-directory: ${{ matrix.workspace }}
         run: bun run build
+
+  # One-command Codespaces launcher: validate the dev container files and really boot the `core`
+  # profile (PostgreSQL 18, mTLS certificates, migrations, seeds, core-back over mTLS) so the
+  # Codespaces path cannot silently rot. The full portal profiles are covered by the jobs above.
+  codespaces:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_USER: postgres
+          POSTGRES_DB: payment_gateway_monolith_ci
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: "55433"
+      DB_NAME: payment_gateway_monolith_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Shell syntax
+        run: |
+          bash -n scripts/codespaces-start.sh
+          bash -n scripts/deploy-localhost.sh
+          bash -n .devcontainer/post-create.sh
+      - name: devcontainer.json is valid JSONC
+        run: |
+          bun -e 'const t = await Bun.file(".devcontainer/devcontainer.json").text(); JSON.parse(t.replace(/^\s*\/\/.*$/gm, "")); console.log("devcontainer.json OK")'
+      - name: Compose file is valid
+        run: docker compose -f .devcontainer/docker-compose.yml config -q
+      - name: Boot the core profile
+        run: ./scripts/codespaces-start.sh start core
+      - name: core-back rejects a client without a certificate (mTLS enforced)
+        run: |
+          if curl -ksf --max-time 5 https://127.0.0.1:4000/health >/dev/null; then
+            echo "::error::core-back answered a request that carried no client certificate"; exit 1
+          fi
+          echo "rejected as expected"
+      - name: Second start is idempotent (no reseed, no reset)
+        run: ./scripts/codespaces-start.sh start core
+      - name: Stop
+        if: always()
+        run: ./scripts/codespaces-start.sh stop
+      - name: Service logs on failure
+        if: failure()
+        run: tail -n 120 .local/codespaces/logs/*.log || true

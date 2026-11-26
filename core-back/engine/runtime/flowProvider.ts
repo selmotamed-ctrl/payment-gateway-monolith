@@ -180,6 +180,27 @@ const selectFlow = (
 };
 
 /**
+ * The database stores a step's content type as the `ContentType` enum name (`MULTIPART_FORM_DATA`), while the
+ * StepExecutor chooses how to build the request body from the MIME string (`multipart/form-data`). Passing the
+ * enum name through meant multipart and form-urlencoded steps never built a body (and JSON only worked through
+ * the fallback branch), so the gateway received an empty request. A value that already is a MIME string is kept.
+ */
+const CONTENT_TYPE_MIME: Record<string, string> = {
+  APPLICATION_JSON: "application/json",
+  APPLICATION_FORM_URLENCODED: "application/x-www-form-urlencoded",
+  MULTIPART_FORM_DATA: "multipart/form-data",
+  APPLICATION_XML: "application/xml",
+  TEXT_XML: "text/xml",
+  TEXT_PLAIN: "text/plain",
+};
+
+export const toMimeContentType = (value: unknown): string | undefined => {
+  if (value === undefined || value === null) return undefined;
+  const text = String(value);
+  return CONTENT_TYPE_MIME[text] ?? text;
+};
+
+/**
  * Replaces the named base URL placeholders of a URL template. Placeholders
  * that are not a known base URL are left untouched: they are path parameters
  * that the step executor resolves from the step parameters.
@@ -219,7 +240,7 @@ const toFlowStep = (
       row.urlTemplate === undefined || row.urlTemplate === null ? undefined : String(row.urlTemplate),
       baseUrls,
     ),
-    content_type: (row.contentType ?? undefined) as string | undefined,
+    content_type: toMimeContentType(row.contentType),
     xml_template: (row.xmlTemplate ?? undefined) as string | undefined,
     timeout_ms: (row.timeoutMs ?? undefined) as number | undefined,
     side_effect: (row.sideEffect ?? "READ_ONLY") as FlowStep["side_effect"],

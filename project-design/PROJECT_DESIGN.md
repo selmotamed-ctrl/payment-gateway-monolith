@@ -58,6 +58,7 @@ Historical `design/**` files are source lineage only; this document and the part
 - [Storage Provisioners](#deploystorage) — `partial`
 - [Backup Daemon](#deploybackup) — `partial`
 - [Health Verification, Rollback and Recovery](#deployhealth) — `partial`
+- [GitHub Codespaces and One-Command Local Launcher](#deploycodespaces) — `partial`
 - [Testing Strategy](#testingstrategy) — `partial`
 - [Test Suite Catalog](#testingsuites) — `partial`
 - [Fixtures, Mock API and Live Stack](#testingfixtures) — `partial`
@@ -3201,7 +3202,7 @@ Dispute, adjustment and cash-out summaries return a `byCurrency` array in additi
 
 <a id="coreengine"></a>
 
-> **Part ID:** `core.engine` · **Status:** `partial` · **Last verified:** 2026-11-25 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.engine` · **Status:** `partial` · **Last verified:** 2026-11-26 · **Verified against:** `efb90c8+working-tree`
 
 # Core Engine
 
@@ -3448,7 +3449,8 @@ Output stores: `STATE`, `PUBLIC`, `SETTLED_AMOUNT`, `PROVIDER_FEE`, `PROVIDER_RE
 
 HTTP behavior:
 
-- Method default `POST`; content types JSON, form-urlencoded, multipart, XML, or JSON-by-default.
+- Method default `POST`; content types JSON, form-urlencoded, multipart, XML, or JSON-by-default. The StepExecutor selects the body builder by **MIME substring** (`json`, `x-www-form-urlencoded`, `multipart`, `xml`); `PrismaFlowProvider` therefore maps the persisted `ContentType` enum (`APPLICATION_JSON`, `APPLICATION_FORM_URLENCODED`, `MULTIPART_FORM_DATA`, `APPLICATION_XML`, `TEXT_XML`, `TEXT_PLAIN`) to its MIME string through `toMimeContentType()` (2026-11-26; before, form and multipart steps built no body at all).
+- `ApiConsumer.send` passes a `FormData` body through untouched and deletes any preset `Content-Type` so `fetch` can add the multipart boundary; it was previously object-spread (`{}`) and JSON-stringified.
 - URL templates support `{name}`/`{{name}}` base URL placeholders; path parameters are encoded and cannot contain `/`, `\`, CR, LF or NUL.
 - Headers reject CR/LF/NUL.
 - Query arrays support indices, brackets and repeat formats.
@@ -3794,6 +3796,16 @@ Step 3 is not present today; registering an adapter alone does not make the live
 - `core-back/test/exhaustive/04-rail-engine/all-20-gateways-24-scenarios.test.ts` is the broad blueprint matrix; it is a repository test, not a live partner certification.
 
 No build or test was run for this documentation change. Tests that require PostgreSQL/Redis or partner sandboxes are environment-dependent.
+
+## Accuracy remediation: multipart and form bodies (2026-11-26)
+
+Found by driving a real Edfali (OTP-pull, `multipart/form-data`) payment through the Sandbox plane against Fake Rails. Three independent defects made the gateway receive an **empty** request and the engine end the confirm in `UNKNOWN` / `TRUSTED_SUCCESS_FACTS_FAILED`:
+
+1. `PrismaFlowProvider` forwarded the enum name (`MULTIPART_FORM_DATA`) as `content_type`; `StepExecutor` tests for `multipart`, `x-www-form-urlencoded`, `json` and `xml` (lower case MIME), so the multipart/form/XML builders never ran.
+2. `ApiConsumer.send` copied any object body with `{ ...body }`, which turns a `FormData` into `{}`.
+3. `ApiConsumer.serializeBody` JSON-stringified whatever was not a string/`URLSearchParams`/`ArrayBuffer`.
+
+Fixes: `toMimeContentType()` in `engine/runtime/flowProvider.ts`; `FormData` excluded from the spread and returned as-is (with the `Content-Type` header removed) in `ApiConsumer`. Pinned by `core-back/test/engine/multipart-and-content-type.test.ts`. Fake Rails was changed alongside so the loop closes (reference keys `invoice_no`/`merchantRef`, `env` echoed in success bodies, see `fake-rails.integration`).
 
 ## 9. Source references
 
@@ -14045,7 +14057,7 @@ The portal gains account and checkout-helper routes: `GET/POST/PATCH /portal-api
 
 <a id="fake-railsintegration"></a>
 
-> **Part ID:** `fake-rails.integration` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `fake-rails.integration` · **Status:** `partial` · **Last verified:** 2026-11-26 · **Verified against:** `efb90c8+working-tree`
 
 # Core Integration and Deployment
 
@@ -14102,7 +14114,11 @@ No other widget is changed.
 HMAC-SHA256(seederToken, "fake-rails:<gatewayCode>:<purpose>")
 ```
 
-where purpose is `webhook` if any matching profile is `INBOUND_VERIFY`, otherwise `sign`. The derived secret is encrypted through `Vault.encryptSecret(secret, "credential-set")`, the entry is marked secret and its `secretVersion` is incremented. Entries with no matching profile are left untouched. The credential set is marked `VERIFIED`.
+where purpose is `webhook` if any matching profile is `INBOUND_VERIFY`, otherwise `sign`.
+
+**Demo credential manifest (2026-11-26).** A freshly seeded platform credential set has `entriesCiphertext = []` (real secrets are only written through the credential API), so every emulated gateway failed at the first authenticated step with `API_KEY credential is missing`. When a `PLATFORM` set for a `VERIFIED`/`UNTESTED` status is empty, `updateCredentialSecrets()` now creates entries `apiKey`, `token`, `username`, `password`, `secret`, `clientId`, `clientSecret` (HMAC-derived, vault-encrypted, `secretVersion` 1) plus one entry per distinct crypto-profile `secretKeyRef` (key = the ref verbatim, derived with the same `webhook`/`sign` purpose rule). The emulator never checks key values, so this is sufficient for the test tier. Sets that already have entries are not touched except for the crypto-profile secrets above.
+
+**Browser-facing base URL.** `FAKE_RAILS_BROWSER_BASE_URL` (default `FAKE_RAILS_PUBLIC_BASE_URL`) is used only for widget script URLs and widget allowed origins. It lets core keep calling the emulator on a private address (`http://127.0.0.1:4104`) while a payer's browser loads the SDK from a forwarded URL (GitHub Codespaces). The derived secret is encrypted through `Vault.encryptSecret(secret, "credential-set")`, the entry is marked secret and its `secretVersion` is incremented. Entries with no matching profile are left untouched. The credential set is marked `VERIFIED`.
 
 **Environment mode.** `ensureEnvironmentSetting()` upserts `server.environment_mode = { mode: "TEST_SANDBOX" }`.
 
@@ -14194,7 +14210,7 @@ The redirect flow is unaffected because it uses a browser navigation to the host
 - **Wrong path.** `WebhookDispatcher.defaultUrlFor()` inserts `/webhook/` between the inbound base and `:gateway`, while the checkout route is `/api/v1/inbound/:gateway/:env/:pathToken`.
 - **Token mismatch.** The default token is `${gateway_code}-webhook`. Blueprint tokens are not uniformly that string (for example `cbl-lypay-webhook`); `seedFakeRails.ts` rewrites the first webhook channel per code to `${code}-webhook`, so the default works only after that pass and only for the rewritten channel.
 - **No fake-side verification.** The emulator signs outbound webhooks but never verifies core-originated requests.
-- **Credential coverage.** `updateCredentialSecrets()` only updates existing credential entries whose key matches a crypto profile. A gateway with no secret entry or a different key shape remains unconfigured.
+- **Credential coverage.** (Partly closed 2026-11-26: empty platform sets get a demo manifest, see section 3.1.) For sets that already have entries, `updateCredentialSecrets()` still only updates entries whose key matches a crypto profile. A gateway with no secret entry or a different key shape remains unconfigured.
 - **Crypto-profile mismatch.** The emulator has six explicit webhook signature profiles plus a generic fallback. `evo_pay`'s blueprint declares RSA-SHA256 with a private key, but the fake profile for `evo_pay` is not defined, so it falls back to HMAC.
 - **Statement channels.** The core seeds statement channel rows with `<code>-statement` tokens but has no `SETTLEMENT_FETCH` flow and no fetch URL. The fake `/statement` endpoint is not consumed automatically.
 
@@ -14279,7 +14295,9 @@ bun run deploy.ts --only=fake-rails
 
 ### Implemented
 
-- `seedFakeRails.ts` updates environments, widget URLs, webhook tokens and existing credential secrets.
+- `seedFakeRails.ts` updates environments, widget URLs, webhook tokens and credential secrets, and creates the demo credential manifest on empty platform sets.
+- Fake Rails recognises `invoice_no` and `merchantRef` as reference keys (the names the OTP-pull and one hosted blueprint send) and echoes `env`/`environment` in every success body, which core's trusted-success check requires.
+- `scripts/codespaces-smoke.ts` performs a real initiate -> OTP confirm -> merchant-visible `SUCCEEDED` flow through the seeded Edfali gateway on the Sandbox plane, plus a wrong-OTP negative control.
 - Deterministic HMAC secret derivation shared by both sides.
 - Triple-gated SSRF allowlist with tests.
 - Five synthetic-seeder safety gates.
@@ -14292,7 +14310,8 @@ bun run deploy.ts --only=fake-rails
 - `cbl_lypay` and `evo_pay` URL mismatches.
 - Webhook token/path mismatch.
 - Embedded widget blocked by CSP and renderer allowlist.
-- Credential coverage only updates existing entries.
+- Credential coverage: demo manifest on empty sets only; MUTUAL_TLS gateways unconfigured.
+- Only OTP-pull rails verified to settle; the initiate response omits the hosted redirect URL (`clientAction` has `kind: HTTP_REDIRECT` without `url`) and several rails fail at initiate (GAP-079).
 - Fake inbound requests are not verified.
 - Statement channels not connected to a fetch flow.
 
@@ -14301,7 +14320,7 @@ bun run deploy.ts --only=fake-rails
 - Core blueprints for the seven unseeded fake rails.
 - Automatic reconciliation pull from `/rails/:gateway/statement`.
 - SRI generation and propagation for fake SDK scripts.
-- A deployment smoke test that performs a full initiate/confirm/webhook flow through a seeded gateway.
+- A deployment smoke test for every rail and for the webhook leg (the OTP-pull confirm leg is now covered by `scripts/codespaces-smoke.ts`).
 - TLS verification of the fake rails certificate from core in the local script.
 
 ### Known bugs / risks
@@ -14318,7 +14337,8 @@ bun run deploy.ts --only=fake-rails
 - `core-back/test/exhaustive/10-seeder-and-deploy/synthetic-seeder-safety-and-audit.test.ts` covers all five seeder gates, handshake failure and the 3.5-year timeline audit.
 - `deploy/test/fakeRails.test.ts` covers host planning, production guard, credential requirement, port collision, synthetic-seed requirement, Arch/localhost support.
 - `deploy/test/exhaustive-deploy-matrix.test.ts` covers one-, two-, five- and six-host topologies, firewall unions, PKI SANs and Nginx rendering.
-- There is no test for `seedFakeRails.ts` itself, no full-flow test through a seeded core gateway, and no test that the embedded widget scripts load under the checkout CSP.
+- `core-back/test/engine/multipart-and-content-type.test.ts` pins the content-type mapping at the flow-provider boundary and the `FormData` pass-through in `ApiConsumer` (both defects made Edfali's multipart request arrive empty).
+- `scripts/codespaces-smoke.ts` is the only full-flow check through a seeded core gateway (live stack required). There is still no unit test for `seedFakeRails.ts` itself and no test that the embedded widget scripts load under the checkout CSP.
 
 ## 9. Source references
 
@@ -17036,6 +17056,125 @@ Every storage-only deploy checks `systemctl is-active pg-object-storage-daemon` 
 
 ---
 
+<a id="deploycodespaces"></a>
+
+> **Part ID:** `deploy.codespaces` · **Status:** `partial` · **Last verified:** 2026-11-26 · **Verified against:** `efb90c8+working-tree`
+
+# GitHub Codespaces and One-Command Local Launcher
+
+## 1. Purpose and scope
+
+This part documents the **development / demonstration** environment that lets a contributor open the repository in GitHub Codespaces (or any Linux/macOS/WSL host that already has PostgreSQL 18, Bun, Node and OpenSSL) and start a working stack with **one command**:
+
+```bash
+./scripts/codespaces-start.sh            # default profile: merchant-demo
+```
+
+It is **not** a deployment path. Nothing is published outside the machine; production and multi-host deployment remain the job of `deploy/` (see `deploy.topology`, `deploy.pipeline`). `scripts/deploy-localhost.sh` (PM2, Arch Linux workstation) is unchanged in purpose; the launcher exists because Codespaces has no PM2 and no systemd/sudo, uses containers for PostgreSQL and Redis, and reaches every portal through *forwarded* URLs instead of loopback.
+
+## 2. Design intent
+
+- **One clear command.** Idempotent: a second run reuses the database, secrets, certificates and portal builds and only starts what is not running.
+- **Nothing destructive by default.** The launcher never resets a database. Seeds are individually guarded (baseline seed only when `platform_settings` is empty; dev users only when missing; Fake Rails gateway re-pointing only when the forwarded URL or the seeder script changed). The only destructive path is `reset-db --yes-delete-dev-database`, which refuses `*_test` databases.
+- **No hard-coded secrets.** `KMS_MASTER_KEY`, `OBJECT_STORAGE_KEK_KEYRING`, the development password, the Fake Rails admin password, JWT secret, seeder token and control token are generated with `openssl rand` into `.local/codespaces/secrets.env` (mode 0600, git-ignored). The development password satisfies the `create-dev-users` policy (12+ characters with lowercase, uppercase and a digit). It is shown only by `./scripts/codespaces-start.sh credentials`.
+- **Security posture unchanged.** mTLS (TLS 1.3, one client common name per namespace) stays enforced between edges and cores; the launcher only generates the same local CA/certificates as `bun run generate-mtls-certs`. `core-back`, `core-sandbox`, PostgreSQL and Redis are never forwarded; every service binds to `127.0.0.1`; edges never receive `DATABASE_URL` or `KMS_MASTER_KEY`.
+
+## 3. As-built architecture
+
+### 3.1 Dev container (`.devcontainer/`)
+
+| File | Role |
+| :--- | :--- |
+| `devcontainer.json` | Compose-based container, Node 22 feature, `hostRequirements` 4 CPU / 8 GB, `forwardPorts` and labels, VS Code extensions, `postCreateCommand`. |
+| `docker-compose.yml` | `app` (workspace), `db` (`postgres:18`, named volume `pg18-data` at `/var/lib/postgresql`), `redis` (`redis:7`). `db` and `redis` publish no ports; trust authentication is therefore reachable only from `app` on the private compose network. |
+| `Dockerfile` | `devcontainers/base:ubuntu-24.04` + `postgresql-client`, `redis-tools`, `openssl`, `curl`, Bun (pinned `BUN_VERSION`, tested with 1.4.2). |
+| `post-create.sh` | Waits for PostgreSQL, creates `payment_gateway_monolith` and `payment_gateway_monolith_test`, installs every workspace with `--frozen-lockfile`, copies the portals' `.env.example`. It starts nothing and seeds nothing. |
+
+The compose environment points the Redis-backed and PostgreSQL-backed test suites at an isolated `payment_gateway_monolith_test` database, never at the development database.
+
+### 3.2 Launcher (`scripts/codespaces-start.sh`)
+
+Commands: `start [core|merchant-demo|full] [--rebuild]`, `stop`, `status`, `urls`, `credentials`, `logs <service>`, `smoke`, `reset-db --yes-delete-dev-database`.
+
+| Profile | Services |
+| :--- | :--- |
+| `core` | `core-back` |
+| `merchant-demo` (default) | `core-back`, `core-sandbox`, `fake-rails-back`, `merchant-back`, `checkout-back`, merchant / checkout / Fake Rails portals |
+| `full` | `merchant-demo` + `admin-back` + admin portal |
+
+Start sequence: tool check → secrets → PostgreSQL 18 version gate (`server_version_num >= 180000`) → database(s) → dependencies → mTLS certificates → `prisma generate` + `migrate deploy` → guarded seeds → portal builds → services → health checks (core cores probed over mTLS with Bun, because some curl builds cannot present a PEM client key).
+
+**Ports** (schema defaults): core 4000, sandbox core 4005, admin-back 4101, merchant-back 4102, checkout-back 4103, Fake Rails 4104, portals 5101-5104.
+
+**Portals reach their edge through the Vite preview proxy.** Production builds call a relative `/api`; `vite preview` proxies it to `VITE_API_URL` (`http://127.0.0.1:<edge port>`), so the browser only ever talks to the portal's own forwarded origin: no CORS, no cookies across origins, and edge ports need no forwarding. Vite blocks unknown `Host` headers, so each portal is started with `VITE_MY_TAILSCALE=<its forwarded host>` (the existing allowed-hosts hook); `fake-rails-front` gained the same hook.
+
+**URLs baked at build time.** `VITE_CHECKOUT_BASE_URL` (merchant portal link generator) and `VITE_CHECKOUT_ORIGIN` (Fake Rails portal) depend on the Codespace name, so portals are rebuilt only when that URL set changes (`build.stamp`) or with `--rebuild`.
+
+**Forwarded URL derivation.** `https://${CODESPACE_NAME}-<port>.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}`; outside Codespaces `http://127.0.0.1:<port>`.
+
+### 3.3 Why a Sandbox plane
+
+Fake Rails answers with `env: "SANDBOX"` and the engine's trusted-success check requires the response environment to equal the attempt's. Fake Rails payments therefore only settle on **Sandbox-plane** attempts (`sbx_*` links), as designed in `platform.sandbox`. The `merchant-demo` and `full` profiles start a second `core-back` (`EXECUTION_PLANE=SANDBOX`, port 4005) on its own database `<DB_NAME>_sandbox`, migrated with `?options=-c app.execution_plane=SANDBOX` (otherwise v38 stamps the database LIVE), and give the edges `SANDBOX_CORE_BACK_URL`. The Live core runs with `PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE=true` (a development deployment only) and `OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED=false` when both planes share the vault.
+
+### 3.4 Fake Rails wiring specific to this launcher
+
+- Core reaches the emulator at `http://127.0.0.1:4104` (seeded as the gateway base URL, `FAKE_RAILS_PUBLIC_BASE_URL` of the core), while the payer's browser uses the forwarded Fake Rails *portal* origin: `fake-rails-back` is started with `FAKE_RAILS_PUBLIC_BASE_URL=<forwarded 5104>` (hosted redirect pages live in the portal) and `seedFakeRails.ts` accepts `FAKE_RAILS_BROWSER_BASE_URL` for widget SDK script URLs / allowed origins.
+- `seedFakeRails.ts` now creates a demo credential manifest (`apiKey`, `token`, `username`, `password`, `secret`, `clientId`, `clientSecret`, plus every crypto profile `secretKeyRef`) on **empty** platform credential sets, values derived from the seeder token. The emulator never checks key values; existing entries are never replaced; mutual-TLS gateways stay unconfigured.
+- `FAKE_RAILS_CONTROL_TOKEN` is generated and shared by the sandbox core and `fake-rails-back` (required in production mode by the control plane).
+- The dev merchant is created with `DEV_MERCHANT_UNSCOPED=true` so it is not restricted to the single Live application and can use Sandbox Studio.
+
+## 4. Contracts and invariants
+
+- The launcher refuses `NODE_ENV=production` unless `LOCAL_TARGET=1`.
+- Every service log is `.local/codespaces/logs/<service>.log`; pids in `.local/codespaces/pids`.
+- Changing the key material after seeding is refused: if encrypted data exists but no KMS key is found in the secrets file the launcher stops and explains how to restore it or reset.
+- `.gitattributes` forces LF for `*.sh`, `.devcontainer/**` and `project-design/**` so a Windows checkout with `core.autocrlf=true` does not break the scripts or the design generator.
+
+## 5. Data / API / config / deployment surface
+
+| Variable | Used by | Meaning |
+| :--- | :--- | :--- |
+| `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | launcher | PostgreSQL connection (compose sets `db:5432`, trust auth, `payment_gateway_monolith`). |
+| `SANDBOX_DB_NAME` | launcher | Sandbox plane database (default `<DB_NAME>_sandbox`). |
+| `CODESPACES_SECRETS_FILE` | launcher | Override of `.local/codespaces/secrets.env`. |
+| `REDIS_URL` | core | Optional cache/velocity store (compose sets `redis://redis:6379`). |
+| `FAKE_RAILS_BROWSER_BASE_URL` | `seedFakeRails.ts` | Browser-reachable origin for SDK script URLs; defaults to `FAKE_RAILS_PUBLIC_BASE_URL`. |
+| `DEV_MERCHANT_UNSCOPED` | `create-dev-users` | `true` leaves the dev merchant unrestricted (all applications). |
+
+Forwarded ports (private by default): 5102 merchant portal, 5103 checkout, 5104 Fake Rails portal, 4102 merchant API (`pg_live_` / `pg_test_` tokens), 5101 admin portal (`full` only). Port visibility cannot be set from `devcontainer.json`; make a port public only from the Ports tab, and only the one you intend to demonstrate.
+
+## 6. Operational usage
+
+```bash
+./scripts/codespaces-start.sh               # start
+./scripts/codespaces-start.sh smoke         # 17 real HTTP checks incl. a simulated payment and mTLS enforcement
+./scripts/codespaces-start.sh credentials   # development logins
+./scripts/codespaces-start.sh stop
+```
+
+Codespaces stop after inactivity: processes die, the PostgreSQL volume and `.local/` survive; run the start command again. Deleting the Codespace deletes both.
+
+CI (`codespaces` job) validates the shell syntax, parses `devcontainer.json`, validates the compose file, boots the `core` profile against a PostgreSQL 18 service container, proves `core-back` rejects a client without a certificate, and runs the start command a second time to prove idempotence.
+
+## 7. Status and deviations
+
+### Implemented
+
+- Dev container, launcher with three profiles, Sandbox plane wiring, guarded seeds, generated secrets, mTLS probes, smoke test, CI job.
+- Verified locally (Windows host, WSL PostgreSQL 18.6, Bun 1.4.2): fresh first start of `merchant-demo`, idempotent restart, the 17-check smoke test, an Edfali and a Sadad OTP payment settling `SUCCEEDED`.
+
+### Partial
+
+- Not exercised inside a real Codespace (no Docker on the verifying host).
+- Only OTP-pull rails settle; other rails initiate (redirect, QR, embedded) but settlement needs tester actions or hits seeded-blueprint gaps.
+
+### Known bugs / risks
+
+- Code gap: Windows Bun 1.4.2 crashes/hangs in `test/admin-slice/report-engine-migration.test.ts`; verified on Linux (CI) only.
+- Documentation gap closed in this change: `deploy-localhost.sh` could not start core (missing `OBJECT_STORAGE_KEK_KEYRING`, plane-fence flag) and its dev password never satisfied the user policy; both fixed.
+
+---
+
 <a id="testingstrategy"></a>
 
 > **Part ID:** `testing.strategy` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
@@ -17870,7 +18009,7 @@ The final core run was 20,265 pass / 5,066 skip / 4 fail; the 4 failures are the
 
 <a id="testingfixtures"></a>
 
-> **Part ID:** `testing.fixtures` · **Status:** `partial` · **Last verified:** 2026-11-03 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `testing.fixtures` · **Status:** `partial` · **Last verified:** 2026-11-26 · **Verified against:** `efb90c8+working-tree`
 
 # Fixtures, Mock API and Live Stack
 
@@ -18146,6 +18285,7 @@ bun run test:live
 - `tests/playwright*.config.ts` define the web servers and projects.
 - `scripts/deploy-localhost.sh` is executable and was read for this part; it was not run.
 - `tests/e2e-live/live.spec.ts` contains the hard-coded defaults.
+- `scripts/codespaces-smoke.ts` (run through `./scripts/codespaces-start.sh smoke`) is the first live check that performs initiate -> OTP confirm -> merchant-visible `SUCCEEDED` through the seeded Edfali gateway, plus mTLS-rejection, unauthenticated-merchant-API and wrong-OTP negative checks. Verified 17/17 on 2026-11-26 against the `merchant-demo` profile.
 
 No test in this part verifies the fixture itself. The fixture is exercised indirectly by every mocked Playwright suite.
 
@@ -18179,6 +18319,7 @@ No test in this part verifies the fixture itself. The fixture is exercised indir
 ## 10. Change history
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
+- 2026-11-26: added the Codespaces launcher and its smoke test (see `deploy.codespaces`).
 
 ---
 

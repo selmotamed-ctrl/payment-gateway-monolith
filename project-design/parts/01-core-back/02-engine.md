@@ -3,8 +3,8 @@ id: core.engine
 title: Core Engine
 status: partial
 confidence: high
-last_verified: 2026-11-25
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-26
+verified_against: efb90c8+working-tree
 code:
   - core-back/lib/commerceStatus.ts
   - core-back/engine/runtime/index.ts
@@ -38,6 +38,7 @@ tests:
   - core-back/test/gaps/gap-015-018-regressions.test.ts
   - core-back/test/engine/step-executor.test.ts
   - core-back/test/engine/api-consumer.test.ts
+  - core-back/test/engine/multipart-and-content-type.test.ts
   - core-back/test/engine/api-consumer-primitives.test.ts
   - core-back/test/engine/transform-pipeline.test.ts
   - core-back/test/engine/crypto.test.ts
@@ -308,7 +309,8 @@ Output stores: `STATE`, `PUBLIC`, `SETTLED_AMOUNT`, `PROVIDER_FEE`, `PROVIDER_RE
 
 HTTP behavior:
 
-- Method default `POST`; content types JSON, form-urlencoded, multipart, XML, or JSON-by-default.
+- Method default `POST`; content types JSON, form-urlencoded, multipart, XML, or JSON-by-default. The StepExecutor selects the body builder by **MIME substring** (`json`, `x-www-form-urlencoded`, `multipart`, `xml`); `PrismaFlowProvider` therefore maps the persisted `ContentType` enum (`APPLICATION_JSON`, `APPLICATION_FORM_URLENCODED`, `MULTIPART_FORM_DATA`, `APPLICATION_XML`, `TEXT_XML`, `TEXT_PLAIN`) to its MIME string through `toMimeContentType()` (2026-11-26; before, form and multipart steps built no body at all).
+- `ApiConsumer.send` passes a `FormData` body through untouched and deletes any preset `Content-Type` so `fetch` can add the multipart boundary; it was previously object-spread (`{}`) and JSON-stringified.
 - URL templates support `{name}`/`{{name}}` base URL placeholders; path parameters are encoded and cannot contain `/`, `\`, CR, LF or NUL.
 - Headers reject CR/LF/NUL.
 - Query arrays support indices, brackets and repeat formats.
@@ -654,6 +656,16 @@ Step 3 is not present today; registering an adapter alone does not make the live
 - `core-back/test/exhaustive/04-rail-engine/all-20-gateways-24-scenarios.test.ts` is the broad blueprint matrix; it is a repository test, not a live partner certification.
 
 No build or test was run for this documentation change. Tests that require PostgreSQL/Redis or partner sandboxes are environment-dependent.
+
+## Accuracy remediation: multipart and form bodies (2026-11-26)
+
+Found by driving a real Edfali (OTP-pull, `multipart/form-data`) payment through the Sandbox plane against Fake Rails. Three independent defects made the gateway receive an **empty** request and the engine end the confirm in `UNKNOWN` / `TRUSTED_SUCCESS_FACTS_FAILED`:
+
+1. `PrismaFlowProvider` forwarded the enum name (`MULTIPART_FORM_DATA`) as `content_type`; `StepExecutor` tests for `multipart`, `x-www-form-urlencoded`, `json` and `xml` (lower case MIME), so the multipart/form/XML builders never ran.
+2. `ApiConsumer.send` copied any object body with `{ ...body }`, which turns a `FormData` into `{}`.
+3. `ApiConsumer.serializeBody` JSON-stringified whatever was not a string/`URLSearchParams`/`ArrayBuffer`.
+
+Fixes: `toMimeContentType()` in `engine/runtime/flowProvider.ts`; `FormData` excluded from the spread and returned as-is (with the `Content-Type` header removed) in `ApiConsumer`. Pinned by `core-back/test/engine/multipart-and-content-type.test.ts`. Fake Rails was changed alongside so the loop closes (reference keys `invoice_no`/`merchantRef`, `env` echoed in success bodies, see `fake-rails.integration`).
 
 ## 9. Source references
 

@@ -55,7 +55,9 @@ const sourceMap = existsSync(join(ROOT, "project-design/appendices/design-source
   ? readFileSync(join(ROOT, "project-design/appendices/design-source-map.md"), "utf8")
   : "";
 // Every design/**/*.md (except README.md) must be mapped in the design source map.
+// `Bun.Glob` yields native separators on Windows; the source map always uses forward slashes.
 const designFiles = [...new Bun.Glob("design/**/*.md").scanSync({ cwd: ROOT })]
+  .map((file) => file.replaceAll("\\", "/"))
   .filter((file) => !file.endsWith("README.md"))
   .sort();
 if (designFiles.length === 0) {

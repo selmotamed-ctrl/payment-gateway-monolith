@@ -1,0 +1,5 @@
+# Keep shell scripts, the dev container and the generated design docs on LF even when a Windows
+# checkout has core.autocrlf=true (CRLF breaks bash scripts and the project-design generator).
+*.sh text eol=lf
+.devcontainer/** text eol=lf
+project-design/** text eol=lf

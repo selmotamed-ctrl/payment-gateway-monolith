@@ -31,11 +31,16 @@ if [[ -f "$SECRETS_FILE" ]]; then
   . "$SECRETS_FILE"
 fi
 gen_secret() { openssl rand -hex 24 | cut -c1-40; }
+# create-dev-users enforces a password policy (12+ chars with lowercase, uppercase and a digit), which a
+# plain hex string never satisfies; keep 128 bits of randomness and add the required character classes.
+gen_password() { printf 'Dp1-%s' "$(openssl rand -hex 16)"; }
 ensure_secret() {
   local name="$1"
   if [[ -z "${!name:-}" ]]; then
     local value
-    value="$(gen_secret)"
+    if [[ "$name" == "DEV_PASSWORD" ]]; then value="$(gen_password)"
+    elif [[ "$name" == "OBJECT_STORAGE_KEK_KEYRING" ]]; then value="v1:$(openssl rand -hex 32)"
+    else value="$(gen_secret)"; fi
     printf -v "$name" '%s' "$value"
     printf '%s=%q\n' "$name" "$value" >> "$SECRETS_FILE"
     chmod 600 "$SECRETS_FILE"
@@ -86,6 +91,8 @@ DATABASE_URL="${DATABASE_URL:-postgresql://${DB_USER}:$(url_encode "$DB_PASSWORD
 
 ensure_secret KMS_MASTER_KEY
 ensure_secret DEV_PASSWORD
+# core-back refuses the development fallback KEK when NODE_ENV=production (see objectStorageSdk/crypto.ts).
+ensure_secret OBJECT_STORAGE_KEK_KEYRING
 FAKE_RAILS_BASE_URL="${FAKE_RAILS_BASE_URL:-$(deploy_value FAKE_RAILS_PUBLIC_BASE_URL http://127.0.0.1:4104)}"
 FAKE_RAILS_PUBLIC_BASE_URL="${FAKE_RAILS_PUBLIC_BASE_URL:-$FAKE_RAILS_BASE_URL}"
 FAKE_RAILS_BACK_PORT="${FAKE_RAILS_BACK_PORT:-$(deploy_value FAKE_RAILS_BACK_PORT 4104)}"
@@ -179,6 +186,8 @@ const commonCore = {
   NODE_ENV: "production",
   DATABASE_URL: "$DATABASE_URL",
   KMS_MASTER_KEY: "$KMS_MASTER_KEY",
+  OBJECT_STORAGE_KEK_KEYRING: "$OBJECT_STORAGE_KEK_KEYRING",
+  OBJECT_STORAGE_ROOT_DIR: path.join(root, ".local/object-storage"),
   MTLS_CA_CERT_PATH: path.join(core, "certs/internal-ca.crt"),
   MTLS_SERVER_CERT_PATH: path.join(core, "certs/core-back.crt"),
   MTLS_SERVER_KEY_PATH: path.join(core, "certs/core-back.key"),
@@ -191,6 +200,9 @@ const commonCore = {
   FAKE_RAILS_ENABLED: "true",
   FAKE_RAILS_ALLOW_IN_PRODUCTION: "true",
   ALLOW_FAKE_RAILS_HOSTS: "true",
+  // Local test tier: the emulator normally belongs to the Sandbox plane (core-back/engine/PlaneFenceGuard.ts).
+  EXECUTION_PLANE: "LIVE",
+  PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE: "true",
   FAKE_RAILS_ALLOWED_HOSTS: "127.0.0.1,localhost",
   FAKE_RAILS_PUBLIC_BASE_URL: "$FAKE_RAILS_BASE_URL",
   FAKE_RAILS_SEEDER_TOKEN: "$FAKE_RAILS_SEEDER_TOKEN",

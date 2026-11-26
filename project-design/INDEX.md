@@ -88,6 +88,7 @@ This is the canonical entrypoint for the payment-gateway project design.
 - [Storage Provisioners](parts/07-deploy/05-storage-provisioners.md) — `deploy.storage` · `partial`
 - [Backup Daemon](parts/07-deploy/06-backup-daemon.md) — `deploy.backup` · `partial`
 - [Health Verification, Rollback and Recovery](parts/07-deploy/07-health-rollback-and-recovery.md) — `deploy.health` · `partial`
+- [GitHub Codespaces and One-Command Local Launcher](parts/07-deploy/08-codespaces.md) — `deploy.codespaces` · `partial`
 
 ### 08-testing
 

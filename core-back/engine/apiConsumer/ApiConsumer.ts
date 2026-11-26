@@ -515,6 +515,7 @@ export class ApiConsumer {
     let rawBody = request.body;
     if (rawBody !== undefined && rawBody !== null && typeof rawBody === "object"
       && !(rawBody instanceof URLSearchParams) && !(rawBody instanceof ArrayBuffer)
+      && !(typeof FormData !== "undefined" && rawBody instanceof FormData)
       && !ArrayBuffer.isView(rawBody)) {
       rawBody = { ...(rawBody as Record<string, unknown>) };
     }
@@ -613,6 +614,13 @@ export class ApiConsumer {
       return body as FetchBody;
     }
     if (ArrayBuffer.isView(body)) {
+      return body as FetchBody;
+    }
+    if (typeof FormData !== "undefined" && body instanceof FormData) {
+      // The multipart boundary only exists once fetch serialises the form: an explicit
+      // `Content-Type: multipart/form-data` without it makes the gateway reject (or ignore) the body, and
+      // JSON.stringify(FormData) would silently send "{}". Let fetch set the header itself.
+      headers.delete("content-type");
       return body as FetchBody;
     }
     if (!headers.has("content-type")) {

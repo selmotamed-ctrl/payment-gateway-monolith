@@ -1,0 +1,64 @@
+# Dev stack for GitHub Codespaces / VS Code Dev Containers.
+#
+#   app    the workspace container (Bun, Node, psql, redis-cli, openssl)
+#   db     PostgreSQL 18 - the only supported runtime database
+#   redis  Redis 7 - optional cache/velocity store, required by the Redis-backed test suites
+#
+# db and redis publish NO ports: they are reachable only from `app` over the private compose network,
+# so trust authentication on `db` is not reachable from outside the Codespace.
+name: payment-gateway-codespace
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: sleep infinity
+    volumes:
+      - ../..:/workspaces:cached
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_NAME: payment_gateway_monolith
+      REDIS_URL: redis://redis:6379
+      # Isolated database for `bun test` (never the development database)
+      POSTGRES_TEST_DATABASE_URL: postgresql://postgres@db:5432/payment_gateway_monolith_test
+      STORAGE_TEST_DATABASE_URL: postgresql://postgres@db:5432/payment_gateway_monolith_test
+      EXHAUSTIVE_DATABASE_URL: postgresql://postgres@db:5432/payment_gateway_monolith_test
+      STORAGE_TEST_REDIS_URL: redis://redis:6379
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: payment_gateway_monolith
+      POSTGRES_HOST_AUTH_METHOD: trust
+    # PostgreSQL 18 images keep data in a versioned subdirectory of /var/lib/postgresql.
+    volumes:
+      - pg18-data:/var/lib/postgresql
+    command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=256MB"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d payment_gateway_monolith"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+volumes:
+  pg18-data:

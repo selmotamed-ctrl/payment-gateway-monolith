@@ -953,7 +953,7 @@ The portal gains account and checkout-helper routes: `GET/POST/PATCH /portal-api
 
 ## Core Integration and Deployment
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-26
 
 ## 1. Purpose and scope
 
@@ -1008,7 +1008,11 @@ No other widget is changed.
 HMAC-SHA256(seederToken, "fake-rails:<gatewayCode>:<purpose>")
 ```
 
-where purpose is `webhook` if any matching profile is `INBOUND_VERIFY`, otherwise `sign`. The derived secret is encrypted through `Vault.encryptSecret(secret, "credential-set")`, the entry is marked secret and its `secretVersion` is incremented. Entries with no matching profile are left untouched. The credential set is marked `VERIFIED`.
+where purpose is `webhook` if any matching profile is `INBOUND_VERIFY`, otherwise `sign`.
+
+**Demo credential manifest (2026-11-26).** A freshly seeded platform credential set has `entriesCiphertext = []` (real secrets are only written through the credential API), so every emulated gateway failed at the first authenticated step with `API_KEY credential is missing`. When a `PLATFORM` set for a `VERIFIED`/`UNTESTED` status is empty, `updateCredentialSecrets()` now creates entries `apiKey`, `token`, `username`, `password`, `secret`, `clientId`, `clientSecret` (HMAC-derived, vault-encrypted, `secretVersion` 1) plus one entry per distinct crypto-profile `secretKeyRef` (key = the ref verbatim, derived with the same `webhook`/`sign` purpose rule). The emulator never checks key values, so this is sufficient for the test tier. Sets that already have entries are not touched except for the crypto-profile secrets above.
+
+**Browser-facing base URL.** `FAKE_RAILS_BROWSER_BASE_URL` (default `FAKE_RAILS_PUBLIC_BASE_URL`) is used only for widget script URLs and widget allowed origins. It lets core keep calling the emulator on a private address (`http://127.0.0.1:4104`) while a payer's browser loads the SDK from a forwarded URL (GitHub Codespaces). The derived secret is encrypted through `Vault.encryptSecret(secret, "credential-set")`, the entry is marked secret and its `secretVersion` is incremented. Entries with no matching profile are left untouched. The credential set is marked `VERIFIED`.
 
 **Environment mode.** `ensureEnvironmentSetting()` upserts `server.environment_mode = { mode: "TEST_SANDBOX" }`.
 
@@ -1100,7 +1104,7 @@ The redirect flow is unaffected because it uses a browser navigation to the host
 - **Wrong path.** `WebhookDispatcher.defaultUrlFor()` inserts `/webhook/` between the inbound base and `:gateway`, while the checkout route is `/api/v1/inbound/:gateway/:env/:pathToken`.
 - **Token mismatch.** The default token is `${gateway_code}-webhook`. Blueprint tokens are not uniformly that string (for example `cbl-lypay-webhook`); `seedFakeRails.ts` rewrites the first webhook channel per code to `${code}-webhook`, so the default works only after that pass and only for the rewritten channel.
 - **No fake-side verification.** The emulator signs outbound webhooks but never verifies core-originated requests.
-- **Credential coverage.** `updateCredentialSecrets()` only updates existing credential entries whose key matches a crypto profile. A gateway with no secret entry or a different key shape remains unconfigured.
+- **Credential coverage.** (Partly closed 2026-11-26: empty platform sets get a demo manifest, see section 3.1.) For sets that already have entries, `updateCredentialSecrets()` still only updates entries whose key matches a crypto profile. A gateway with no secret entry or a different key shape remains unconfigured.
 - **Crypto-profile mismatch.** The emulator has six explicit webhook signature profiles plus a generic fallback. `evo_pay`'s blueprint declares RSA-SHA256 with a private key, but the fake profile for `evo_pay` is not defined, so it falls back to HMAC.
 - **Statement channels.** The core seeds statement channel rows with `<code>-statement` tokens but has no `SETTLEMENT_FETCH` flow and no fetch URL. The fake `/statement` endpoint is not consumed automatically.
 
@@ -1185,7 +1189,9 @@ bun run deploy.ts --only=fake-rails
 
 ### Implemented
 
-- `seedFakeRails.ts` updates environments, widget URLs, webhook tokens and existing credential secrets.
+- `seedFakeRails.ts` updates environments, widget URLs, webhook tokens and credential secrets, and creates the demo credential manifest on empty platform sets.
+- Fake Rails recognises `invoice_no` and `merchantRef` as reference keys (the names the OTP-pull and one hosted blueprint send) and echoes `env`/`environment` in every success body, which core's trusted-success check requires.
+- `scripts/codespaces-smoke.ts` performs a real initiate -> OTP confirm -> merchant-visible `SUCCEEDED` flow through the seeded Edfali gateway on the Sandbox plane, plus a wrong-OTP negative control.
 - Deterministic HMAC secret derivation shared by both sides.
 - Triple-gated SSRF allowlist with tests.
 - Five synthetic-seeder safety gates.
@@ -1198,7 +1204,8 @@ bun run deploy.ts --only=fake-rails
 - `cbl_lypay` and `evo_pay` URL mismatches.
 - Webhook token/path mismatch.
 - Embedded widget blocked by CSP and renderer allowlist.
-- Credential coverage only updates existing entries.
+- Credential coverage: demo manifest on empty sets only; MUTUAL_TLS gateways unconfigured.
+- Only OTP-pull rails verified to settle; the initiate response omits the hosted redirect URL (`clientAction` has `kind: HTTP_REDIRECT` without `url`) and several rails fail at initiate (GAP-079).
 - Fake inbound requests are not verified.
 - Statement channels not connected to a fetch flow.
 
@@ -1207,7 +1214,7 @@ bun run deploy.ts --only=fake-rails
 - Core blueprints for the seven unseeded fake rails.
 - Automatic reconciliation pull from `/rails/:gateway/statement`.
 - SRI generation and propagation for fake SDK scripts.
-- A deployment smoke test that performs a full initiate/confirm/webhook flow through a seeded gateway.
+- A deployment smoke test for every rail and for the webhook leg (the OTP-pull confirm leg is now covered by `scripts/codespaces-smoke.ts`).
 - TLS verification of the fake rails certificate from core in the local script.
 
 ### Known bugs / risks
@@ -1224,7 +1231,8 @@ bun run deploy.ts --only=fake-rails
 - `core-back/test/exhaustive/10-seeder-and-deploy/synthetic-seeder-safety-and-audit.test.ts` covers all five seeder gates, handshake failure and the 3.5-year timeline audit.
 - `deploy/test/fakeRails.test.ts` covers host planning, production guard, credential requirement, port collision, synthetic-seed requirement, Arch/localhost support.
 - `deploy/test/exhaustive-deploy-matrix.test.ts` covers one-, two-, five- and six-host topologies, firewall unions, PKI SANs and Nginx rendering.
-- There is no test for `seedFakeRails.ts` itself, no full-flow test through a seeded core gateway, and no test that the embedded widget scripts load under the checkout CSP.
+- `core-back/test/engine/multipart-and-content-type.test.ts` pins the content-type mapping at the flow-provider boundary and the `FormData` pass-through in `ApiConsumer` (both defects made Edfali's multipart request arrive empty).
+- `scripts/codespaces-smoke.ts` is the only full-flow check through a seeded core gateway (live stack required). There is still no unit test for `seedFakeRails.ts` itself and no test that the embedded widget scripts load under the checkout CSP.
 
 ## 9. Source references
 

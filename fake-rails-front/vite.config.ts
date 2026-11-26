@@ -38,6 +38,8 @@ export default ({ mode }: { mode: string }) => {
     },
     server: {
       port: 5104,
+      // Same convention as the other portals: one extra hostname (LAN/Tailscale/Codespaces forwarded host).
+      ...(loaded.VITE_MY_TAILSCALE ? { allowedHosts: [loaded.VITE_MY_TAILSCALE] } : {}),
       proxy: {
         "/portal-api": { target: backend, changeOrigin: true },
         "/rails": { target: backend, changeOrigin: true },
