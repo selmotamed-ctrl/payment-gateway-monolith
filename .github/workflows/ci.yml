@@ -26,10 +26,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # two commits so HEAD^1 exists (a shallow clone would make `git show` treat the whole tree as added)
+          fetch-depth: 2
       - uses: oven-sh/setup-bun@v2
       - run: bun scripts/project-design/build.ts --check
       - run: bun scripts/project-design/check.ts
-      - run: "git show --check --pretty=format: HEAD"
+      - name: Whitespace check of the change under test
+        run: |
+          if git rev-parse --verify -q HEAD^1 >/dev/null; then git diff --check HEAD^1 HEAD; fi
 
   core-back:
     runs-on: ubuntu-latest
@@ -72,6 +77,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Install (frozen lockfile)
         run: bun install --frozen-lockfile
+      - name: Install sibling workspaces imported by core-back tests
+        working-directory: .
+        run: |
+          for workspace in admin-back deploy deploy/backup-daemon; do
+            (cd "$workspace" && bun install --frozen-lockfile)
+          done
       - name: Generate the Prisma client
         run: bun run migrate-generate
       - name: Generate the internal mTLS test certificates
@@ -120,6 +131,12 @@ jobs:
       - name: Install (frozen lockfile)
         working-directory: ${{ matrix.workspace }}
         run: bun install --frozen-lockfile
+      - name: Install sibling workspaces imported across workspace boundaries
+        if: startsWith(matrix.workspace, 'deploy')
+        run: |
+          for workspace in core-back deploy deploy/backup-daemon admin-back; do
+            if [ "$workspace" != "${{ matrix.workspace }}" ]; then (cd "$workspace" && bun install --frozen-lockfile); fi
+          done
       - name: Typecheck
         working-directory: ${{ matrix.workspace }}
         run: bun run typecheck
@@ -153,6 +170,11 @@ jobs:
       - name: Install (frozen lockfile)
         working-directory: tests
         run: bun install --frozen-lockfile
+      - name: Install the frontends whose sources the unit tests import
+        run: |
+          for workspace in admin-front merchant-front checkout-front fake-rails-front; do
+            (cd "$workspace" && bun install --frozen-lockfile)
+          done
       - name: Root Vitest suite
         working-directory: tests
         run: bun run test:unit
