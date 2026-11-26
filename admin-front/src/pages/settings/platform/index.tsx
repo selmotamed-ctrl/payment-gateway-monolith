@@ -1,14 +1,16 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
+import { useRoute, useRouter } from "vue-router";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VCheckbox, VDivider, VFileInput, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VFileInput, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { api } from "@/state/api";
+import { hasOneOfAuthorities } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -17,37 +19,64 @@ import { showSnackBar } from "@/utils/snackBar";
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
 import { FormChecklist } from "@/components/ui/FormChecklist";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
 import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
-import { DescriptionList } from "@/components/ui/DescriptionList";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { SectionFields } from "@/components/SectionFields";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { JsonDiffViewer } from "@/components/ui/JsonDiffViewer";
-import { PlatformSettingTypedEditor } from "@/components/builders/PlatformSettingTypedEditor";
-import { SettingValueView } from "@/components/builders/SettingValueView";
-import {
-    buildSettingValue,
-    isSettingUnchanged,
-    knownSettingKeys,
-    parseSettingForm,
-    resolveSettingNamespace,
-    validateSettingForm,
-    type SettingForm,
-} from "@/components/builders/model";
 import { NotificationTemplatesTab } from "./components/NotificationTemplatesTab";
-type PlatformSetting = {
-    id: string;
-    key: string;
-    scope: string;
-    version: number;
-    valueJson: Record<string, unknown>;
-    effectiveFrom: string;
-    createdAt: string;
-    updatedAt: string;
-};
+import { SettingsSectionNav } from "./components/SettingsSectionNav";
+import { SettingsHealthStrip } from "./components/SettingsHealthStrip";
+import { SettingRow } from "./components/SettingRow";
+import { SettingDetailDrawer } from "./components/SettingDetailDrawer";
+import { NewSettingDrawer } from "./components/NewSettingDrawer";
+import {
+    SETTING_SECTIONS,
+    SETTING_SECTION_BY_ID,
+    createUnregisteredEntry,
+    filterSettingEntries,
+    mergeSettingEntries,
+    resolveSettingDefinition,
+    resolveSettingNamespace,
+    settingSectionCounts,
+    type PlatformSettingRow,
+    type SettingEntry,
+    type SettingSectionId,
+    type SettingStatusFilter,
+    type SettingsViewId,
+} from "@/components/builders/model";
+
+const BACKUP_EXPORT_CHECKS = [
+    { key: "SETTINGS_SCOPE_VERIFIED", label: "Settings scope verified" },
+    { key: "SENSITIVE_VALUES_REVIEWED", label: "Sensitive values reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "SETTINGS_SCOPE_VERIFIED", label: "Settings scope verified" },
+    { key: "VERSIONS_REVIEWED", label: "Version counts reviewed" },
+    { key: "EFFECTIVE_DATES_REVIEWED", label: "Effective dates reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
+const RESTORE_CHECKS = [
+    { key: "BACKUP_REVIEWED", label: "Backup contents reviewed" },
+    { key: "INVALID_ENTRIES_CLEARED", label: "Invalid entries cleared" },
+    { key: "VERSION_CONFLICTS_REVIEWED", label: "Version conflicts reviewed" },
+    { key: "RESTORE_SCOPE_CONFIRMED", label: "Restore scope confirmed" },
+] as const;
+
+const STATUS_FILTERS: Array<{ id: SettingStatusFilter; label: string }> = [
+    { id: "all", label: "All" },
+    { id: "live", label: "Live policies" },
+    { id: "decision", label: "Decision records" },
+    { id: "default", label: "Using defaults" },
+    { id: "attention", label: "Needs attention" },
+];
+
+const isSectionId = (value: unknown): value is SettingSectionId =>
+    typeof value === "string" && SETTING_SECTIONS.some((item) => item.id === value);
+const isStatusFilter = (value: unknown): value is SettingStatusFilter =>
+    typeof value === "string" && STATUS_FILTERS.some((item) => item.id === value);
 
 type SettingsSummary = {
     keys: number;
@@ -77,63 +106,41 @@ const restoreTone = (status: string): "success" | "warning" | "danger" | "neutra
     return "neutral";
 };
 
-const BACKUP_EXPORT_CHECKS = [
-    { key: "SETTINGS_SCOPE_VERIFIED", label: "Settings scope verified" },
-    { key: "SENSITIVE_VALUES_REVIEWED", label: "Sensitive values reviewed" },
-    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
-] as const;
-
-const SUMMARY_EXPORT_CHECKS = [
-    { key: "SETTINGS_SCOPE_VERIFIED", label: "Settings scope verified" },
-    { key: "VERSIONS_REVIEWED", label: "Version counts reviewed" },
-    { key: "EFFECTIVE_DATES_REVIEWED", label: "Effective dates reviewed" },
-    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
-] as const;
-
-const SETTING_EDIT_CHECKS = [
-    { key: "KEY_SCOPE_VERIFIED", label: "Key and scope verified" },
-    { key: "VALUE_SCHEMA_REVIEWED", label: "Value schema reviewed" },
-    { key: "EFFECTIVE_DATE_REVIEWED", label: "Effective date reviewed" },
-    { key: "IMMUTABLE_VERSION_ACKNOWLEDGED", label: "Immutable-version impact acknowledged" },
-] as const;
-
-const RESTORE_CHECKS = [
-    { key: "BACKUP_REVIEWED", label: "Backup contents reviewed" },
-    { key: "INVALID_ENTRIES_CLEARED", label: "Invalid entries cleared" },
-    { key: "VERSION_CONFLICTS_REVIEWED", label: "Version conflicts reviewed" },
-    { key: "RESTORE_SCOPE_CONFIRMED", label: "Restore scope confirmed" },
-] as const;
-
 const PlatformSettingsPage = dc(() => {
     const { t } = useLocale();
+    const route = useRoute();
+    const router = useRouter();
     const showChecklists = areChecklistsVisible();
-    const settings = ref<PlatformSetting[]>([]);
+    const canWrite = computed(() => hasOneOfAuthorities(["settings:write", "settings.write"]));
+
+    const settings = ref<PlatformSettingRow[]>([]);
     const summary = ref<SettingsSummary | null>(null);
     const loading = ref(true);
     const error = ref<string | null>(null);
-    const search = ref("");
-
-    const dialogOpen = ref(false);
+    const search = ref(typeof route.query.q === "string" ? route.query.q : "");
+    const section = ref<SettingsViewId>(isSectionId(route.query.section) ? (route.query.section as SettingsViewId) : "all");
+    const statusFilter = ref<SettingStatusFilter>(isStatusFilter(route.query.status) ? (route.query.status as SettingStatusFilter) : "all");
     const tab = ref<"settings" | "templates">("settings");
-    const editKey = ref("");
-    const editForm = ref<SettingForm>(parseSettingForm(null, {}));
-    const editError = ref<string | null>(null);
-    const editChecklist = ref<Record<string, boolean>>({});
-    const saving = ref(false);
+    const detailOpen = ref(false);
+    const selectedEntry = ref<SettingEntry | null>(null);
+    const detailOpenedAt = ref(0);
+    const newOpen = ref(false);
+    const newOpenedAt = ref(0);
+
     const exportLoading = ref(false);
     const backupExportOpen = ref(false);
     const backupExportChecklist = ref<Record<string, boolean>>({});
-    const backupExportChecklistComplete = computed(() => !showChecklists || BACKUP_EXPORT_CHECKS.every((check) => backupExportChecklist.value[check.key] === true));
     const summaryExportLoading = ref(false);
+    const summaryExportOpen = ref(false);
     const summaryExportChecklist = ref<Record<string, boolean>>({});
-    const history = ref<PlatformSetting[]>([]);
+
     const restoreOpen = ref(false);
     const restoreLoading = ref(false);
     const restoreError = ref<string | null>(null);
     const restoreFileName = ref("");
     const restorePreview = ref<{
         summary: { backupKeys: number; added: number; changed: number; unchanged: number; invalid: number; missingInBackup: number };
-        entries: Array<{ index: number; key: string; scope: string; status: string; reason?: string; currentVersion?: number | null; nextVersion?: number; effectiveFrom?: string | null; backupValue?: Record<string, unknown> }>;
+        entries: Array<{ index: number; key: string; scope: string; status: string; reason?: string; currentVersion?: number | null; nextVersion?: number; effectiveFrom?: string | null; backupValue?: Record<string, unknown>; currentValue?: Record<string, unknown> | null }>;
         missingInBackup: string[];
     } | null>(null);
     const restoreConfirm = ref(false);
@@ -141,9 +148,55 @@ const PlatformSettingsPage = dc(() => {
     const restoreReason = ref("");
     const restoreApplying = ref(false);
     const restoreApplyError = ref<string | null>(null);
-    const compareRow = ref<PlatformSetting | null>(null);
 
-    const load = async () => {
+    const backupExportChecklistComplete = computed(() => !showChecklists || BACKUP_EXPORT_CHECKS.every((check) => backupExportChecklist.value[check.key] === true));
+    const summaryExportChecklistComplete = computed(() => !showChecklists || SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+    const restoreChecklistComplete = computed(() => !showChecklists || RESTORE_CHECKS.every((check) => restoreChecklist.value[check.key] === true));
+
+    const entries = computed(() => mergeSettingEntries(settings.value));
+    const sectionCounts = computed(() => settingSectionCounts(entries.value));
+    const filtered = computed(() =>
+        filterSettingEntries(entries.value, {
+            query: search.value,
+            section: section.value,
+            status: statusFilter.value,
+            translate: t,
+        }),
+    );
+    const statusCounts = computed(() => ({
+        all: entries.value.length,
+        live: entries.value.filter((entry) => entry.displayStatus === "RUNTIME" || entry.displayStatus === "DYNAMIC").length,
+        decision: entries.value.filter((entry) => entry.displayStatus === "DECISION").length,
+        default: entries.value.filter((entry) => entry.displayStatus === "UNCONFIGURED").length,
+        attention: entries.value.filter((entry) => entry.displayStatus === "UNREGISTERED" || entry.displayStatus === "DEPRECATED" || entry.displayStatus === "FALLBACK").length,
+    }));
+
+    const groups = computed(() => {
+        const map = new Map<SettingSectionId, SettingEntry[]>();
+        for (const entry of filtered.value) {
+            const list = map.get(entry.definition.section) ?? [];
+            list.push(entry);
+            map.set(entry.definition.section, list);
+        }
+        return SETTING_SECTIONS.filter((item) => map.has(item.id)).map((item) => ({
+            section: item,
+            entries: map.get(item.id)!,
+        }));
+    });
+
+    const activeSection = computed(() => (section.value === "all" ? null : SETTING_SECTION_BY_ID[section.value]));
+    const unconfiguredEntries = computed(() => entries.value.filter((entry) => entry.displayStatus === "UNCONFIGURED"));
+    const hasFilters = computed(() => search.value.trim().length > 0 || section.value !== "all" || statusFilter.value !== "all");
+
+    const updateQuery = (patch: Record<string, string | undefined>) => {
+        const next: Record<string, string> = {};
+        for (const [key, value] of Object.entries({ ...route.query, ...patch })) {
+            if (typeof value === "string" && value.length > 0) next[key] = value;
+        }
+        void router.replace({ query: next });
+    };
+
+    const load = async (openKey?: string | null) => {
         loading.value = true;
         error.value = null;
         try {
@@ -153,37 +206,120 @@ const PlatformSettingsPage = dc(() => {
             ]);
             const listPayload = listResponse.data?.data ?? listResponse.data ?? {};
             const summaryPayload = summaryResponse.data?.data ?? summaryResponse.data ?? {};
-            settings.value = (listPayload.settings ?? []) as PlatformSetting[];
+            settings.value = (listPayload.settings ?? []) as PlatformSettingRow[];
             summary.value = (summaryPayload.summary ?? summaryPayload) as SettingsSummary;
+            const wanted = openKey ?? (typeof route.query.open === "string" ? route.query.open : null);
+            if (wanted) {
+                const found = mergeSettingEntries(settings.value).find((entry) => entry.key === wanted);
+                if (found) {
+                    selectedEntry.value = found;
+                    window.setTimeout(() => {
+                        detailOpen.value = true;
+                        detailOpenedAt.value = Date.now();
+                    }, 0);
+                }
+            }
         } catch (e) {
             error.value = extractApiErrorMessage(e);
         } finally {
             loading.value = false;
         }
     };
-
     void load();
 
-    const grouped = computed(() => {
-        const map = new Map<string, PlatformSetting[]>();
-        for (const row of settings.value) {
-            const list = map.get(row.key) ?? [];
-            list.push(row);
-            map.set(row.key, list);
-        }
-        for (const list of map.values()) list.sort((left, right) => right.version - left.version);
-        return map;
-    });
+    const selectSection = (value: SettingsViewId) => {
+        section.value = value;
+        updateQuery({ section: value === "all" ? undefined : value });
+    };
 
-    const rows = computed(() => {
-        const query = search.value.trim().toLowerCase();
-        return [...grouped.value.entries()]
-            .filter(([key]) => !query || key.toLowerCase().includes(query))
-            .map(([key, versions]) => ({ key, latest: versions[0]!, versions }))
-            .sort((left, right) => left.key.localeCompare(right.key));
-    });
+    const setStatusFilter = (value: SettingStatusFilter) => {
+        statusFilter.value = value;
+        updateQuery({ status: value === "all" ? undefined : value });
+    };
 
-    const summaryExportChecklistComplete = computed(() => !showChecklists || SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+    const openEntry = (entry: SettingEntry) => {
+        selectedEntry.value = entry;
+        window.setTimeout(() => {
+            detailOpen.value = true;
+            detailOpenedAt.value = Date.now();
+            updateQuery({ open: entry.key });
+        }, 0);
+    };
+
+    const openKey = (key: string) => {
+        const found = entries.value.find((entry) => entry.key === key);
+        openEntry(found ?? createUnregisteredEntry(key));
+    };
+
+    const closeDetail = (value: boolean) => {
+        // Vuetify can emit an initial false while the temporary drawer is mounting.
+        if (!value && Date.now() - detailOpenedAt.value < 250) return;
+        detailOpen.value = value;
+        if (!value) updateQuery({ open: undefined });
+    };
+
+    const openNew = () => {
+        window.setTimeout(() => {
+            newOpen.value = true;
+            newOpenedAt.value = Date.now();
+        }, 0);
+    };
+
+    const selectNew = (entry: SettingEntry) => {
+        newOpen.value = false;
+        selectedEntry.value = entry;
+        window.setTimeout(() => {
+            detailOpen.value = true;
+            detailOpenedAt.value = Date.now();
+            updateQuery({ open: entry.key });
+        }, 0);
+    };
+
+    const createCustom = (key: string) => {
+        newOpen.value = false;
+        const found = entries.value.find((entry) => entry.key === key);
+        selectedEntry.value = found ?? createUnregisteredEntry(key);
+        window.setTimeout(() => {
+            detailOpen.value = true;
+            detailOpenedAt.value = Date.now();
+            updateQuery({ open: key });
+        }, 0);
+    };
+
+    const saved = async () => {
+        const key = selectedEntry.value?.key ?? null;
+        await load(key);
+    };
+
+    const reviewDefaults = () => {
+        search.value = "";
+        section.value = "all";
+        setStatusFilter("default");
+    };
+
+    const reviewAttention = () => {
+        search.value = "";
+        section.value = "all";
+        setStatusFilter("attention");
+    };
+
+    const clearFilters = () => {
+        search.value = "";
+        section.value = "all";
+        statusFilter.value = "all";
+        updateQuery({ q: undefined, section: undefined, status: undefined });
+    };
+
+    const metricItems = computed<MetricItem[]>(() => {
+        const data = summary.value;
+        if (!data) return [];
+        return [
+            { key: "keys", label: t("Setting keys"), value: String(data.keys) },
+            { key: "versions", label: t("Versions"), value: String(data.versions) },
+            { key: "updated", label: t("Updated last 24h"), value: String(data.updatedLast24h), badge: data.updatedLast24h > 0 ? t("Active") : t("Clear"), badgeTone: data.updatedLast24h > 0 ? "success" : "neutral" },
+            { key: "future", label: t("Future effective"), value: String(data.futureEffective), badge: data.futureEffective > 0 ? t("Watch") : t("Clear"), badgeTone: data.futureEffective > 0 ? "warning" : "success" },
+        ];
+    });
 
     const exportSummary = async () => {
         if (summaryExportLoading.value) return;
@@ -212,36 +348,13 @@ const PlatformSettingsPage = dc(() => {
                 lines,
             });
             showSnackBar({ type: "success", message: t("Platform settings summary exported") });
+            summaryExportOpen.value = false;
         } catch (error) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
         } finally {
             summaryExportLoading.value = false;
         }
     };
-
-    const metricItems = computed<MetricItem[]>(() => {
-        const data = summary.value;
-        if (!data) return [];
-        return [
-            { key: "keys", label: t("Setting keys"), value: String(data.keys) },
-            { key: "versions", label: t("Versions"), value: String(data.versions) },
-            { key: "updated", label: t("Updated last 24h"), value: String(data.updatedLast24h), badge: data.updatedLast24h > 0 ? t("Active") : t("Clear"), badgeTone: data.updatedLast24h > 0 ? "success" : "neutral" },
-            { key: "future", label: t("Future effective"), value: String(data.futureEffective), badge: data.futureEffective > 0 ? t("Watch") : t("Clear"), badgeTone: data.futureEffective > 0 ? "warning" : "success" },
-        ];
-    });
-
-    const restoreMetricItems = computed<MetricItem[]>(() => {
-        const preview = restorePreview.value;
-        if (!preview) return [];
-        return [
-            { key: "backupKeys", label: t("Backup keys"), value: String(preview.summary.backupKeys) },
-            { key: "added", label: t("Added"), value: String(preview.summary.added) },
-            { key: "changed", label: t("Changed"), value: String(preview.summary.changed) },
-            { key: "unchanged", label: t("Unchanged"), value: String(preview.summary.unchanged) },
-            { key: "invalid", label: t("Invalid"), value: String(preview.summary.invalid), badge: preview.summary.invalid > 0 ? t("Critical") : t("Clear"), badgeTone: preview.summary.invalid > 0 ? "danger" : "success" },
-            { key: "missing", label: t("Missing in backup"), value: String(preview.summary.missingInBackup), badge: preview.summary.missingInBackup > 0 ? t("Watch") : t("Clear"), badgeTone: preview.summary.missingInBackup > 0 ? "warning" : "success" },
-        ];
-    });
 
     const exportBackup = async () => {
         if (exportLoading.value) return;
@@ -310,8 +423,6 @@ const PlatformSettingsPage = dc(() => {
         }
     };
 
-    const restoreChecklistComplete = computed(() => !showChecklists || RESTORE_CHECKS.every((check) => restoreChecklist.value[check.key] === true));
-
     const applyRestore = async () => {
         const preview = restorePreview.value;
         if (!preview || restoreApplying.value) return;
@@ -361,113 +472,44 @@ const PlatformSettingsPage = dc(() => {
         }
     };
 
-    const editDef = computed(() => resolveSettingNamespace(editKey.value.trim()));
-
-    const openNew = () => {
-        editKey.value = "";
-        editForm.value = parseSettingForm(null, {});
-        editError.value = null;
-        editChecklist.value = {};
-        history.value = [];
-        compareRow.value = null;
-        dialogOpen.value = true;
-    };
-
-    const copySettingValue = async (entry: { key: string; latest: PlatformSetting }) => {
-        try {
-            await navigator.clipboard.writeText(JSON.stringify({ key: entry.key, version: entry.latest.version, value: entry.latest.valueJson }, null, 2));
-            showSnackBar({ type: "success", message: t("Setting value copied") });
-        } catch {
-            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
-        }
-    };
-
-    const openEdit = (entry: { key: string; versions: PlatformSetting[] }) => {
-        editKey.value = entry.key;
-        editForm.value = parseSettingForm(resolveSettingNamespace(entry.key), entry.versions[0]?.valueJson ?? {});
-        editError.value = null;
-        editChecklist.value = {};
-        history.value = entry.versions;
-        compareRow.value = null;
-        dialogOpen.value = true;
-    };
-
-    /** Typing a known key switches the form to its typed editor, keeping what was already entered. */
-    const changeKey = (value: string) => {
-        const before = resolveSettingNamespace(editKey.value.trim());
-        const carried = buildSettingValue(before, editForm.value);
-        editKey.value = value;
-        editForm.value = parseSettingForm(resolveSettingNamespace(value.trim()), carried);
-    };
-
-    const restoreVersion = (row: PlatformSetting) => {
-        editForm.value = parseSettingForm(editDef.value, row.valueJson ?? {});
-        editError.value = null;
-    };
-
-    const editChecklistComplete = computed(() => !showChecklists || SETTING_EDIT_CHECKS.every((check) => editChecklist.value[check.key] === true));
-
-    const save = async () => {
-        if (saving.value) return;
-        const key = editKey.value.trim();
-        if (!/^[A-Za-z0-9._:-]{2,120}$/.test(key)) {
-            editError.value = t("Use 2-120 letters, digits, dots, colons, underscores or hyphens.");
-            return;
-        }
-        if (validateSettingForm(editDef.value, editForm.value).length > 0) {
-            editError.value = t("Fix the highlighted fields before saving.");
-            return;
-        }
-        const parsed = buildSettingValue(editDef.value, editForm.value);
-        if (history.value.length > 0 && isSettingUnchanged(editDef.value, editForm.value, history.value[0]?.valueJson)) {
-            editError.value = t("Nothing changed: the value is identical to the current version.");
-            return;
-        }
-        if (history.value.length === 0 && Object.keys(parsed).length === 0) {
-            editError.value = t("Enter at least one value.");
-            return;
-        }
-        if (!editChecklistComplete.value) {
-            editError.value = t("Complete all setting checklist items before saving.");
-            return;
-        }
-        saving.value = true;
-        editError.value = null;
-        try {
-            await api.put(urlsMap.settings, {
-                settings: { [key]: parsed },
-                checklist: SETTING_EDIT_CHECKS.filter((check) => editChecklist.value[check.key]).map((check) => check.key),
-            });
-            showSnackBar({ type: "success", message: t("A new setting version was saved") });
-            dialogOpen.value = false;
-            await load();
-        } catch (e) {
-            editError.value = extractApiErrorMessage(e);
-        } finally {
-            saving.value = false;
-        }
-    };
+    const restoreMetricItems = computed<MetricItem[]>(() => {
+        const preview = restorePreview.value;
+        if (!preview) return [];
+        return [
+            { key: "backupKeys", label: t("Backup keys"), value: String(preview.summary.backupKeys) },
+            { key: "added", label: t("Added"), value: String(preview.summary.added) },
+            { key: "changed", label: t("Changed"), value: String(preview.summary.changed) },
+            { key: "unchanged", label: t("Unchanged"), value: String(preview.summary.unchanged) },
+            { key: "invalid", label: t("Invalid"), value: String(preview.summary.invalid), badge: preview.summary.invalid > 0 ? t("Critical") : t("Clear"), badgeTone: preview.summary.invalid > 0 ? "danger" : "success" },
+            { key: "missing", label: t("Missing in backup"), value: String(preview.summary.missingInBackup), badge: preview.summary.missingInBackup > 0 ? t("Watch") : t("Clear"), badgeTone: preview.summary.missingInBackup > 0 ? "warning" : "success" },
+        ];
+    });
 
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Platform Settings")}
-                    subtitle={t("Governed platform configuration with versioned changes.")}
+                    subtitle={t("Searchable, versioned configuration with a reader, effect and hint for every setting.")}
                     end={() => tab.value !== "settings" ? null : (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
                                 {t("Refresh")}
                             </VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportBackup()}>
+                            <VBtn variant="tonal" prependIcon="mdi-download" onClick={() => (backupExportOpen.value = true)}>
                                 {t("Export backup")}
+                            </VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-chart-box-outline" onClick={() => (summaryExportOpen.value = true)}>
+                                {t("Export summary")}
                             </VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-backup-restore" onClick={openRestore}>
                                 {t("Restore preview")}
                             </VBtn>
-                            <VBtn color="primary" variant="flat" prependIcon="mdi-plus" onClick={openNew}>
-                                {t("New setting")}
-                            </VBtn>
+                            {canWrite.value && (
+                                <VBtn color="primary" variant="flat" prependIcon="mdi-plus" onClick={openNew}>
+                                    {t("New setting")}
+                                </VBtn>
+                            )}
                         </ThemedView>
                     )}
                 />
@@ -481,93 +523,120 @@ const PlatformSettingsPage = dc(() => {
                     ]}
                     ariaLabel={t("Platform settings sections")}
                 />
+
                 {tab.value === "templates" ? (
                     <NotificationTemplatesTab />
-                ) : (
-                    <>
-                <VAlert type="info" variant="tonal">
-                    {t("Every save creates a new immutable version. The effective version is the highest version whose effective date has passed.")}
-                </VAlert>
-
-                {error.value ? (
+                ) : error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : loading.value ? (
                     <StateView loading={true} />
                 ) : (
                     <>
-                        {summary.value && (
-                            <SummaryExportCard
-                                title={t("Configuration health")}
-                                metrics={metricItems.value}
-                                exportLoading={summaryExportLoading.value}
-                                exportDisabled={!summaryExportChecklistComplete.value}
-                                onExport={() => void exportSummary()}
-                            >
-                                <FormChecklist
-                                    checks={[...SUMMARY_EXPORT_CHECKS]}
-                                    modelValue={summaryExportChecklist.value}
-                                    onUpdate:modelValue={(value: Record<string, boolean>) => (summaryExportChecklist.value = value)}
-                                    show={showChecklists}
-                                    title={t("Summary export checklist")}
-                                    complete={summaryExportChecklistComplete.value}
-                                    incompleteMessage={t("Complete all summary export checklist items before exporting")}
+                        <VAlert type="info" variant="tonal">
+                            {t("Every save creates a new immutable version. The effective version is the highest version whose effective date has passed; a future version is shown as scheduled.")}
+                        </VAlert>
+                        <SettingsHealthStrip entries={entries.value} onReviewDefaults={reviewDefaults} onReviewAttention={reviewAttention} />
+
+                        <SurfaceCard bodyPadding="14px 16px">
+                            <div class="pg-settings-toolbar">
+                                <VTextField
+                                    modelValue={search.value}
+                                    onUpdate:modelValue={(value: string) => (search.value = value)}
+                                    prependInnerIcon="mdi-magnify"
+                                    label={t("Search settings")}
+                                    placeholder={t("Search by name, key, description, reader, effect or hint…")}
+                                    density="compact"
+                                    hideDetails
+                                    clearable
+                                    aria-label={t("Search settings")}
                                 />
-                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                    {Object.entries(summary.value.scopes ?? {}).map(([scope, count]) => (
-                                        <MetaPill key={scope} size="x-small" variant="tonal">{scope}: {count}</MetaPill>
+                                <div class="pg-settings-toolbar__filters" role="group" aria-label={t("Filter by status")}>
+                                    {STATUS_FILTERS.map((filter) => (
+                                        <VBtn
+                                            key={filter.id}
+                                            size="small"
+                                            variant={statusFilter.value === filter.id ? "tonal" : "text"}
+                                            color={statusFilter.value === filter.id ? "primary" : undefined}
+                                            onClick={() => setStatusFilter(filter.id)}
+                                        >
+                                            {t(filter.label)} <span class="pg-settings-toolbar__count">{statusCounts.value[filter.id]}</span>
+                                        </VBtn>
                                     ))}
-                                </ThemedView>
-                            </SummaryExportCard>
-                        )}
+                                </div>
+                            </div>
+                        </SurfaceCard>
 
-                        <FormField label={t("Search setting key")}>
-                            <VTextField
-                                modelValue={search.value}
-                                onUpdate:modelValue={(value: string) => (search.value = value)}
-                                prependInnerIcon="mdi-magnify"
-                                clearable
-                            />
-                        </FormField>
+                        <div class="pg-settings-layout">
+                            <SettingsSectionNav modelValue={section.value} counts={sectionCounts.value} onUpdate:modelValue={selectSection} ariaLabel={t("Settings sections")} />
+                            <section id="pg-settings-results" role="tabpanel" aria-live="polite" class="pg-settings-results">
+                                <div class="pg-settings-results__header">
+                                    <div>
+                                        <h2 class="pg-settings-results__title">
+                                            {activeSection.value ? t(activeSection.value.title) : t("All settings")}
+                                        </h2>
+                                        <p class="pg-settings-results__subtitle">
+                                            {activeSection.value ? t(activeSection.value.description) : t("Every known setting, grouped by the part of the platform it affects.")}
+                                        </p>
+                                    </div>
+                                    <div class="pg-settings-results__meta">
+                                        <span>{t("{count} settings", { count: filtered.value.length })}</span>
+                                        {hasFilters.value && <VBtn size="x-small" variant="text" onClick={clearFilters}>{t("Clear filters")}</VBtn>}
+                                    </div>
+                                </div>
 
-                        {rows.value.length === 0 && (
-                            <SurfaceCard>
-                                <SurfaceCardText>
-                                    <StateView empty={true} emptyTitle={t("No settings found")} emptyDescription={t("Create the first platform setting.")} minHeight="180px" />
-                                </SurfaceCardText>
-                            </SurfaceCard>
-                        )}
-
-                        {rows.value.map((entry) => (
-                            <SurfaceCard key={entry.key}>
-                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "14px", direction: "ltr" }}>{entry.key}</ThemedText>
-                                        <MetaPill size="x-small" variant="tonal" color="primary">v{entry.latest.version}</MetaPill>
-                                        <MetaPill size="x-small" variant="tonal">{entry.latest.scope}</MetaPill>
-                                        {resolveSettingNamespace(entry.key) && (
-                                            <MetaPill size="x-small" variant="text">{t(resolveSettingNamespace(entry.key)!.title)}</MetaPill>
-                                        )}
-                                        {entry.versions.length > 1 && (
-                                            <MetaPill size="x-small" variant="text">{entry.versions.length} {t("versions")}</MetaPill>
-                                        )}
-                                        <div style={{ flex: 1 }} />
-                                        <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>
-                                            {t("Effective")}: {formatDateTime(entry.latest.effectiveFrom)}
-                                        </ThemedText>
-                                    </ThemedView>
-                                    <SettingValueView settingKey={entry.key} value={entry.latest.valueJson} maxRows={8} />
-                                    <ThemedView style={{ flexDirection: "row", gap: "6px", justifyContent: "flex-end", flexWrap: "wrap" }}>
-                                        <VBtn size="small" variant="text" prependIcon="mdi-content-copy" onClick={() => void copySettingValue(entry)}>{t("Copy value")}</VBtn>
-                                        <VBtn size="small" variant="tonal" onClick={() => openEdit(entry)}>{t("History & edit")}</VBtn>
-                                    </ThemedView>
-                                </SurfaceCardText>
-                            </SurfaceCard>
-                        ))}
-                    </>
-                )}
+                                {groups.value.length === 0 ? (
+                                    <SurfaceCard bodyPadding="18px">
+                                        <StateView
+                                            empty={true}
+                                            emptyTitle={t("No settings match")}
+                                            emptyDescription={t("Try a different search, section or status filter.")}
+                                            minHeight="160px"
+                                        />
+                                    </SurfaceCard>
+                                ) : (
+                                    groups.value.map((group) => (
+                                        <div key={group.section.id} class="pg-settings-group">
+                                            <div class="pg-settings-group__header">
+                                                <div>
+                                                    <h3 class="pg-settings-group__title">{t(group.section.title)}</h3>
+                                                    <p class="pg-settings-group__subtitle">{t(group.section.description)}</p>
+                                                </div>
+                                                <span class="pg-settings-group__count">{t("{count} settings", { count: group.entries.length })}</span>
+                                            </div>
+                                            <SurfaceCard noPadding>
+                                                {group.entries.map((entry) => (
+                                                    <SettingRow key={entry.key} entry={entry} onOpen={openEntry} />
+                                                ))}
+                                            </SurfaceCard>
+                                        </div>
+                                    ))
+                                )}
+                            </section>
+                        </div>
                     </>
                 )}
             </ThemedView>
+
+            <SettingDetailDrawer
+                modelValue={detailOpen.value}
+                onUpdate:modelValue={closeDetail}
+                entry={selectedEntry.value}
+                canWrite={canWrite.value}
+                showChecklists={showChecklists}
+                onSaved={() => void saved()}
+                onOpenKey={openKey}
+            />
+
+            <NewSettingDrawer
+                modelValue={newOpen.value}
+                onUpdate:modelValue={(value: boolean) => {
+                    if (!value && Date.now() - newOpenedAt.value < 250) return;
+                    newOpen.value = value;
+                }}
+                entries={unconfiguredEntries.value}
+                onSelect={selectNew}
+                onCreateCustom={createCustom}
+            />
 
             <FormModal
                 modelValue={backupExportOpen.value}
@@ -587,6 +656,28 @@ const PlatformSettingsPage = dc(() => {
                     title={t("Backup export checklist")}
                     complete={backupExportChecklistComplete.value}
                     incompleteMessage={t("Complete all backup export checklist items before exporting")}
+                />
+            </FormModal>
+
+            <FormModal
+                modelValue={summaryExportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (summaryExportOpen.value = value)}
+                title={t("Export settings summary")}
+                size="md"
+                loading={summaryExportLoading.value}
+                submitLabel={t("Export summary")}
+                onSubmit={() => void exportSummary()}
+            >
+                <VAlert type="info" variant="tonal">{t("The summary contains counts and effective-date health, not the values themselves.")}</VAlert>
+                <MetricStrip items={metricItems.value} />
+                <FormChecklist
+                    checks={[...SUMMARY_EXPORT_CHECKS]}
+                    modelValue={summaryExportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (summaryExportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Summary export checklist")}
+                    complete={summaryExportChecklistComplete.value}
+                    incompleteMessage={t("Complete all summary export checklist items before exporting")}
                 />
             </FormModal>
 
@@ -621,7 +712,7 @@ const PlatformSettingsPage = dc(() => {
                 <VAlert type="info" variant="tonal">
                     {t("Choose a settings backup JSON. This preview does not write anything.")}
                 </VAlert>
-                <FormField label={t("Settings backup JSON")} sensitiveMakerChecker>
+                <FormField label={t("Settings backup JSON")}>
                     <VFileInput
                         {...{ accept: ".json,application/json" }}
                         modelValue={null}
@@ -635,20 +726,26 @@ const PlatformSettingsPage = dc(() => {
                         <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{restoreFileName.value}</ThemedText>
                         <MetricStrip items={restoreMetricItems.value} />
                         <ThemedView style={{ gap: "6px" }}>
-                            {restorePreview.value.entries.map((entry) => (
-                                <ThemedView key={`${entry.index}-${entry.key}`} style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap", padding: "7px 9px", borderRadius: "var(--pg-radius-sm)", border: "1px solid var(--pg-border-subtle)" }}>
-                                    <StatusBadge status={entry.status} toneOverride={restoreTone(entry.status)} showDot={false} />
-                                    <ThemedText style={{ fontSize: "12px", fontWeight: 600, direction: "ltr" }}>{entry.key}</ThemedText>
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{entry.scope}</ThemedText>
-                                    {entry.currentVersion !== undefined && (
-                                        <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>
-                                            v{entry.currentVersion ?? 0} → v{entry.nextVersion ?? 1}
-                                        </ThemedText>
-                                    )}
-                                    {entry.effectiveFrom && <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(entry.effectiveFrom)}</ThemedText>}
-                                    {entry.reason && <ThemedText style={{ fontSize: "11px", color: "var(--pg-status-danger-text)" }}>{entry.reason}</ThemedText>}
-                                </ThemedView>
-                            ))}
+                            {restorePreview.value.entries.map((entry) => {
+                                const definition = resolveSettingDefinition(entry.key);
+                                const namespace = resolveSettingNamespace(definition.namespaceId);
+                                return (
+                                    <ThemedView key={`${entry.index}-${entry.key}`} style={{ display: "flex", flexDirection: "column", gap: "3px", padding: "8px 10px", borderRadius: "var(--pg-radius-sm)", border: "1px solid var(--pg-border-subtle)" }}>
+                                        <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                                            <StatusBadge status={entry.status} toneOverride={restoreTone(entry.status)} showDot={false} />
+                                            <ThemedText style={{ fontSize: "12.5px", fontWeight: 600 }}>{t(namespace?.title ?? definition.summary)}</ThemedText>
+                                            <ThemedText style={{ fontSize: "10.5px", opacity: 0.6, direction: "ltr" }}>{entry.key}</ThemedText>
+                                            <div style={{ flex: 1 }} />
+                                            {entry.currentVersion !== undefined && (
+                                                <ThemedText style={{ fontSize: "11px", opacity: 0.7 }}>v{entry.currentVersion ?? 0} → v{entry.nextVersion ?? 1}</ThemedText>
+                                            )}
+                                            {entry.effectiveFrom && <ThemedText style={{ fontSize: "10.5px", opacity: 0.55 }}>{formatDateTime(entry.effectiveFrom)}</ThemedText>}
+                                        </ThemedView>
+                                        <ThemedText style={{ fontSize: "11.5px", opacity: 0.72 }}>{t(definition.summary)}</ThemedText>
+                                        {entry.reason && <ThemedText style={{ fontSize: "11px", color: "var(--pg-status-danger-text)" }}>{entry.reason}</ThemedText>}
+                                    </ThemedView>
+                                );
+                            })}
                         </ThemedView>
                         {restorePreview.value.missingInBackup.length > 0 && (
                             <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>
@@ -660,14 +757,13 @@ const PlatformSettingsPage = dc(() => {
                                 {t("Fix or remove invalid backup entries before applying.")}
                             </VAlert>
                         )}
-                        <VDivider />
-                        <FormField label={t("Restore reason")} hint={t("Required. Recorded in the audit log.")} required sensitiveMakerChecker>
-                            <VTextarea
-                                modelValue={restoreReason.value}
-                                onUpdate:modelValue={(value: string) => (restoreReason.value = value)}
-                                rows={2}
-                            />
-                        </FormField>
+                        <VTextarea
+                            modelValue={restoreReason.value}
+                            onUpdate:modelValue={(value: string) => (restoreReason.value = value)}
+                            label={t("Restore reason")}
+                            hint={t("Required. Recorded in the audit log.")}
+                            rows={2}
+                        />
                         <FormChecklist
                             checks={[...RESTORE_CHECKS]}
                             modelValue={restoreChecklist.value}
@@ -684,109 +780,6 @@ const PlatformSettingsPage = dc(() => {
                             hideDetails
                         />
                     </>
-                )}
-            </FormModal>
-
-            <FormModal
-                modelValue={dialogOpen.value}
-                onUpdate:modelValue={(value: boolean) => (dialogOpen.value = value)}
-                title={history.value?.length > 0 ? t("Edit setting") : t("New setting")}
-                size="lg"
-                onSubmit={() => void save()}
-                submitLabel={t("Save new version")}
-                loading={saving.value}
-                errorMessage={editError.value ?? ""}
-                v-slots={{
-                    footer: () => (
-                        <>
-                            <VBtn variant="outlined" disabled={saving.value} onClick={() => (dialogOpen.value = false)}>{t("Cancel")}</VBtn>
-                            <VBtn color="primary" variant="flat" {...{ type: "submit" }} loading={saving.value} disabled={!editChecklistComplete.value}>
-                                {t("Save new version")}
-                            </VBtn>
-                        </>
-                    ),
-                }}
-            >
-                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                    {history.value.length > 0 && <MetaPill size="small" variant="tonal" color="primary">v{history.value[0]?.version}</MetaPill>}
-                </ThemedView>
-
-                <FormField
-                    label={t("Setting key")}
-                    hint={t("Example: checkout.support_config")}
-                    required
-                    sensitiveMakerChecker
-                >
-                    <VTextField
-                        modelValue={editKey.value}
-                        onUpdate:modelValue={(value: string) => changeKey(value)}
-                        readonly={history.value.length > 0}
-                    />
-                </FormField>
-                {history.value.length === 0 && (
-                    <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
-                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{t("Common settings")}:</ThemedText>
-                        {knownSettingKeys().map((key) => (
-                            <VBtn key={key} size="x-small" variant="tonal" onClick={() => changeKey(key)}>{key}</VBtn>
-                        ))}
-                    </ThemedView>
-                )}
-                <SectionFields title={editDef.value ? t(editDef.value.title) : t("Setting value")}>
-                    <div style={{ gridColumn: "1 / -1" }}>
-                        <PlatformSettingTypedEditor def={editDef.value} modelValue={editForm.value} onUpdate:modelValue={(value: SettingForm) => (editForm.value = value)} />
-                    </div>
-                </SectionFields>
-                <FormChecklist
-                    checks={[...SETTING_EDIT_CHECKS]}
-                    modelValue={editChecklist.value}
-                    onUpdate:modelValue={(value: Record<string, boolean>) => (editChecklist.value = value)}
-                    show={showChecklists}
-                    title={t("Setting checklist")}
-                    complete={editChecklistComplete.value}
-                    incompleteMessage={t("Complete all setting checklist items before saving.")}
-                />
-
-                {history.value.length > 0 && (
-                    <>
-                        <VDivider />
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "14px" }}>{t("Version history")}</ThemedText>
-                        {history.value.map((row) => (
-                            <ThemedView
-                                key={row.id}
-                                style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "8px 10px", borderRadius: "var(--pg-radius-sm)", border: "1px solid var(--pg-border-subtle)" }}
-                            >
-                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                                    <MetaPill size="x-small" variant="tonal" color="primary">v{row.version}</MetaPill>
-                                    <div style={{ flex: 1 }} />
-                                    {row.version !== history.value[0]?.version && (
-                                        <VBtn size="x-small" variant="text" onClick={() => (compareRow.value = row)}>{t("Compare with current")}</VBtn>
-                                    )}
-                                    <VBtn size="x-small" variant="text" onClick={() => restoreVersion(row)}>{t("Load into editor")}</VBtn>
-                                </ThemedView>
-                                <DescriptionList
-                                    columns={2}
-                                    items={[
-                                        { label: t("Effective"), value: formatDateTime(row.effectiveFrom) },
-                                        { label: t("Updated"), value: formatDateTime(row.updatedAt) },
-                                    ]}
-                                />
-                            </ThemedView>
-                        ))}
-                    </>
-                )}
-
-                {compareRow.value && (
-                    <SurfaceCard variant="tonal">
-                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px", flex: 1 }}>
-                                    {t("Comparing")} v{compareRow.value.version} → v{history.value[0]?.version}
-                                </ThemedText>
-                                <VBtn size="x-small" variant="text" onClick={() => (compareRow.value = null)}>{t("Clear comparison")}</VBtn>
-                            </ThemedView>
-                            <JsonDiffViewer diff={{ before: compareRow.value.valueJson ?? {}, after: history.value[0]?.valueJson ?? {} }} />
-                        </SurfaceCardText>
-                    </SurfaceCard>
                 )}
             </FormModal>
         </ScreenContainer>

@@ -125,7 +125,7 @@ The router has 40 protected children under `/`, a visitor-only `/login`, and a c
 | `/guide` | `AdminGuide` | none (intentional learning surface) | Interactive admin guide, glossary, simulators and checklists. |
 | `/academy`, `/academy/tracks`, `/academy/track/:trackId`, `/academy/module/:moduleId`, `/academy/lesson/:lessonId`, `/academy/lab/:labId`, `/academy/exam/:examId`, `/academy/certificate/:badgeId`, `/academy/help` | `AdminAcademy*` | none (intentional learning surface) | Employee Academy: tracks, lessons, labs, server-graded exams, certificates. |
 | `/academy/team` | `AdminAcademyTeam` | role `SECURITY_ADMIN` | Team certification view with CSV export. |
-| `/settings/platform` | `AdminPlatformSettings` | none (backend `settings:read`/`settings:write`) | Versioned platform settings, backup export and restore. |
+| `/settings/platform` | `AdminPlatformSettings` | `settings:read` / `settings:write` | Searchable, sectioned platform settings with reader/effect/risk and field hints, backup export and restore. |
 | `/settings/checkout-help` | `AdminCheckoutHelp` | none (backend `settings:read`/`settings:write`) | Checkout support config, preview, history and diff. |
 | `/system/backups` | `SystemBackups` | `security:read` or `gateway:read` | WAL/daemon/target health, history, drills and policy. |
 
@@ -158,11 +158,14 @@ Public routes are `/login` (`Login`, visitor-only) and `/:pathMatch(.*)*` (`NotF
 
 ### Platform settings (`/settings/platform`)
 
-- Lists settings grouped by key with the latest version, scope, version count and effective date; includes JSON preview, history, version diff and "load into editor".
-- Saves create the next immutable version with scope `PLATFORM`, validate the key and require a JSON object (not an array or scalar), plus the setting checklist when checklists are visible.
-- Backup export writes a JSON file containing the latest version per key and an audit entry.
-- Restore is preview-first: preview classifies added/changed/unchanged/invalid/missing keys; apply requires a reason of at least three characters, the restore checklist and `confirm: true`, and refuses invalid entries or `expectedCurrentVersion` conflicts (`409 SETTING_VERSION_CONFLICT`).
-- Platform settings edits are versioned and audited but are **not** maker-checker approvals, despite sensitive-field hints in the form.
+- A searchable workspace with an **All settings** rail and sections for payments, merchants, risk, reporting, governance, operations, checkout and advanced/unregistered keys. Search matches titles, keys, descriptions, readers, effects, field labels, field hints, keywords, current values and Arabic text.
+- Every row shows a human title, technical key, lifecycle/status badge, risk, effective version, scheduled marker, summary, value preview and effect. Statuses distinguish live policies, legacy fallbacks, recorded decisions (no runtime effect), retired keys, values managed on another screen, system-managed values, unconfigured defaults and unregistered keys.
+- The detail drawer has Overview (reader, effect, risk reason, default, related keys, Guide link), Value (typed editor grouped by field, with hints, units, option hints and a field filter) and History (current/scheduled/superseded versions, diff, load into editor).
+- Effective, latest and scheduled versions are distinct: the row shows the effective value and warns that a new save supersedes a scheduled version.
+- Saves create the next immutable version with scope `PLATFORM`, validate the key and JSON object, require the setting checklist when visible and require a change note. The change note is audited.
+- Platform settings edits are versioned and audited but are **not** maker-checker approvals. The UI says so instead of showing a false four-eyes badge. Checkout support is managed on `/settings/checkout-help` and appears read-only here.
+- Backup export writes a JSON file containing the latest version per key and an audit entry. Restore is preview-first: preview classifies added/changed/unchanged/invalid/missing keys; apply requires a reason, the restore checklist and `confirm: true`, and refuses invalid entries or `expectedCurrentVersion` conflicts (`409 SETTING_VERSION_CONFLICT`).
+- Adding a setting: follow [`docs/developer/platform-settings.md`](../docs/developer/platform-settings.md) and the catalog-coverage test in `tests/unit/platform-settings.test.ts`.
 
 ### Checkout help (`/settings/checkout-help`)
 
@@ -257,7 +260,7 @@ Relevant browser suites (from `tests/`): admin shell, table/padding geometry, ac
 | :--- | :--- |
 | Login loops or requests fail | Is `admin-back` reachable at `/api`? In dev, is `VITE_API_URL` pointing at the admin edge port (4101)? Remember production uses same-origin `/api`. |
 | "You are not allowed" redirect | The route authority/role guard rejected direct navigation. Hidden navigation is not proof of protection; confirm the backend authority too. |
-| Page loads then APIs return 403 | Expected for ungated routes such as settings, checkout help, users and pricing. The backend is authoritative. |
+| Page loads then APIs return 403 | The route gate is advisory; the edge/core still re-checks authorities. A user without `settings:read`/`settings:write` sees the settings shell but the API calls are refused. The backend is authoritative. |
 | Stale-chunk error | The router retries a failed dynamic import once; hard-reload the SPA if the chunk hash is stale. |
 | Contextual help says no chapter | Check the effective key (`parentName ?? name`), the `GUIDE_ROUTE_HELP` entry, and whether the chapter is in the mapped book. `Merchants`/`MerchantDetail` currently fail through the 9.4 placement bug. |
 | XLSX export misses rows | Table export exports only the current rendered page. Use a summary export or a backend export endpoint when full data is required. |

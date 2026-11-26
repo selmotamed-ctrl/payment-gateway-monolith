@@ -9,6 +9,7 @@ import { ledgerOpsCatalogue } from "../../admin-front/src/constants/i18n/ledgerO
 import { formsCatalogue } from "../../admin-front/src/constants/i18n/forms";
 import { buildersCatalogue } from "../../admin-front/src/constants/i18n/builders";
 import { reportsCatalogue } from "../../admin-front/src/constants/i18n/reports";
+import { settingsCatalogue } from "../../admin-front/src/constants/i18n/settings";
 import { appCatalogue as merchantApp } from "../../merchant-front/src/constants/i18nCatalogue";
 import { landingCatalogue } from "../../merchant-front/src/constants/landingCatalogue";
 import { merchantReportCatalogue } from "../../merchant-front/src/constants/reportCatalogue";
@@ -37,6 +38,7 @@ const fronts: Array<{ name: string; src: string; catalogues: Catalogue[] }> = [
       { name: "forms", entries: formsCatalogue },
       { name: "builders", entries: buildersCatalogue },
       { name: "reports", entries: reportsCatalogue },
+      { name: "settings", entries: settingsCatalogue },
     ],
   },
   {

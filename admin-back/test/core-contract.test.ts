@@ -903,7 +903,7 @@ const cases: ContractCase[] = [
       baseVersion: 3,
       reason: "policy change",
     },
-    allowedKeys: ["settings"],
+    allowedKeys: ["settings", "reason"],
     requiredKeys: ["settings"],
   },
 ];
@@ -1564,7 +1564,7 @@ describe("core contract field mapping", () => {
       { key: "limits", valueJson: { max: 10 } },
     ]);
     expect(mapped.baseVersion).toBeUndefined();
-    expect(mapped.reason).toBeUndefined();
+    expect(mapped.reason).toBe("policy change");
   });
 
   test("the edge names the canonical key the public payload cannot supply", () => {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { detailList, readApiErrorInfo } from "@/components/builders/model/apiError";
 import { buildersCatalogue } from "@/constants/i18n/builders";
+import { settingsCatalogue } from "@/constants/i18n/settings";
 import { appCatalogue } from "@/constants/i18nCatalogue";
 import {
   AML_PARAM_ERROR_MESSAGES,
@@ -39,7 +40,7 @@ describe("readApiErrorInfo", () => {
 });
 
 describe("builders catalogue", () => {
-  const has = (key: string) => key in buildersCatalogue || key in appCatalogue;
+  const has = (key: string) => key in buildersCatalogue || key in appCatalogue || key in settingsCatalogue;
   const messageMaps: Record<string, string>[] = [
     COST_ERROR_MESSAGES,
     SCOPE_ERROR_MESSAGES,

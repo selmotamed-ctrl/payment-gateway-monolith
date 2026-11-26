@@ -20425,6 +20425,7 @@ router.put("/settings", async (request: Request, response: Response) => {
           "EFFECTIVE_DATE_REVIEWED",
           "IMMUTABLE_VERSION_ACKNOWLEDGED",
         ])).max(10).optional(),
+        reason: z.string().trim().min(3).max(500).optional(),
       })
       .strict(),
     request.body,
@@ -20456,7 +20457,7 @@ router.put("/settings", async (request: Request, response: Response) => {
       entityType: "PLATFORM_SETTING",
       entityId: written[0]?.key ?? "settings",
       beforeJson: {},
-      afterJson: { settings: written, checklist: body.checklist ?? [] },
+      afterJson: { settings: written, checklist: body.checklist ?? [], reason: body.reason ?? null },
     },
   });
   invalidateMerchantReportPolicyCache();

@@ -10,6 +10,7 @@ import {
     validateSettingForm,
     type JsonObject,
     type SettingFieldDef,
+    type SettingFieldGroup,
     type SettingForm,
     type SettingNamespaceDef,
 } from "./model/index";
@@ -17,17 +18,22 @@ import {
 const humanizeOption = (value: string): string =>
     value.toLowerCase().split("_").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
 
+const GROUP_ORDER: SettingFieldGroup[] = ["General", "Identity", "Sampling", "Thresholds", "Recovery", "Canary", "Overrides", "Contact", "Content", "Stored note"];
+
 /**
  * Typed editor of one platform-setting namespace (see `model/settingsSchemas.ts`): one labelled
- * control per declared field, then every key the namespace does not declare as an editable
- * structured tree, so saving never drops an unknown key. An unknown namespace (`def === null`)
- * is edited entirely through the structured tree.
+ * control per declared field, grouped for long policies, then every key the namespace does not
+ * declare as an editable structured tree, so saving never drops an unknown key. An unknown
+ * namespace (`def === null`) is edited entirely through the structured tree.
  */
 export const PlatformSettingTypedEditor = defineComponent({
     name: "PlatformSettingTypedEditor",
     props: {
         def: { type: Object as PropType<SettingNamespaceDef | null>, default: null },
         modelValue: { type: Object as PropType<SettingForm>, required: true },
+        /** Optional field filter from the drawer. */
+        query: { type: String, default: "" },
+        readOnly: { type: Boolean, default: false },
     },
     emits: ["update:modelValue"],
     setup(props, { emit }) {
@@ -39,29 +45,43 @@ export const PlatformSettingTypedEditor = defineComponent({
         const setExtras = (extras: unknown) =>
             emit("update:modelValue", { ...props.modelValue, extras: (extras && typeof extras === "object" && !Array.isArray(extras) ? extras : {}) as JsonObject });
 
+        const optionHint = (field: SettingFieldDef, value: unknown): string => {
+            if (field.kind !== "select" || typeof value !== "string") return "";
+            const hint = field.optionHints?.[value];
+            return hint ? t(hint) : "";
+        };
+
         const control = (field: SettingFieldDef, errorText: string): VNodeChild => {
             const value = props.modelValue.values[field.key];
             switch (field.kind) {
                 case "boolean":
                     return (
-                        <VSwitch
-                            modelValue={value === true}
-                            onUpdate:modelValue={(next: boolean | null) => setValue(field.key, next === true)}
-                            color="primary"
-                            density="compact"
-                            hideDetails
-                        />
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                            <VSwitch
+                                modelValue={value === true}
+                                onUpdate:modelValue={(next: boolean | null) => setValue(field.key, next === true)}
+                                color="primary"
+                                density="compact"
+                                hideDetails
+                                disabled={props.readOnly}
+                            />
+                            <span style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>{value === true ? t("On") : t("Off")}</span>
+                        </div>
                     );
                 case "select":
                     return (
-                        <VSelect
-                            modelValue={typeof value === "string" && value ? value : null}
-                            onUpdate:modelValue={(next: string | null) => setValue(field.key, next ?? "")}
-                            items={selectOptions(field, props.modelValue.originals[field.key]).map((option) => ({ title: humanizeOption(option), value: option }))}
-                            clearable={!field.required}
-                            density="compact"
-                            hideDetails
-                        />
+                        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                            <VSelect
+                                modelValue={typeof value === "string" && value ? value : null}
+                                onUpdate:modelValue={(next: string | null) => setValue(field.key, next ?? "")}
+                                items={selectOptions(field, props.modelValue.originals[field.key]).map((option) => ({ title: humanizeOption(option), value: option }))}
+                                clearable={!field.required && !props.readOnly}
+                                density="compact"
+                                hideDetails
+                                disabled={props.readOnly}
+                            />
+                            {optionHint(field, value) && <span style={{ fontSize: "11.5px", color: "var(--pg-ink-faint)", lineHeight: 1.4 }}>{optionHint(field, value)}</span>}
+                        </div>
                     );
                 case "strings":
                     return (
@@ -71,6 +91,7 @@ export const PlatformSettingTypedEditor = defineComponent({
                                 onUpdate:modelValue={(next: (string | number)[]) => setValue(field.key, next.map(String))}
                                 normalize={field.uppercase ? (entry: string) => entry.toUpperCase() : undefined}
                                 ariaLabel={t(field.label)}
+                                disabled={props.readOnly}
                             />
                         </div>
                     );
@@ -82,57 +103,62 @@ export const PlatformSettingTypedEditor = defineComponent({
                                 <div key={name} style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "8px 10px", borderRadius: "var(--pg-radius-sm)", border: "1px solid var(--pg-border-subtle)" }}>
                                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
                                         <strong dir="auto" style={{ fontSize: "12.5px" }}>{name}</strong>
-                                        <VBtn
-                                            icon="mdi-delete-outline"
-                                            variant="text"
-                                            size="small"
-                                            color="error"
-                                            aria-label={`${t("Remove")} ${name}`}
-                                            onClick={() => {
-                                                const { [name]: _removed, ...rest } = map;
-                                                setValue(field.key, rest);
-                                            }}
-                                        />
+                                        {!props.readOnly && (
+                                            <VBtn
+                                                icon="mdi-delete-outline"
+                                                variant="text"
+                                                size="small"
+                                                color="error"
+                                                aria-label={`${t("Remove")} ${name}`}
+                                                onClick={() => {
+                                                    const { [name]: _removed, ...rest } = map;
+                                                    setValue(field.key, rest);
+                                                }}
+                                            />
+                                        )}
                                     </div>
                                     <ChipListInput
                                         modelValue={list}
                                         onUpdate:modelValue={(next: (string | number)[]) => setValue(field.key, { ...map, [name]: next.map(String) })}
                                         normalize={field.uppercase ? (entry: string) => entry.toUpperCase() : undefined}
                                         ariaLabel={`${t(field.label)} · ${name}`}
+                                        disabled={props.readOnly}
                                     />
                                 </div>
                             ))}
-                            <div style={{ display: "flex", gap: "6px", alignItems: "flex-start" }}>
-                                <VTextField
-                                    modelValue={newCategory.value}
-                                    onUpdate:modelValue={(next: string) => (newCategory.value = next)}
-                                    placeholder={t("New category name")}
-                                    aria-label={t("New category name")}
-                                    density="compact"
-                                    hideDetails
-                                    style={{ flex: 1, minInlineSize: 0 }}
-                                />
-                                <VBtn
-                                    variant="tonal"
-                                    size="small"
-                                    prependIcon="mdi-plus"
-                                    onClick={() => {
-                                        const name = newCategory.value.trim();
-                                        if (!name || name in map) return;
-                                        setValue(field.key, { ...map, [name]: [] });
-                                        newCategory.value = "";
-                                    }}
-                                >
-                                    {t("Add category")}
-                                </VBtn>
-                            </div>
+                            {!props.readOnly && (
+                                <div style={{ display: "flex", gap: "6px", alignItems: "flex-start" }}>
+                                    <VTextField
+                                        modelValue={newCategory.value}
+                                        onUpdate:modelValue={(next: string) => (newCategory.value = next)}
+                                        placeholder={t("New category name")}
+                                        aria-label={t("New category name")}
+                                        density="compact"
+                                        hideDetails
+                                        style={{ flex: 1, minInlineSize: 0 }}
+                                    />
+                                    <VBtn
+                                        variant="tonal"
+                                        size="small"
+                                        prependIcon="mdi-plus"
+                                        onClick={() => {
+                                            const name = newCategory.value.trim();
+                                            if (!name || name in map) return;
+                                            setValue(field.key, { ...map, [name]: [] });
+                                            newCategory.value = "";
+                                        }}
+                                    >
+                                        {t("Add category")}
+                                    </VBtn>
+                                </div>
+                            )}
                         </div>
                     );
                 }
                 case "tree":
-                    return <StructuredValueEditor modelValue={value} onUpdate:modelValue={(next: unknown) => setValue(field.key, next)} ariaLabel={t(field.label)} />;
+                    return <StructuredValueEditor modelValue={value} onUpdate:modelValue={(next: unknown) => setValue(field.key, next)} ariaLabel={t(field.label)} lockStructure={props.readOnly} />;
                 case "longtext":
-                    return <VTextarea modelValue={typeof value === "string" ? value : ""} onUpdate:modelValue={(next: string) => setValue(field.key, next)} rows={2} autoGrow density="compact" hideDetails />;
+                    return <VTextarea modelValue={typeof value === "string" ? value : ""} onUpdate:modelValue={(next: string) => setValue(field.key, next)} rows={2} autoGrow density="compact" hideDetails readonly={props.readOnly} />;
                 default:
                     return (
                         <VTextField
@@ -141,6 +167,8 @@ export const PlatformSettingTypedEditor = defineComponent({
                             density="compact"
                             hideDetails
                             error={Boolean(errorText)}
+                            readonly={props.readOnly}
+                            suffix={field.unit ? ` ${field.unit}` : undefined}
                         />
                     );
             }
@@ -150,22 +178,52 @@ export const PlatformSettingTypedEditor = defineComponent({
             const def = props.def;
             const errors = validateSettingForm(def, props.modelValue);
             const extrasCount = Object.keys(props.modelValue.extras).length;
+            const query = props.query.trim().toLowerCase();
+            const visibleFields = (def?.fields ?? []).filter((field) => {
+                if (!query) return true;
+                const text = [field.key, field.label, field.hint, field.description ?? "", field.unit ?? "", ...(field.options ?? [])].join(" ").toLowerCase();
+                return text.includes(query);
+            });
+            const grouped = new Map<string, SettingFieldDef[]>();
+            for (const field of visibleFields) {
+                const group = field.group ?? "General";
+                const list = grouped.get(group) ?? [];
+                list.push(field);
+                grouped.set(group, list);
+            }
+            const groupEntries = [...grouped.entries()].sort((left, right) => {
+                const leftIndex = GROUP_ORDER.indexOf(left[0] as SettingFieldGroup);
+                const rightIndex = GROUP_ORDER.indexOf(right[0] as SettingFieldGroup);
+                return (leftIndex === -1 ? 99 : leftIndex) - (rightIndex === -1 ? 99 : rightIndex);
+            });
             return (
                 <div style={{ display: "flex", flexDirection: "column", gap: "14px", minInlineSize: 0 }}>
-                    {def && def.description && <span style={{ fontSize: "12.5px", color: "var(--pg-ink-muted)" }}>{t(def.description)}</span>}
-                    {(def?.fields ?? []).map((field) => {
-                        const found = errors.find((entry) => entry.field === field.key);
-                        const errorText = found ? t(SETTING_ERROR_MESSAGES[found.code]) : "";
-                        return (
-                            <FormField key={field.key} label={t(field.label)} hint={field.hint ? t(field.hint) : ""} error={errorText} required={field.required === true}>
-                                <div>{control(field, errorText)}</div>
-                            </FormField>
-                        );
-                    })}
+                    {def && def.description && <span style={{ fontSize: "12.5px", color: "var(--pg-ink-muted)", lineHeight: 1.5 }}>{t(def.description)}</span>}
+                    {groupEntries.map(([group, fields]) => (
+                        <div key={group} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                            {groupEntries.length > 1 && (
+                                <div style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--pg-ink-faint)", paddingBottom: "2px", borderBottom: "1px solid var(--pg-border-subtle)" }}>
+                                    {t(group)}
+                                </div>
+                            )}
+                            {fields.map((field) => {
+                                const found = errors.find((entry) => entry.field === field.key);
+                                const errorText = found ? t(SETTING_ERROR_MESSAGES[found.code]) : "";
+                                return (
+                                    <FormField key={field.key} label={t(field.label)} hint={t(field.hint)} error={errorText} required={field.required === true && !props.readOnly}>
+                                        <div>{control(field, errorText)}</div>
+                                    </FormField>
+                                );
+                            })}
+                        </div>
+                    ))}
+                    {visibleFields.length === 0 && query && (
+                        <span style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>{t("No fields match this filter.")}</span>
+                    )}
                     {(!def || def.fields.length === 0 || extrasCount > 0) && (
                         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                             {def && def.fields.length > 0 && <span style={{ fontSize: "13px", fontWeight: 500 }}>{t("Other fields")}</span>}
-                            <StructuredValueEditor modelValue={props.modelValue.extras} onUpdate:modelValue={setExtras} ariaLabel={t("Setting value")} />
+                            <StructuredValueEditor modelValue={props.modelValue.extras} onUpdate:modelValue={setExtras} ariaLabel={t("Setting value")} lockStructure={props.readOnly} />
                         </div>
                     )}
                 </div>

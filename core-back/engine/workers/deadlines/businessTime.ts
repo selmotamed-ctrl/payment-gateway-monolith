@@ -77,13 +77,16 @@ export const businessHoursBetween = (start: Date, end: Date, calendar: BusinessC
   return total;
 };
 
-/** Parses the `calendar.holidays` platform setting (an array of `YYYY-MM-DD`, ignoring anything malformed). */
+/** Parses `calendar.holidays`: either a raw `YYYY-MM-DD` array (legacy) or `{ holidays: [...] }`. Malformed dates are ignored. */
 export const parseHolidays = (value: unknown): Set<string> => {
   const holidays = new Set<string>();
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      if (typeof entry === "string" && /^\d{4}-\d{2}-\d{2}$/.test(entry)) holidays.add(entry);
-    }
+  const source = Array.isArray(value)
+    ? value
+    : value && typeof value === "object" && Array.isArray((value as Record<string, unknown>).holidays)
+      ? ((value as Record<string, unknown>).holidays as unknown[])
+      : [];
+  for (const entry of source) {
+    if (typeof entry === "string" && /^\d{4}-\d{2}-\d{2}$/.test(entry)) holidays.add(entry);
   }
   return holidays;
 };

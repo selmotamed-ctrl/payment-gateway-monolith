@@ -210,7 +210,7 @@ The mixed timestamp convention is real. Any query that compares a core `TIMESTAM
 
 `core-back/prisma/seed.ts` is the main baseline seeder. It is idempotent by lookup for most rows and covers:
 
-- platform settings (`OD-1` through `OD-11` plus `join_request.four_eyes_policy`, `onboarding.required_documents`, `join_request.volume_threshold`, `kyb.refresh_policy`);
+- platform settings (`OD-1` through `OD-11` plus `join_request.four_eyes_policy`, `onboarding.required_documents`, `join_request.volume_threshold`, `kyb.refresh_policy`, `screening.fail_closed`, `SELF_PAYMENT_POLICY`, `calendar.holidays`) from `prisma/platformSettingsSeed.ts`; the defaults for the three runtime switches match their code defaults;
 - system GL accounts via `seedSystemGlAccounts(client)`;
 - the blueprint catalogue (`seedBlueprints(client)`) — gateways, versions, rails, routes, flows, steps, status/error maps and related definitions;
 - platform credential sets via `seedPlatformCredentialSets(client)`;
