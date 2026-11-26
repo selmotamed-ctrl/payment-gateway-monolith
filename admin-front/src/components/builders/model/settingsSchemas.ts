@@ -32,10 +32,11 @@ export type SettingFieldKind =
     | "select"
     | "strings"
     | "stringListMap"
-    | "tree";
+    | "tree"
+    | "secret";
 
 /** A visual group inside a long setting editor (for example Sampling, Thresholds, Recovery). */
-export type SettingFieldGroup = "General" | "Sampling" | "Thresholds" | "Recovery" | "Canary" | "Overrides" | "Content" | "Contact" | "Identity" | "Stored note";
+export type SettingFieldGroup = "General" | "Communication" | "Sampling" | "Thresholds" | "Recovery" | "Canary" | "Overrides" | "Content" | "Contact" | "Identity" | "Stored note";
 
 export type SettingFieldDef = {
     key: string;
@@ -1034,6 +1035,60 @@ const NAMESPACES: Record<string, SettingNamespaceDef> = {
             },
         ],
     },
+    "communication.email": {
+        id: "communication.email",
+        title: "Email delivery (SMTP)",
+        description: "Primary communication channel. Merchant registration and sign-in are in maintenance while this is not configured.",
+        fields: [
+            { key: "enabled", kind: "boolean", label: "Email channel enabled", hint: "Turn the primary channel on or off. Merchant authentication is blocked while it is not configured.", group: "Communication" },
+            { key: "provider", kind: "select", label: "Provider", options: ["SMTP"], hint: "Delivery provider. SMTP is the supported email transport.", group: "Communication" },
+            { key: "smtpHost", kind: "text", label: "SMTP host", aliases: ["host"], hint: "Hostname or IP address of the SMTP mailbox server.", group: "Communication" },
+            { key: "smtpPort", kind: "integer", label: "SMTP port", min: 1, max: 65535, aliases: ["port"], hint: "TCP port: 587 for STARTTLS, 465 for implicit TLS.", group: "Communication" },
+            { key: "smtpSecurity", kind: "select", label: "Connection security", options: ["STARTTLS", "TLS", "NONE"], aliases: ["security"], hint: "Transport security. NONE is only for local development and is refused in production.", group: "Communication" },
+            { key: "smtpUsername", kind: "text", label: "SMTP username", aliases: ["user", "username"], hint: "Optional login name for the SMTP server.", group: "Communication" },
+            { key: "smtpPassword", kind: "secret", label: "SMTP password", hint: "Optional SMTP password. It is stored encrypted and is never shown again.", group: "Communication" },
+            { key: "fromEmail", kind: "text", label: "From address", aliases: ["from"], hint: "The sender address recipients see.", group: "Communication" },
+            { key: "fromName", kind: "text", label: "From name", hint: "Display name shown beside the sender address.", group: "Communication" },
+            { key: "replyTo", kind: "text", label: "Reply-to address", hint: "Optional address used when a recipient replies.", group: "Communication" },
+            { key: "timeoutMs", kind: "integer", label: "Timeout (ms)", min: 1000, max: 120000, hint: "Maximum wait for the SMTP server, in milliseconds.", group: "Communication" },
+            { key: "allowInsecure", kind: "boolean", label: "Allow insecure TLS (development only)", hint: "Accept an invalid SMTP certificate. Development only; refused in production.", group: "Communication" },
+        ],
+    },
+    "communication.sms": {
+        id: "communication.sms",
+        title: "SMS delivery (secondary channel)",
+        description: "Optional second channel. Critical codes (sign-in, password reset, verification) are also sent by SMS when this is configured and the user has a phone.",
+        fields: [
+            { key: "enabled", kind: "boolean", label: "SMS channel enabled", hint: "Turn the secondary channel on or off. Email remains the primary channel.", group: "Communication" },
+            { key: "provider", kind: "select", label: "Provider", options: ["WEBHOOK"], hint: "Delivery provider. The signed aggregator webhook is supported.", group: "Communication" },
+            { key: "webhookUrl", kind: "text", label: "Aggregator webhook URL", aliases: ["url"], hint: "HTTPS endpoint of the SMS aggregator that accepts the signed message.", group: "Communication" },
+            { key: "webhookSecret", kind: "secret", label: "Webhook signing secret", hint: "HMAC secret used to sign each SMS request. Stored encrypted.", group: "Communication" },
+            { key: "senderId", kind: "text", label: "Sender ID", hint: "Optional sender name or number shown on the phone.", group: "Communication" },
+            { key: "timeoutMs", kind: "integer", label: "Timeout (ms)", min: 1000, max: 120000, hint: "Maximum wait for the SMS provider, in milliseconds.", group: "Communication" },
+        ],
+    },
+    "communication.policy": {
+        id: "communication.policy",
+        title: "Channel policy",
+        description: "Email is always used when configured. This policy decides which messages are ALSO sent by SMS.",
+        fields: [
+            { key: "smsMode", kind: "select", label: "SMS mode", options: ["OFF", "AUTH_ONLY", "CRITICAL_ONLY", "ALL"], hint: "Select which messages may also use SMS. OFF never uses SMS.", group: "Communication" },
+            { key: "smsTemplateCodes", kind: "strings", label: "SMS template codes", uppercase: true, hint: "Template codes eligible for SMS under CRITICAL_ONLY, for example LOGIN_MFA and PASSWORD_RESET.", group: "Communication" },
+            { key: "staffSmsFallbackWhenEmailMissing", kind: "boolean", label: "Allow staff SMS when email is not configured", hint: "Lets staff sign in by SMS while email delivery is not configured.", group: "Communication" },
+        ],
+    },
+    "auth.google": {
+        id: "auth.google",
+        title: "Google sign-in",
+        description: "Server-side OAuth 2.0 authorization-code flow with PKCE. The redirect URI must exactly match the Google Console entry.",
+        fields: [
+            { key: "enabled", kind: "boolean", label: "Google sign-in enabled", hint: "Show the Google button on the merchant login and registration pages.", group: "Communication" },
+            { key: "clientId", kind: "text", label: "Google OAuth client ID", hint: "Client ID from the Google Cloud OAuth credentials page.", group: "Communication" },
+            { key: "clientSecret", kind: "secret", label: "Google OAuth client secret", hint: "Client secret used by the server code exchange. Stored encrypted.", group: "Communication" },
+            { key: "redirectUri", kind: "text", label: "Redirect URI", hint: "Exact callback URL registered in Google Cloud, for example https://merchant.example/api/v1/merchant/auth/google/callback.", group: "Communication" },
+            { key: "hostedDomain", kind: "text", label: "Hosted domain (optional)", hint: "Restrict sign-in to one Google Workspace domain.", group: "Communication" },
+        ],
+    },
 };
 
 const GO_LIVE_PREFIX = "gateway.go_live.";
@@ -1329,7 +1384,7 @@ export const validateSettingForm = (def: SettingNamespaceDef | null, form: Setti
     for (const field of def?.fields ?? []) {
         const value = form.values[field.key];
         const text = typeof value === "string" ? value.trim() : "";
-        const textual = ["text", "longtext", "integer", "number", "money", "select"].includes(field.kind);
+        const textual = ["text", "longtext", "integer", "number", "money", "select", "secret"].includes(field.kind);
         if (field.required && textual && !text) {
             errors.push({ field: field.key, code: "REQUIRED" });
             continue;

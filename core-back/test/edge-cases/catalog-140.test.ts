@@ -2820,11 +2820,12 @@ const checks: Record<string, Check> = {
       const response = await fetch(`http://127.0.0.1:${port}/auth/google`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ idToken: "x".repeat(30) }),
+        body: JSON.stringify({ mode: "login", returnPath: "/login" }),
       });
       const body = await response.json() as Record<string, unknown>;
-      expect(response.status).toBe(501);
-      expect(body.code).toBe("GOOGLE_IDENTITY_NOT_CONFIGURED");
+      // v46: merchant auth is maintenance-gated until email is configured; Google cannot be used to bypass it.
+      expect(response.status).toBe(503);
+      expect(body.code).toBe("AUTH_MAINTENANCE_EMAIL_NOT_CONFIGURED");
     } finally {
       server.close();
     }

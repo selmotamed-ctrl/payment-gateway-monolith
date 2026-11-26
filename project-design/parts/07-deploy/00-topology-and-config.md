@@ -363,3 +363,19 @@ New keys: `SANDBOX_ENABLED` (default false), `SANDBOX_NODE`, `SANDBOX_CORE_PORT`
 ## Backup and object-storage input hardening (2026-11-23)
 
 `BUN_VERSION` defaults to the tested 1.4.x line (1.4.4) because the committed lockfiles are version 2. `BACKUP_PRIMARY_S3_ENDPOINT` must be an http(s) URL without whitespace or shell metacharacters; `BACKUP_PRIMARY_S3_BUCKET` accepts an S3 bucket/path (optional `s3://`) using safe characters only; `BACKUP_MINIO_VERSION` and `BACKUP_MINIO_BINARY_URL` are restricted to safe tags/URLs; `BACKUP_MINIO_DATA_DIR` uses the safe absolute-path schema and rejects system directories. `BACKUP_ALLOW_INSECURE_HTTP` remains a documented availability option and is rejected only where the object-storage production guard applies. The object-storage and backup certificate directories must be separate and non-nested.
+
+## v46 communication deployment keys (2026-11-26)
+
+The deploy config accepts `COMMUNICATION_BOOTSTRAP_ENABLED`,
+`COMMUNICATION_EMAIL_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY`,
+`SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`,
+`SMTP_REPLY_TO`, `SMTP_TIMEOUT_MS`, `SMTP_ALLOW_INSECURE`,
+`COMMUNICATION_SMS_ENABLED`, `SMS_WEBHOOK_URL`, `SMS_WEBHOOK_SECRET`,
+`SMS_SENDER_ID`, `SMS_TIMEOUT_MS`, `GOOGLE_AUTH_ENABLED`, `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `GOOGLE_HOSTED_DOMAIN`, `GOOGLE_REDIRECT_URI`,
+`PLATFORM_ALERT_EMAIL` and `PLATFORM_ALERT_SMS`. `coreEnv` forwards them to the
+core process; the core bootstrap copies them into Platform Settings when no
+administrator has saved them. Validation requires the host/from address when
+email is enabled, the webhook URL and secret when SMS is enabled, and the client
+ID/secret/redirect URI when Google is enabled; production refuses
+`SMTP_SECURITY=NONE` and `SMTP_ALLOW_INSECURE=true`.

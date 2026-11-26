@@ -62,6 +62,7 @@ export const CASE_TYPE_META: Record<string, CaseTypeMeta> = {
     OBJECT_STORAGE: meta("Object storage alert", "The shared object vault or quarantine is unhealthy.", "Open the object storage console and inspect the vault.", "SystemObjectStorage", "Open object storage", "danger"),
     MONITOR_CHECK_FAILED: meta("Platform monitor check failed", "A platform monitor check could not run.", "Inspect Jobs & Outbox and the monitor worker health.", "JobsOutbox", "Open jobs & outbox", "warning"),
     PLATFORM_ALERT: meta("Platform alert", "A platform monitor check found a condition that needs attention.", "Open the related platform screen and investigate the source.", undefined, undefined, "warning"),
+    COMMUNICATION_UNCONFIGURED: meta("Communication is not configured", "Email delivery is not configured, so merchant registration and sign-in are in maintenance.", "Open Platform Settings → Communication and configure SMTP; the case clears automatically once email is ready.", "AdminPlatformSettings", "Open platform settings", "danger"),
 
     ROUTE_HEALTH: meta("Route health is degraded", "A gateway route is degraded or its breaker is open.", "Open the route health drawer and review the traffic and probes.", "GatewayRoutes", "Open routes", "danger"),
     ROUTE_OVERRIDE: meta("Route health override", "An operator forced a route health state.", "Open the route drawer and review the override and its expiry.", "GatewayRoutes", "Open routes", "warning"),

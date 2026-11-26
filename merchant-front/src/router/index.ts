@@ -29,6 +29,30 @@ const router = createRouter({
             },
         },
         {
+            path: "/verify-email",
+            name: "VerifyEmail",
+            component: () => import("@/pages/public/auth/verify-email/index"),
+            meta: { requiresVisitor: true },
+        },
+        {
+            path: "/forgot-password",
+            name: "ForgotPassword",
+            component: () => import("@/pages/public/auth/forgot-password/index"),
+            meta: { requiresVisitor: true },
+        },
+        {
+            path: "/reset-password",
+            name: "ResetPassword",
+            component: () => import("@/pages/public/auth/reset-password/index"),
+            meta: { requiresVisitor: true },
+        },
+        {
+            path: "/auth/google/finish",
+            name: "GoogleFinish",
+            component: () => import("@/pages/public/auth/google-finish/index"),
+            meta: { requiresVisitor: true },
+        },
+        {
             path: "/portal",
             component: () => import("@/layouts/default"),
             children: [

@@ -24,6 +24,7 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { NotificationTemplatesTab } from "./components/NotificationTemplatesTab";
+import { CommunicationTab } from "./components/CommunicationTab";
 import { SettingsSectionNav } from "./components/SettingsSectionNav";
 import { SettingsHealthStrip } from "./components/SettingsHealthStrip";
 import { SettingRow } from "./components/SettingRow";
@@ -120,7 +121,7 @@ const PlatformSettingsPage = dc(() => {
     const search = ref(typeof route.query.q === "string" ? route.query.q : "");
     const section = ref<SettingsViewId>(isSectionId(route.query.section) ? (route.query.section as SettingsViewId) : "all");
     const statusFilter = ref<SettingStatusFilter>(isStatusFilter(route.query.status) ? (route.query.status as SettingStatusFilter) : "all");
-    const tab = ref<"settings" | "templates">("settings");
+    const tab = ref<"settings" | "templates" | "communication">("settings");
     const detailOpen = ref(false);
     const selectedEntry = ref<SettingEntry | null>(null);
     const detailOpenedAt = ref(0);
@@ -516,9 +517,10 @@ const PlatformSettingsPage = dc(() => {
 
                 <SegmentedTabs
                     modelValue={tab.value}
-                    onUpdate:modelValue={(value: string) => (tab.value = value === "templates" ? "templates" : "settings")}
+                    onUpdate:modelValue={(value: string) => (tab.value = value === "templates" ? "templates" : value === "communication" ? "communication" : "settings")}
                     tabs={[
                         { value: "settings", label: t("Platform settings") },
+                        { value: "communication", label: t("Communication") },
                         { value: "templates", label: t("Notification templates") },
                     ]}
                     ariaLabel={t("Platform settings sections")}
@@ -526,6 +528,8 @@ const PlatformSettingsPage = dc(() => {
 
                 {tab.value === "templates" ? (
                     <NotificationTemplatesTab />
+                ) : tab.value === "communication" ? (
+                    <CommunicationTab onEdit={openKey} />
                 ) : error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : loading.value ? (

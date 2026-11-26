@@ -18,7 +18,7 @@ import {
 const humanizeOption = (value: string): string =>
     value.toLowerCase().split("_").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
 
-const GROUP_ORDER: SettingFieldGroup[] = ["General", "Identity", "Sampling", "Thresholds", "Recovery", "Canary", "Overrides", "Contact", "Content", "Stored note"];
+const GROUP_ORDER: SettingFieldGroup[] = ["General", "Communication", "Identity", "Sampling", "Thresholds", "Recovery", "Canary", "Overrides", "Contact", "Content", "Stored note"];
 
 /**
  * Typed editor of one platform-setting namespace (see `model/settingsSchemas.ts`): one labelled
@@ -159,6 +159,22 @@ export const PlatformSettingTypedEditor = defineComponent({
                     return <StructuredValueEditor modelValue={value} onUpdate:modelValue={(next: unknown) => setValue(field.key, next)} ariaLabel={t(field.label)} lockStructure={props.readOnly} />;
                 case "longtext":
                     return <VTextarea modelValue={typeof value === "string" ? value : ""} onUpdate:modelValue={(next: string) => setValue(field.key, next)} rows={2} autoGrow density="compact" hideDetails readonly={props.readOnly} />;
+                case "secret": {
+                    const stored = value === "••••";
+                    return (
+                        <VTextField
+                            modelValue={stored ? "" : typeof value === "string" ? value : ""}
+                            onUpdate:modelValue={(next: string) => setValue(field.key, next)}
+                            type="password"
+                            autocomplete="new-password"
+                            placeholder={stored ? t("Stored — leave blank to keep") : ""}
+                            density="compact"
+                            hideDetails
+                            readonly={props.readOnly}
+                            error={Boolean(errorText)}
+                        />
+                    );
+                }
                 default:
                     return (
                         <VTextField

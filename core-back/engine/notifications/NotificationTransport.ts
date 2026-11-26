@@ -62,6 +62,8 @@ export interface NotificationDeliveryResult {
   status: NotificationDeliveryStatus;
   providerMessageId?: string;
   error?: string;
+  /** The failure cannot succeed until configuration changes (for example the channel is not configured). */
+  permanent?: boolean;
 }
 
 /**

@@ -22,6 +22,7 @@ const LoginPage = dc(() => {
     const password = ref("");
     const mfaCode = ref("");
     const mfaChallengeId = ref<string | null>(null);
+    const mfaChannels = ref<string[]>([]);
     const loading = ref(false);
     const error = ref<string | null>(null);
     const showPassword = ref(false);
@@ -80,6 +81,7 @@ const LoginPage = dc(() => {
             const payload = response.data?.data ?? response.data ?? {};
             if (!payload?.challengeId) throw new Error(t("The verification code could not be resent"));
             mfaChallengeId.value = String(payload.challengeId);
+            mfaChannels.value = Array.isArray(payload.deliveryChannels) ? payload.deliveryChannels.map(String) : mfaChannels.value;
             mfaCode.value = "";
             showSnackBar({ message: t("A new verification code was sent"), type: "success" });
         } catch (caught) {
@@ -135,6 +137,7 @@ const LoginPage = dc(() => {
             const payload = response.data?.data ?? response.data;
             if (payload?.mfaRequired && payload?.challengeId) {
                 mfaChallengeId.value = String(payload.challengeId);
+                mfaChannels.value = Array.isArray(payload.deliveryChannels) ? payload.deliveryChannels.map(String) : [];
                 startResendCooldown();
                 return;
             }
@@ -180,7 +183,11 @@ const LoginPage = dc(() => {
                     {mfaChallengeId.value ? (
                         <>
                             <VAlert type="info" variant="tonal" density="compact">
-                                {t("Enter the six-digit code sent to your registered phone.")}
+                                {mfaChannels.value.includes("EMAIL") && mfaChannels.value.includes("SMS")
+                                    ? t("Enter the six-digit code sent to your email address and phone.")
+                                    : mfaChannels.value.includes("SMS")
+                                      ? t("Enter the six-digit code sent to your email address.")
+                                      : t("Enter the six-digit code sent to your email address.")}
                             </VAlert>
                             <FormField label={t("MFA code")} required>
                                 <VTextField
@@ -269,9 +276,14 @@ const LoginPage = dc(() => {
                     )}
 
                     {!mfaChallengeId.value && (
-                        <VBtn variant="text" size="small" onClick={() => void router.push({ name: "AcceptInvitation" })}>
-                            {t("I have an invitation code")}
-                        </VBtn>
+                        <div class="d-flex flex-wrap ga-2 justify-space-between">
+                            <VBtn variant="text" size="small" onClick={() => void router.push({ name: "AcceptInvitation" })}>
+                                {t("I have an invitation code")}
+                            </VBtn>
+                            <VBtn variant="text" size="small" onClick={() => void router.push({ name: "ForgotPassword" })}>
+                                {t("Forgot password?")}
+                            </VBtn>
+                        </div>
                     )}
 
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>

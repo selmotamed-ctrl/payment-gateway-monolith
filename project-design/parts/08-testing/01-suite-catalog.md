@@ -636,3 +636,17 @@ New or extended DB-free suites:
 - `core-back/test/background-jobs.test.ts`, `core-back/test/refund-three-phase.test.ts` — fixtures now give the merchant ceiling headroom so the tests exercise the reserve/refund path rather than the ceiling guard.
 
 The final core run was 20,265 pass / 5,066 skip / 4 fail; the 4 failures are the known audit-chain/vault environment tests that need PostgreSQL and `KMS_MASTER_KEY`. Admin-back 835, merchant-back 157, checkout-back 275, deploy 685, backup-daemon 238, object-storage-daemon 16, fake-rails-back 113, root Vitest 534, admin-front 48, merchant-front 23, companion 27; all front builds pass.
+
+## v46 communication suites (2026-11-26)
+
+`core-back/test/communication-settings.test.ts` covers settings merge precedence,
+explicit disable, channel policy and masking; `communication-settings-secrets.test.ts`
+covers secret extraction/masking/export; `communication-transport.test.ts` covers
+SMTP payloads, the signed SMS webhook and the resolver's refusal to use a masked
+address; `communication-auth-pg.test.ts` drives registration → email verification
+→ password login → email+SMS OTP → password reset on PostgreSQL;
+`google-oauth-pg.test.ts` covers state/PKCE, single-use ticket and merchant
+provisioning. `tests/unit/i18n-catalogue.test.ts` guards the new EN/AR keys and
+`tests/e2e/merchant/auth.spec.ts` covers the no-phone registration, email MFA
+copy and maintenance screen. Deploy config tests cover the SMTP/SMS/Google
+validation.

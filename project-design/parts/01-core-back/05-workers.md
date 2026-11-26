@@ -14,6 +14,8 @@ code:
   - core-back/engine/workers/PollWorker.ts
   - core-back/engine/workers/InboundInboxWorker.ts
   - core-back/engine/workers/OutboxNotificationWorker.ts
+  - core-back/engine/workers/communicationMonitorChecks.ts
+  - core-back/engine/notifications/CommunicationTransport.ts
   - core-back/engine/workers/LedgerInvariantWorker.ts
   - core-back/engine/workers/LedgerCheckpointWorker.ts
   - core-back/engine/workers/LedgerShardScalerWorker.ts
@@ -567,3 +569,23 @@ PSP-M refunds, disputes opened/decided and cash-outs are grouped by currency and
 ## Second-pass settlement and reconciliation corrections (2026-11-25)
 
 `postSettlementSweeps` still excludes a statement line tied to a known merchant-direct, internal or fee-at-source attempt. A **batch-net** source line with no local attempt (the gateway reports a settled batch total) is now swept again; previously the absence of an attempt skipped the whole batch and lost the clearing settlement. A test in `test/remediation-high.test.ts` covers the no-attempt batch case and the USD account selection.
+
+## v46 notification routing and readiness (2026-11-26)
+
+`OutboxNotificationWorker` now persists `last_error`, `sent_at` and
+`delivered_at`, marks a permanent configuration failure (`CHANNEL_NOT_CONFIGURED`,
+`RECIPIENT_ADDRESS_MISSING`) as `SUPPRESSED` instead of retrying eight times, and
+for an EMAIL row whose template policy allows SMS creates the mirrored
+`...:SMS` row once (idempotent by event id; the SMS template must exist). The
+runtime transport reads the current settings on every delivery: EMAIL goes to
+SMTP, SMS to the signed webhook, IN_APP is delivered by the row. The recipient
+resolver opens the sealed address or reads the user/merchant contact; it never
+sends to a masked value.
+
+`communication_readiness` is an extra `PlatformMonitorWorker` check. While email
+is unconfigured it raises the keyed case `platform.communication:email` and
+notifies active GATEWAY_ADMIN/SECURITY_ADMIN or `settings:write` users in-app,
+plus SMS when configured and the optional `PLATFORM_ALERT_SMS`; the daily event
+key prevents repeat spam. It also reports an enabled-but-incomplete SMS/Google
+configuration and repeated delivery failures. The case clears when email is
+configured.

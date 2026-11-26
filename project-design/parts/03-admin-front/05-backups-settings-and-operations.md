@@ -415,3 +415,20 @@ Backup trigger, restore drill and policy changes now require the shared checklis
 ## Second-pass restore-drill rendering (2026-11-25)
 
 The Backups page now reads the daemon's camelCase check objects (`doubleEntry`, `balanceParity`, `auditChain`, `objectStorage`) and their `ok` boolean before falling back to counters. A failed check with a successful query counter can no longer render as **Passed**. The object-storage parity check is shown as a fourth badge when the daemon includes it; the core DTO exposes `checks.objectStorage` as optional.
+
+## 12. Communication settings (2026-11-26)
+
+The settings catalog registers four runtime keys with typed editors:
+
+| Key | Section | Purpose |
+| :--- | :--- | :--- |
+| `communication.email` | Operations & data | Primary SMTP channel: host, port, security, credentials, sender and timeout. Merchant registration and sign-in stay in maintenance while it is not configured. |
+| `communication.sms` | Operations & data | Optional signed SMS aggregator webhook and sender ID. SMS is additive; email remains primary. |
+| `communication.policy` | Operations & data | Which templates may also use SMS (`OFF`, `AUTH_ONLY`, `CRITICAL_ONLY`, `ALL`) and whether staff may fall back to SMS when email is missing. |
+| `auth.google` | Merchants & onboarding | Server-side Google OAuth 2.0 client ID, secret, redirect URI and optional hosted domain for merchant sign-in and registration. |
+
+All four use `showWhenUnconfigured`, so they appear as **Using default** before the first save and can be created from the detail drawer. Secrets (`smtpPassword`, `webhookSecret`, `clientSecret`) use the `secret` field kind: the API returns a mask, a blank input keeps the stored value, and the value is stored encrypted in `platform_setting_secrets`.
+
+The **Communication** tab sits beside **Platform settings** and **Notification templates**. It shows email, SMS and Google readiness (configured, source, missing fields, last test, last delivery, consecutive failures), the merchant maintenance banner and test-send actions. Each card opens the matching typed setting in the same detail drawer. The tab does not save values itself, so the change-note, checklist and immutable-version rules are identical to every other setting.
+
+`tests/unit/platform-settings.test.ts` requires every definition string and field hint to have an Arabic entry; the communication strings live in `constants/i18n/settings.ts`. `tests/e2e/admin/platform-settings.spec.ts` covers the tab, the maintenance banner and opening the typed email editor.

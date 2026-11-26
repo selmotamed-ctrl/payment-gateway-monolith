@@ -58,14 +58,18 @@
 | `core-back/test/checkout-confirm-concurrency.test.ts` | 313 | 5 |
 | `core-back/test/checkout-return-route.test.ts` | 126 | 4 |
 | `core-back/test/commission-tiers.test.ts` | 60 | 7 |
+| `core-back/test/communication-auth-pg.test.ts` | 190 | 5 |
+| `core-back/test/communication-settings-secrets.test.ts` | 66 | 4 |
+| `core-back/test/communication-settings.test.ts` | 170 | 11 |
+| `core-back/test/communication-transport.test.ts` | 165 | 9 |
 | `core-back/test/compliance-input-validation.test.ts` | 244 | 15 |
 | `core-back/test/content-disposition.test.ts` | 106 | 9 |
-| `core-back/test/create-admin-plan.test.ts` | 99 | 8 |
+| `core-back/test/create-admin-plan.test.ts` | 103 | 8 |
 | `core-back/test/db-connection-config.test.ts` | 46 | 4 |
 | `core-back/test/db-wait-budgets.test.ts` | 50 | 3 |
 | `core-back/test/dev-users-plan.test.ts` | 114 | 6 |
 | `core-back/test/e2e/postgres-payment.test.ts` | 987 | 0 |
-| `core-back/test/edge-cases/catalog-140.test.ts` | 3552 | 19 |
+| `core-back/test/edge-cases/catalog-140.test.ts` | 3553 | 19 |
 | `core-back/test/edge-cases/catalog.ts` | 191 | 0 |
 | `core-back/test/edge-cases/helpers.ts` | 775 | 0 |
 | `core-back/test/engine/api-consumer-primitives.test.ts` | 92 | 12 |
@@ -126,6 +130,7 @@
 | `core-back/test/gateway-inquiry-schedules.test.ts` | 91 | 4 |
 | `core-back/test/gateway-rollback-go-live.test.ts` | 168 | 4 |
 | `core-back/test/globalSearch.test.ts` | 266 | 12 |
+| `core-back/test/google-oauth-pg.test.ts` | 133 | 2 |
 | `core-back/test/governance-execution.test.ts` | 1301 | 30 |
 | `core-back/test/guides-support.test.ts` | 172 | 8 |
 | `core-back/test/hardening-gap-regressions.test.ts` | 643 | 42 |
@@ -161,14 +166,14 @@
 | `core-back/test/merchant-read-exposure.test.ts` | 106 | 7 |
 | `core-back/test/merchant-read-scope.test.ts` | 437 | 13 |
 | `core-back/test/merchant-webhooks-api.test.ts` | 234 | 9 |
-| `core-back/test/notifications-and-gl-accounts.test.ts` | 536 | 21 |
+| `core-back/test/notifications-and-gl-accounts.test.ts` | 530 | 21 |
 | `core-back/test/objectStorageEngine.test.ts` | 806 | 32 |
 | `core-back/test/objectStorageOrphanSweepGuard.test.ts` | 24 | 3 |
 | `core-back/test/onboarding-four-eyes.test.ts` | 233 | 21 |
 | `core-back/test/operator-case-catalog.test.ts` | 56 | 4 |
 | `core-back/test/operator-cases.test.ts` | 87 | 5 |
 | `core-back/test/partition-truncate-guard.test.ts` | 86 | 5 |
-| `core-back/test/phase1-mtls-and-schema.test.ts` | 504 | 15 |
+| `core-back/test/phase1-mtls-and-schema.test.ts` | 509 | 15 |
 | `core-back/test/phase2-ledger-and-governance.test.ts` | 281 | 11 |
 | `core-back/test/phase3-dynamic-engine-and-blueprints.test.ts` | 273 | 12 |
 | `core-back/test/phase4-onboarding-aml-disputes-recon.test.ts` | 237 | 16 |
@@ -223,7 +228,7 @@
 | `core-back/test/sandboxPlane.test.ts` | 287 | 7 |
 | `core-back/test/screening-and-caps.test.ts` | 515 | 13 |
 | `core-back/test/security-regressions/c1-forged-success.test.ts` | 119 | 8 |
-| `core-back/test/security-regressions/c2-mfa.test.ts` | 278 | 21 |
+| `core-back/test/security-regressions/c2-mfa.test.ts` | 279 | 21 |
 | `core-back/test/security-regressions/commerce-status-enforcement.test.ts` | 173 | 11 |
 | `core-back/test/security-regressions/gap-019-020-027-session.test.ts` | 160 | 8 |
 | `core-back/test/security-regressions/h1h2-authz.test.ts` | 212 | 15 |
@@ -396,7 +401,7 @@
 | `tests/e2e/admin/merchants.spec.ts` | 90 | 2 |
 | `tests/e2e/admin/object-storage-style.spec.ts` | 81 | 1 |
 | `tests/e2e/admin/operator-cases.spec.ts` | 319 | 3 |
-| `tests/e2e/admin/platform-settings.spec.ts` | 186 | 6 |
+| `tests/e2e/admin/platform-settings.spec.ts` | 211 | 7 |
 | `tests/e2e/admin/report-a4-layout.spec.ts` | 282 | 1 |
 | `tests/e2e/admin/shell.spec.ts` | 254 | 17 |
 | `tests/e2e/admin/table-and-padding-geometry.spec.ts` | 235 | 3 |
@@ -412,7 +417,7 @@
 | `tests/e2e/exhaustive/full-platform-lifecycle-journeys.spec.ts` | 74 | 4 |
 | `tests/e2e/fixtures.ts` | 145 | 0 |
 | `tests/e2e/merchant/a11y.spec.ts` | 28 | 1 |
-| `tests/e2e/merchant/auth.spec.ts` | 47 | 2 |
+| `tests/e2e/merchant/auth.spec.ts` | 86 | 4 |
 | `tests/e2e/merchant/landing.spec.ts` | 105 | 5 |
 | `tests/e2e/merchant/shell.spec.ts` | 145 | 11 |
 | `tests/e2e/merchant/table-row-context-menu.spec.ts` | 124 | 3 |
@@ -460,5 +465,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **455**
-- Total literal test declarations: **4489**
+- Total files: **460**
+- Total literal test declarations: **4523**

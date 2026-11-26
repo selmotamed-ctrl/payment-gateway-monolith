@@ -17,6 +17,22 @@ import { buildMerchantUserInfo } from "../../lib/auth/uiAuthorities";
 import { generateAccessToken, hashAccessToken, hashPassword, signSession, verifyPasswordOrDummy } from "../../lib/auth";
 import { accessTokenPrefixForPlane, getExecutionPlane } from "../../lib/executionPlane";
 import { issueMfaChallenge, verifyMfaChallenge } from "../../lib/auth/mfaChallenges";
+import { communicationStatus, getCommunicationConfiguration, publicCommunicationStatus } from "../../lib/communication/settings";
+import { resolveOtpDelivery } from "../../lib/communication/policy";
+import { ensureCommunicationTemplates } from "../../lib/communication/templates";
+import {
+  findAuthUserByEmail,
+  isEmailVerificationRequired,
+  issueEmailVerification,
+  verifyEmailAddress,
+} from "../../lib/auth/emailVerification";
+import { requestPasswordReset, resetPasswordWithCode } from "../../lib/auth/passwordReset";
+import {
+  exchangeGoogleLoginTicket,
+  handleGoogleCallback,
+  startGoogleOAuth,
+  type GoogleMode,
+} from "../../lib/auth/googleOAuth";
 import {
   assertLoginAllowed,
   assertMfaAllowed,
@@ -582,19 +598,12 @@ const idSchema = z.object({ id: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+
 
 const registerSchema = z
   .object({
-    phone: z.string().min(6).max(20).optional(),
-    email: z.string().email().optional(),
+    email: z.string().email(),
     password: z.string().min(10).max(128),
     fullName: z.string().min(2).max(120),
-    identityType: z.enum(["NATIONAL_ID", "PASSPORT"]).optional(),
-    identityNumber: z.string().min(4).max(32).optional(),
     locale: z.enum(["ar", "en"]).optional(),
   })
-  .strict()
-  .refine((value) => Boolean(value.phone || value.email), {
-    error: "a phone number or an email address is required",
-    path: ["phone"],
-  });
+  .strict();
 
 const verifyIdentitySchema = z
   .object({
@@ -612,7 +621,39 @@ const loginSchema = z
   })
   .strict();
 
-const googleSchema = z.object({ idToken: z.string().min(20).max(4096) }).strict();
+const googleStartSchema = z
+  .object({
+    mode: z.enum(["login", "register"]).optional(),
+    returnPath: z.enum(["/login", "/register"]).optional(),
+    /** Legacy body from the first stub; mapped to register/login. */
+    redirectUri: z.string().max(512).optional(),
+  })
+  .strict();
+
+const googleCallbackSchema = z
+  .object({
+    code: z.string().min(8).max(4096),
+    state: z.string().min(8).max(256),
+  })
+  .strict();
+
+const googleExchangeSchema = z.object({ ticket: z.string().min(16).max(512) }).strict();
+
+const emailVerifySchema = z
+  .object({ email: z.string().email(), code: z.string().regex(/^\d{6}$/) })
+  .strict();
+
+const emailResendSchema = z.object({ email: z.string().email() }).strict();
+
+const passwordForgotSchema = z.object({ email: z.string().email() }).strict();
+
+const passwordResetSchema = z
+  .object({
+    email: z.string().email(),
+    code: z.string().regex(/^\d{6}$/),
+    newPassword: z.string().min(10).max(128),
+  })
+  .strict();
 
 const mfaSchema = z
   .object({
@@ -620,6 +661,8 @@ const mfaSchema = z
     challengeId: z.string().min(4).max(4096).optional(),
   })
   .strict();
+
+const mfaResendSchema = z.object({ challengeId: z.string().uuid() }).strict();
 
 const requireMerchantId = (principal: { merchantId: string | null }): string => {
   if (!principal.merchantId) {
@@ -797,22 +840,25 @@ const buildSession = (
   };
 };
 
+const assertMerchantCommunicationReady = async (): Promise<void> => {
+  const config = await getCommunicationConfiguration(client as never);
+  if (!config.email.configured) {
+    throw new ApiError(
+      503,
+      "AUTH_MAINTENANCE_EMAIL_NOT_CONFIGURED",
+      "Merchant registration and sign-in are unavailable until email delivery is configured in Platform Settings",
+    );
+  }
+};
+
 router.post("/auth/register", async (request: Request, response: Response) => {
   const body = parseOrThrow(registerSchema, request.body);
-  const phone = body.phone ? normalizePhone(body.phone) : null;
-  const email = body.email ? normalizeEmail(body.email) : null;
+  await assertMerchantCommunicationReady();
+  const email = normalizeEmail(body.email);
 
-  if (phone) {
-    const existing = await client.userIdentity.findFirst({ where: { kind: "PHONE", identifierNormalized: phone } });
-    if (existing) {
-      throw new ApiError(409, "IDENTITY_ALREADY_REGISTERED", "The phone number is already linked to an account");
-    }
-  }
-  if (email) {
-    const existing = await client.userIdentity.findFirst({ where: { kind: "EMAIL", identifierNormalized: email } });
-    if (existing) {
-      throw new ApiError(409, "IDENTITY_ALREADY_REGISTERED", "The email address is already linked to an account");
-    }
+  const existing = await client.userIdentity.findFirst({ where: { kind: "EMAIL", identifierNormalized: email } });
+  if (existing) {
+    throw new ApiError(409, "IDENTITY_ALREADY_REGISTERED", "The email address is already linked to an account");
   }
 
   const passwordHash = await hashPassword(body.password);
@@ -827,15 +873,15 @@ router.post("/auth/register", async (request: Request, response: Response) => {
         riskTier: "STANDARD",
         onboardingChannel: "SELF_SERVICE",
         country: "LY",
-        contactPhone: phone,
+        contactPhone: null,
         contactEmail: email,
       },
     });
     const user = await tx.user.create({
       data: {
         merchantId: merchant.id,
-        email: email ?? `${phone ?? randomBytes(6).toString("hex")}@pending.payment-gateway.local`,
-        phone,
+        email,
+        phone: null,
         passwordHash,
         role: "MERCHANT_ADMIN",
         authoritiesMap: ["merchant:read", "merchant:write", "link:write", "payment:read"],
@@ -845,25 +891,18 @@ router.post("/auth/register", async (request: Request, response: Response) => {
         status: "ACTIVE",
       },
     });
-    if (phone) {
-      await tx.userIdentity.create({
-        data: { userId: user.id, kind: "PHONE", identifierNormalized: phone, isPrimary: true },
-      });
-    }
-    if (email) {
-      await tx.userIdentity.create({
-        data: { userId: user.id, kind: "EMAIL", identifierNormalized: email, isPrimary: !phone },
-      });
-    }
+    await tx.userIdentity.create({
+      data: { userId: user.id, kind: "EMAIL", identifierNormalized: email, isPrimary: true },
+    });
     const glAccount = await tx.glAccount.create({
       data: {
         accountType: "MERCHANT_WALLET",
         ownerId: merchant.id,
-        currency: "LYD",
+        currency: env.BASE_CURRENCY,
       },
     });
     const wallet = await tx.wallet.create({
-      data: { merchantId: merchant.id, glAccountId: glAccount.id, currency: "LYD", status: "PENDING" },
+      data: { merchantId: merchant.id, glAccountId: glAccount.id, currency: env.BASE_CURRENCY, status: "PENDING" },
     });
     await tx.joinRequest.create({
       data: {
@@ -880,8 +919,42 @@ router.post("/auth/register", async (request: Request, response: Response) => {
         fourEyesReasons: [],
       },
     });
+    await writeAudit(tx, {
+      data: {
+        actorId: user.id,
+        role: user.role,
+        action: "MERCHANT_REGISTERED",
+        entityType: "MERCHANT",
+        entityId: merchant.id,
+        beforeJson: {},
+        afterJson: { email, channel: "SELF_SERVICE", emailVerificationRequired: true },
+      },
+    });
     return { merchant, user, wallet };
   });
+
+  let verification: { channels: Array<"EMAIL" | "SMS">; destinationMasked: Record<string, string> } | null = null;
+  try {
+    verification = await issueEmailVerification(
+      client as never,
+      {
+        user: {
+          id: created.user.id,
+          email: created.user.email,
+          phone: created.user.phone,
+          status: created.user.status,
+          role: created.user.role,
+          merchantId: created.user.merchantId,
+        },
+        channel: "MERCHANT",
+        ip: clientIp(request),
+      },
+    );
+  } catch (error) {
+    // The account exists; the resend endpoint lets the user ask again. Do not fail the registration on a transient
+    // provider problem.
+    if (!(error instanceof ApiError)) throw error;
+  }
 
   response.status(201).json({
     merchantId: created.merchant.id,
@@ -889,6 +962,12 @@ router.post("/auth/register", async (request: Request, response: Response) => {
     userId: created.user.id,
     status: "REGISTERED",
     mfaRequired: true,
+    verificationRequired: true,
+    emailMasked: (() => {
+      const [local = "", domain = ""] = email.split("@");
+      return `${local.slice(0, 2)}***@${domain}`;
+    })(),
+    ...(verification ? { deliveryChannels: verification.channels, destinationMasked: verification.destinationMasked } : {}),
   });
 });
 
@@ -952,8 +1031,49 @@ router.post("/auth/accept-invitation", async (request: Request, response: Respon
   response.json({ status: "ACTIVE", userId: user.id, merchantId: user.merchantId, loginRequired: true });
 });
 
+const issueLoginChallenge = async (
+  user: { id: string; email: string | null; phone: string | null; role: string; merchantId: string | null },
+  ip: string | null,
+  channel: "MERCHANT" | "ADMIN",
+  db: typeof client | Tx = client,
+): Promise<{ challengeId: string; channels: Array<"EMAIL" | "SMS">; destinationMasked: Record<string, string> }> => {
+  await ensureCommunicationTemplates(db as never);
+  const config = await getCommunicationConfiguration(client as never);
+  const delivery = resolveOtpDelivery(
+    config,
+    { email: user.email, phone: user.phone },
+    { channel, purpose: "LOGIN_MFA" },
+  );
+  if (delivery.channels.length === 0) {
+    throw new ApiError(
+      503,
+      channel === "MERCHANT" ? "AUTH_MAINTENANCE_EMAIL_NOT_CONFIGURED" : "NO_DELIVERY_CHANNEL",
+      channel === "MERCHANT"
+        ? "Merchant sign-in is unavailable until email delivery is configured in Platform Settings"
+        : "No configured channel can deliver a verification code",
+    );
+  }
+  return issueMfaChallenge(db as never, {
+    userId: user.id,
+    channel,
+    email: delivery.email,
+    phone: delivery.phone,
+    phoneLast4: delivery.phone?.slice(-4),
+    deliveries: delivery.channels.map((deliveryChannel) => ({
+      channel: deliveryChannel,
+      address: deliveryChannel === "EMAIL" ? delivery.email! : delivery.phone!,
+      masked:
+        deliveryChannel === "EMAIL"
+          ? delivery.destinationMasked.email!
+          : delivery.destinationMasked.phone!,
+    })),
+    ip,
+  });
+};
+
 router.post("/auth/login", async (request: Request, response: Response) => {
   const body = parseOrThrow(loginSchema, request.body);
+  await assertMerchantCommunicationReady();
   const identifier = body.identifier.includes("@")
     ? normalizeEmail(body.identifier)
     : normalizePhone(body.identifier);
@@ -982,30 +1102,189 @@ router.post("/auth/login", async (request: Request, response: Response) => {
   if (user.status !== "ACTIVE") {
     throw new ApiError(403, "ACCOUNT_NOT_ACTIVE", "The account is not active");
   }
+  if (await isEmailVerificationRequired(client, {
+    id: user.id,
+    email: user.email,
+    phone: user.phone,
+    status: user.status,
+    role: user.role,
+    merchantId: user.merchantId,
+  })) {
+    throw new ApiError(403, "EMAIL_NOT_VERIFIED", "Verify your email address before signing in");
+  }
   await recordLoginSuccess(identifier, ip);
   if (user.mfaRequired) {
-    const { challengeId } = await client.$transaction((tx) =>
-      issueMfaChallenge(tx as never, {
-        userId: user.id,
-        channel: "MERCHANT",
-        phone: user.phone,
-        phoneLast4: (user.phone ?? "").slice(-4),
-        ip,
-      }),
-    );
-    response.json({ mfaRequired: true, challengeId });
+    const issued = await issueLoginChallenge(user, ip, "MERCHANT");
+    response.json({
+      mfaRequired: true,
+      challengeId: issued.challengeId,
+      deliveryChannels: issued.channels,
+      destinationMasked: issued.destinationMasked,
+    });
     return;
   }
   response.json(buildSession(user, false));
 });
 
+router.post("/auth/google/start", async (request: Request, response: Response) => {
+  const body = parseOrThrow(googleStartSchema, request.body);
+  await assertMerchantCommunicationReady();
+  const mode: GoogleMode = body.mode ?? "login";
+  const returnPath = body.returnPath ?? (mode === "register" ? "/register" : "/login");
+  try {
+    const result = await startGoogleOAuth(client as never, {
+      mode,
+      returnPath,
+      ip: clientIp(request),
+    });
+    response.json(result);
+  } catch (error) {
+    if (error instanceof Error && error.message === "GOOGLE_NOT_CONFIGURED") {
+      throw new ApiError(503, "GOOGLE_NOT_CONFIGURED", "Google sign-in is not configured in Platform Settings");
+    }
+    throw error;
+  }
+});
+
+// Legacy alias used by the first frontend build.
 router.post("/auth/google", async (request: Request, response: Response) => {
-  parseOrThrow(googleSchema, request.body);
-  throw new ApiError(
-    501,
-    "GOOGLE_IDENTITY_NOT_CONFIGURED",
-    "Google sign-in requires a configured OIDC provider",
-  );
+  const body = parseOrThrow(googleStartSchema, request.body);
+  await assertMerchantCommunicationReady();
+  const mode: GoogleMode = body.mode ?? "login";
+  const returnPath = body.returnPath ?? (mode === "register" ? "/register" : "/login");
+  try {
+    response.json(await startGoogleOAuth(client as never, { mode, returnPath, ip: clientIp(request) }));
+  } catch (error) {
+    if (error instanceof Error && error.message === "GOOGLE_NOT_CONFIGURED") {
+      throw new ApiError(503, "GOOGLE_NOT_CONFIGURED", "Google sign-in is not configured in Platform Settings");
+    }
+    throw error;
+  }
+});
+
+router.get("/auth/google/callback", async (request: Request, response: Response) => {
+  const code = typeof request.query.code === "string" ? request.query.code : "";
+  const state = typeof request.query.state === "string" ? request.query.state : "";
+  if (!code || !state) {
+    response.json({ errorPath: "/login?error=GOOGLE_CALLBACK_INVALID", errorCode: "GOOGLE_CALLBACK_INVALID" });
+    return;
+  }
+  const result = await handleGoogleCallback(client as never, {
+    code,
+    state,
+    ip: clientIp(request),
+  });
+  if (result.userId) {
+    await writeAudit(client, {
+      data: {
+        actorId: result.userId,
+        role: "MERCHANT_ADMIN",
+        action: "GOOGLE_LOGIN",
+        entityType: "USER",
+        entityId: result.userId,
+        beforeJson: {},
+        afterJson: { merchantId: result.merchantId, stage: "callback" },
+      },
+    });
+  }
+  response.json(result);
+});
+
+router.post("/auth/google/exchange", async (request: Request, response: Response) => {
+  const body = parseOrThrow(googleExchangeSchema, request.body);
+  try {
+    const user = await exchangeGoogleLoginTicket(client as never, { ticket: body.ticket });
+    if (await isEmailVerificationRequired(client, {
+      id: String(user.id),
+      email: String(user.email),
+      phone: user.phone ?? null,
+      status: String(user.status),
+      role: String(user.role),
+      merchantId: user.merchantId ?? null,
+    })) {
+      throw new ApiError(403, "EMAIL_NOT_VERIFIED", "Verify your email address before signing in");
+    }
+    response.json(buildSession(user as never, true));
+  } catch (error) {
+    if (error instanceof Error && error.message === "GOOGLE_TICKET_INVALID") {
+      throw new ApiError(401, "GOOGLE_TICKET_INVALID", "The Google sign-in ticket is invalid or expired");
+    }
+    throw error;
+  }
+});
+
+router.post("/auth/email/verify", async (request: Request, response: Response) => {
+  const body = parseOrThrow(emailVerifySchema, request.body);
+  try {
+    const user = await verifyEmailAddress(client as never, {
+      email: body.email,
+      code: body.code,
+      channel: "MERCHANT",
+    });
+    await writeAudit(client, {
+      data: {
+        actorId: user.id,
+        role: user.role,
+        action: "MERCHANT_EMAIL_VERIFIED",
+        entityType: "USER",
+        entityId: user.id,
+        beforeJson: { emailVerified: false },
+        afterJson: { emailVerified: true },
+      },
+    });
+    response.json({ verified: true, userId: user.id, merchantId: user.merchantId });
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(401, "EMAIL_VERIFICATION_INVALID", "The verification code is invalid or expired");
+  }
+});
+
+router.post("/auth/email/resend", async (request: Request, response: Response) => {
+  const body = parseOrThrow(emailResendSchema, request.body);
+  await assertMerchantCommunicationReady();
+  const user = await findAuthUserByEmail(client as never, body.email, "MERCHANT");
+  if (user && user.status === "ACTIVE" && (await isEmailVerificationRequired(client, user))) {
+    try {
+      await issueEmailVerification(client as never, { user, channel: "MERCHANT", ip: clientIp(request) });
+    } catch {
+      // Generic answer: never reveal whether the account exists or is already verified.
+    }
+  }
+  response.status(202).json({ accepted: true });
+});
+
+router.post("/auth/password/forgot", async (request: Request, response: Response) => {
+  const body = parseOrThrow(passwordForgotSchema, request.body);
+  await assertMerchantCommunicationReady();
+  await requestPasswordReset(client as never, {
+    email: body.email,
+    channel: "MERCHANT",
+    ip: clientIp(request),
+  });
+  response.status(202).json({ accepted: true });
+});
+
+router.post("/auth/password/reset", async (request: Request, response: Response) => {
+  const body = parseOrThrow(passwordResetSchema, request.body);
+  await assertMerchantCommunicationReady();
+  const result = await resetPasswordWithCode(client as never, {
+    email: body.email,
+    code: body.code,
+    newPassword: body.newPassword,
+    channel: "MERCHANT",
+  });
+  await writeAudit(client, {
+    data: {
+      actorId: result.userId,
+      role: "MERCHANT_ADMIN",
+      action: "MERCHANT_PASSWORD_RESET",
+      entityType: "USER",
+      entityId: result.userId,
+      beforeJson: {},
+      afterJson: { sessionsInvalidated: true },
+    },
+  });
+  response.json({ reset: true, loginRequired: true });
 });
 
 router.post("/auth/mfa/verify", async (request: Request, response: Response) => {
@@ -1022,6 +1301,7 @@ router.post("/auth/mfa/verify", async (request: Request, response: Response) => 
       challengeId: body.challengeId,
       code: body.code,
       channel: "MERCHANT",
+      purpose: "LOGIN_MFA",
     });
   } catch (error) {
     await recordMfaFailure(ip);
@@ -1034,11 +1314,66 @@ router.post("/auth/mfa/verify", async (request: Request, response: Response) => 
   response.json(buildSession(user, true));
 });
 
-router.get("/auth/me", (_request: Request, response: Response) => {
+router.post("/auth/mfa/resend", async (request: Request, response: Response) => {
+  await assertMerchantCommunicationReady();
+  const body = parseOrThrow(mfaResendSchema, request.body);
+  const ip = clientIp(request);
+  await assertMfaAllowed(ip);
+  const challenge = await client.mfaChallenge.findUnique({
+    where: { id: body.challengeId },
+    select: { id: true, userId: true, channel: true, purpose: true, consumedAt: true, expiresAt: true },
+  });
+  if (
+    !challenge ||
+    challenge.channel !== "MERCHANT" ||
+    String(challenge.purpose ?? "LOGIN_MFA") !== "LOGIN_MFA" ||
+    challenge.consumedAt ||
+    challenge.expiresAt.getTime() <= Date.now()
+  ) {
+    throw new ApiError(400, "MFA_CHALLENGE_INVALID", "The verification challenge is no longer valid. Sign in again");
+  }
+  const user = await client.user.findUnique({
+    where: { id: challenge.userId },
+    select: { id: true, email: true, phone: true, role: true, merchantId: true, status: true },
+  });
+  if (!user || user.status !== "ACTIVE" || user.merchantId === null || !String(user.role).startsWith("MERCHANT_")) {
+    throw new ApiError(400, "MFA_CHALLENGE_INVALID", "The verification challenge is no longer valid. Sign in again");
+  }
+  const issued = await client.$transaction(async (tx) => {
+    await tx.$queryRawUnsafe("SELECT id FROM users WHERE id = $1::uuid FOR UPDATE", user.id);
+    return issueLoginChallenge(user, ip, "MERCHANT", tx as never);
+  });
+  response.json({
+    mfaRequired: true,
+    challengeId: issued.challengeId,
+    deliveryChannels: issued.channels,
+    destinationMasked: issued.destinationMasked,
+  });
+});
+
+router.get("/auth/me", async (_request: Request, response: Response) => {
+  let communication;
+  try {
+    communication = publicCommunicationStatus(await communicationStatus(client as never));
+  } catch {
+    communication = {
+      emailConfigured: false,
+      smsConfigured: false,
+      googleEnabled: false,
+      registrationEnabled: false,
+      passwordResetEnabled: false,
+      maintenance: {
+        active: true,
+        code: "EMAIL_NOT_CONFIGURED" as const,
+        message: "Merchant registration and sign-in are unavailable until email delivery is configured.",
+      },
+    };
+  }
   response.json({
     platformName: "Payment Gateway",
     version: process.env.GIT_COMMIT?.slice(0, 12) ?? "dev",
     suspended: false,
+    communication,
   });
 });
 

@@ -1,4 +1,12 @@
 type Any = Record<string, any>;
+import { Vault } from "../engine/crypto/Vault";
+
+const commissionNotificationVault = new Vault();
+const hasRealEmail = (value: string | null | undefined): value is string =>
+  typeof value === "string" &&
+  value.includes("@") &&
+  !value.endsWith("@pending.payment-gateway.local") &&
+  !value.endsWith("@invited.payment-gateway.local");
 
 /**
  * Merchant notices of the commission netting (AUTO-21, decision D8). One code today:
@@ -93,7 +101,9 @@ export const queueCommissionNotification = async (
     select: { id: true, email: true, phone: true },
   });
   const address = recipient?.email ?? recipient?.phone ?? merchant.contactEmail ?? merchant.contactPhone ?? null;
+  const email = hasRealEmail(recipient?.email) ? recipient.email : hasRealEmail(merchant.contactEmail) ? merchant.contactEmail : null;
   for (const channel of ["IN_APP", "EMAIL"] as const) {
+    if (channel === "EMAIL" && !email) continue;
     const eventId = `commission:${input.eventKey}:${channel}`.slice(0, 191);
     try {
       await db.notification.create({
@@ -106,7 +116,10 @@ export const queueCommissionNotification = async (
           lang: "EN",
           payloadJson: input.payload,
           addressMasked: maskAddress(address),
-          addressCiphertext: "",
+          addressCiphertext:
+            channel === "EMAIL" && email
+              ? await commissionNotificationVault.encryptSecret(email, "notification-address")
+              : "",
           status: "QUEUED",
           attempts: 0,
         },

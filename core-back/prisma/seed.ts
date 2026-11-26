@@ -5,6 +5,7 @@ import { seedBlueprints, seedPlatformCredentialSets } from "./seedBlueprints";
 import { seedCheckoutSupport, seedRailHelpGuides } from "./seedGuides";
 import { seedSystemGlAccounts } from "./seedGlAccounts";
 import { seedDefaultChromeSpecs } from "../engine/reportStudio/seedDefaultChromeSpecs";
+import { ensureCommunicationTemplates } from "../lib/communication/templates";
 import { platformSettings } from "./platformSettingsSeed";
 
 
@@ -285,6 +286,8 @@ const seed = async () => {
       seedKey: "platform-default",
     },
   });
+
+  await ensureCommunicationTemplates(client as never);
 
   await seedBlueprints(client);
 

@@ -1,4 +1,12 @@
 import type { PrismaClient } from "../generated/prisma/client";
+import { Vault } from "../engine/crypto/Vault";
+
+const kybNotificationVault = new Vault();
+const hasRealEmail = (value: string | null | undefined): value is string =>
+  typeof value === "string" &&
+  value.includes("@") &&
+  !value.endsWith("@pending.payment-gateway.local") &&
+  !value.endsWith("@invited.payment-gateway.local");
 
 type KybNotificationCode =
   | "KYB_DOC_EXPIRING"
@@ -202,7 +210,9 @@ export const queueKybNotification = async (
     select: { id: true, email: true, phone: true },
   });
   const address = recipient?.email ?? recipient?.phone ?? merchant.contactEmail ?? merchant.contactPhone ?? null;
+  const email = hasRealEmail(recipient?.email) ? recipient.email : hasRealEmail(merchant.contactEmail) ? merchant.contactEmail : null;
   for (const channel of input.channels ?? ["IN_APP", "EMAIL"]) {
+    if (channel === "EMAIL" && !email) continue;
     const eventId = `kyb:${input.eventKey}:${channel}`.slice(0, 191);
     try {
       await db.notification.create({
@@ -215,7 +225,10 @@ export const queueKybNotification = async (
           lang: "EN",
           payloadJson: input.payload as never,
           addressMasked: maskAddress(address),
-          addressCiphertext: "",
+          addressCiphertext:
+            channel === "EMAIL" && email
+              ? await kybNotificationVault.encryptSecret(email, "notification-address")
+              : "",
           status: "QUEUED",
           attempts: 0,
         },

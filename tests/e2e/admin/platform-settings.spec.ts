@@ -81,6 +81,17 @@ test.beforeEach(async ({ page }) => {
             await route.fulfill(json(200, { settings: [{ key: "screening.fail_closed", version: 1 }] }));
             return;
         }
+        if (url.pathname.endsWith("/settings/communication/status")) {
+            await route.fulfill(json(200, {
+                status: {
+                    email: { enabled: true, configured: false, source: "NONE", missingFields: ["smtpHost", "fromEmail"], lastTestAt: null, lastTestStatus: null, lastTestError: null, lastDeliveryAt: null, lastDeliveryStatus: null, consecutiveFailures: 0 },
+                    sms: { enabled: false, configured: false, source: "NONE", missingFields: ["webhookUrl"], lastTestAt: null, lastTestStatus: null, lastTestError: null, lastDeliveryAt: null, lastDeliveryStatus: null, consecutiveFailures: 0 },
+                    google: { enabled: false, configured: false, source: "NONE", missingFields: ["clientId"], lastTestAt: null, lastTestStatus: null, lastTestError: null, lastDeliveryAt: null, lastDeliveryStatus: null, consecutiveFailures: 0 },
+                    maintenance: { active: true, code: "COMMUNICATION_EMAIL_UNCONFIGURED", message: "Email delivery is not configured." },
+                },
+            }));
+            return;
+        }
         if (url.pathname.endsWith("/settings/summary")) {
             await route.fulfill(json(200, summary));
             return;
@@ -182,4 +193,18 @@ test("the settings workspace does not overflow a phone viewport", async ({ page 
     await expect(page.getByRole("tab", { name: /All settings/ })).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(1);
+});
+
+test("the communication tab shows readiness and opens the typed channel settings", async ({ page }) => {
+    await page.goto("/settings/platform");
+    await page.getByRole("tab", { name: "Communication" }).click();
+    await expect(page.getByText("Merchant registration and sign-in are in maintenance")).toBeVisible();
+    await expect(page.getByText("Email delivery is not configured.")).toBeVisible();
+    await expect(page.getByText("Google sign-in has no delivery test.")).toBeVisible();
+
+    await page.getByRole("button", { name: "Edit setting" }).first().click();
+    await expect(page.getByRole("heading", { name: "Email delivery (SMTP)" })).toBeVisible();
+    await expect(page.getByText("Using default").first()).toBeVisible();
+    await page.getByRole("tab", { name: "Value" }).click();
+    await expect(page.getByLabel("SMTP host")).toBeVisible();
 });

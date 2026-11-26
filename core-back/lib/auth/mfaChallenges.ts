@@ -4,14 +4,19 @@ import { ApiError } from "../error";
 import { constantTimeEqual, generateMfaCode, hashMfaCode } from "./index";
 
 /**
- * Server-side, single-use MFA challenges.
+ * Server-side, single-use authentication challenges.
  *
  * A challenge is only ever issued after the password step succeeded. The
  * client holds the opaque row id; the code is stored as an HMAC. Every wrong
  * guess is counted in the database (so the limit holds across processes), the
  * challenge dies after `MFA_MAX_ATTEMPTS` wrong codes, on first success, or at
  * expiry, and a locked user is refused new challenges for a cool-down.
+ *
+ * `purpose` separates sign-in, e-mail verification and password reset. The same
+ * six-digit UX is used on every purpose, but a password-reset code can never be
+ * replayed as a sign-in code.
  */
+
 export const MFA_MAX_ATTEMPTS = 5;
 export const MFA_TTL_MS = 5 * 60_000;
 export const MFA_LOCK_COOLDOWN_MS = 15 * 60_000;
@@ -19,6 +24,7 @@ export const MFA_ISSUE_WINDOW_MS = 15 * 60_000;
 export const MFA_MAX_ISSUES_PER_WINDOW = 5;
 
 export type MfaChannel = "ADMIN" | "MERCHANT";
+export type MfaPurpose = "LOGIN_MFA" | "EMAIL_VERIFICATION" | "PASSWORD_RESET";
 
 type Row = Record<string, any>;
 
@@ -38,36 +44,66 @@ export interface MfaStore {
   };
 }
 
+export interface MfaDelivery {
+  channel: "EMAIL" | "SMS";
+  /** The real destination; sealed before it is stored. */
+  address: string;
+  /** The masked form shown to the user and written to the log. */
+  masked: string;
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const vault = new Vault();
 
-/** The SMS payload carries the code encrypted; the notification worker opens it at send time. */
+/** The code is stored encrypted; the notification worker opens it at send time. */
 export const sealMfaCode = (code: string): Promise<string> => vault.encryptSecret(code, "mfa-sms");
 export const openMfaCode = (ciphertext: string): Promise<string> => vault.decryptSecret(ciphertext);
-/** The delivery address (phone) is encrypted at rest; the transport opens it at send time. */
-export const sealMfaAddress = (phone: string): Promise<string> => vault.encryptSecret(phone, "mfa-address");
+/** The delivery address is encrypted at rest; the transport opens it at send time. */
+export const sealMfaAddress = (address: string): Promise<string> => vault.encryptSecret(address, "mfa-address");
+
+const templateForPurpose = (purpose: MfaPurpose): string => purpose;
+
+const canBeVerifiedByPhone = (purpose: MfaPurpose): boolean =>
+  purpose === "LOGIN_MFA" || purpose === "PASSWORD_RESET" || purpose === "EMAIL_VERIFICATION";
 
 export const issueMfaChallenge = async (
   db: MfaStore,
   input: {
     userId: string;
     channel: MfaChannel;
-    /** Full destination phone. Required: the challenge is useless without a delivery address. */
+    /** Full destination phone. Required unless a `deliveries` list is supplied. */
     phone?: string | null;
-    phoneLast4: string;
+    phoneLast4?: string;
+    /** Full destination e-mail. Supplied by the communication policy. */
+    email?: string | null;
+    emailMasked?: string | null;
+    /** The exact channels the policy selected. */
+    deliveries?: MfaDelivery[];
+    purpose?: MfaPurpose;
     ip: string | null;
     templateCode?: string;
     now?: Date;
   },
-): Promise<{ challengeId: string }> => {
-  if (!input.phone) {
-    // Fail explicitly instead of queueing a code that can never be delivered
-    // (the notification transport would otherwise receive only a last-4).
+): Promise<{ challengeId: string; channels: Array<"EMAIL" | "SMS">; destinationMasked: Record<string, string> }> => {
+  const purpose = input.purpose ?? "LOGIN_MFA";
+  const deliveries: MfaDelivery[] = input.deliveries
+    ? input.deliveries
+    : input.phone && canBeVerifiedByPhone(purpose)
+      ? [
+          {
+            channel: "SMS",
+            address: input.phone,
+            masked: input.phoneLast4 ? `*******${input.phoneLast4}` : `*******${input.phone.slice(-4)}`,
+          },
+        ]
+      : [];
+  if (deliveries.length === 0) {
+    // Fail explicitly instead of queueing a code that can never be delivered.
     throw new ApiError(
-      409,
-      "MFA_DESTINATION_MISSING",
-      "This account has no phone number for multi-factor authentication. Contact an administrator",
+      503,
+      "NO_DELIVERY_CHANNEL",
+      "No configured channel can deliver a verification code to this account. Contact an administrator",
     );
   }
   const now = input.now ?? new Date();
@@ -82,56 +118,78 @@ export const issueMfaChallenge = async (
     throw new ApiError(429, "MFA_RATE_LIMITED", "Too many verification codes were requested. Try again later");
   }
   // A new challenge supersedes every open one of the same user, and any queued
-  // SMS for a superseded challenge must not be delivered after the new code.
+  // code for a superseded challenge must not be delivered after the new code.
   await db.mfaChallenge.updateMany({
-    where: { userId: input.userId, consumedAt: null },
+    where: { userId: input.userId, consumedAt: null, purpose },
     data: { consumedAt: now },
   });
+  const templateCode = input.templateCode ?? templateForPurpose(purpose);
   if (db.notification.updateMany) {
     await db.notification.updateMany({
-      where: { recipientUserId: input.userId, templateCode: "LOGIN_MFA", status: "QUEUED" },
+      where: { recipientUserId: input.userId, templateCode, status: "QUEUED" },
       data: { status: "SUPPRESSED" },
     });
   }
   const code = generateMfaCode();
+  const destinationMasked: Record<string, string> = {};
+  for (const delivery of deliveries) {
+    destinationMasked[delivery.channel === "EMAIL" ? "email" : "phone"] = delivery.masked;
+  }
   const row = await db.mfaChallenge.create({
     data: {
       userId: input.userId,
       channel: input.channel,
+      purpose,
       codeHash: hashMfaCode(input.userId, code),
       attempts: 0,
       maxAttempts: MFA_MAX_ATTEMPTS,
       expiresAt: new Date(now.getTime() + MFA_TTL_MS),
       ip: input.ip,
+      deliveryChannels: deliveries.map((delivery) => delivery.channel),
+      destinationMasked,
     },
   });
-  await db.notification.create({
-    data: {
-      eventId: randomBytes(16).toString("hex"),
-      recipientUserId: input.userId,
-      templateCode: input.templateCode ?? "LOGIN_MFA",
-      channel: "SMS",
-      lang: "EN",
-      // Never the plaintext code or address: the worker decrypts them at send time.
-      payloadJson: { codeCiphertext: await sealMfaCode(code) },
-      addressCiphertext: await sealMfaAddress(input.phone),
-      status: "QUEUED",
-      addressMasked: input.phoneLast4,
-    },
-  });
-  return { challengeId: String(row.id) };
+  const sealedCode = await sealMfaCode(code);
+  for (const delivery of deliveries) {
+    await db.notification.create({
+      data: {
+        eventId: `auth:${purpose}:${String(row.id)}:${delivery.channel}`,
+        recipientUserId: input.userId,
+        templateCode,
+        channel: delivery.channel,
+        lang: "EN",
+        // Never the plaintext code or address: the worker decrypts them at send time.
+        payloadJson: { codeCiphertext: sealedCode, ttlMinutes: MFA_TTL_MS / 60_000, platformName: "Payment Gateway" },
+        addressCiphertext: await sealMfaAddress(delivery.address),
+        status: "QUEUED",
+        addressMasked: delivery.masked,
+      },
+    });
+  }
+  return {
+    challengeId: String(row.id),
+    channels: deliveries.map((delivery) => delivery.channel),
+    destinationMasked,
+  };
 };
 
 /** Consumes the challenge when the code is right. Returns the user the password step belongs to. */
 export const verifyMfaChallenge = async (
   db: Pick<MfaStore, "mfaChallenge">,
-  input: { challengeId: string; code: string; channel: MfaChannel; now?: Date },
+  input: { challengeId: string; code: string; channel: MfaChannel; purpose?: MfaPurpose; now?: Date },
 ): Promise<{ userId: string }> => {
+  const purpose = input.purpose ?? "LOGIN_MFA";
   const now = input.now ?? new Date();
-  const invalid = () => new ApiError(401, "MFA_CHALLENGE_INVALID", "The MFA challenge is invalid or expired");
+  const invalid = () => new ApiError(401, "MFA_CHALLENGE_INVALID", "The verification challenge is invalid or expired");
   if (!UUID.test(input.challengeId)) throw invalid();
   const row = await db.mfaChallenge.findUnique({ where: { id: input.challengeId } });
-  if (!row || row.channel !== input.channel || row.consumedAt || new Date(row.expiresAt).getTime() <= now.getTime()) {
+  if (
+    !row ||
+    row.channel !== input.channel ||
+    String(row.purpose ?? "LOGIN_MFA") !== purpose ||
+    row.consumedAt ||
+    new Date(row.expiresAt).getTime() <= now.getTime()
+  ) {
     throw invalid();
   }
   const userId = String(row.userId);
