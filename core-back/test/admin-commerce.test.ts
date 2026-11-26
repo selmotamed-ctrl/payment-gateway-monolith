@@ -469,6 +469,11 @@ describe.skipIf(!reachable)("applications and access tokens", () => {
     expect(item.railWhitelist).toBeNull();
     expect(item.railWhitelistMode).toBe("ALL");
     expect(item.accessTokenCount).toBe(1);
+    expect(item.tokenActiveCount).toBe(1);
+    expect(item.tokenRevokedCount).toBe(0);
+    expect(item.tokenExpiredCount).toBe(0);
+    expect(item.tokenIpRestrictedCount).toBe(1);
+    expect(item.tokenCidrCount).toBe(1);
     expect(item.assignedWallet.currency).toBe("LYD");
     expect(item.merchant.tradeName).toContain("C-a");
 
@@ -476,8 +481,12 @@ describe.skipIf(!reachable)("applications and access tokens", () => {
     expect(detail.status).toBe(200);
     const token = detail.body.application.accessTokens[0];
     expect(token.status).toBe("ACTIVE");
+    expect(token.env).toBe("LIVE");
     expect(token.cidrs).toEqual(["10.0.0.0/8"]);
+    expect(token.ipCount).toBe(1);
     expect(token.scopes).toContain("link:write");
+    expect(detail.body.application.tokenIpRestrictedCount).toBe(1);
+    expect(detail.body.application.tokenCidrCount).toBe(1);
     expect(detail.raw).not.toContain(commerce.tokenHash);
     expect(detail.raw).not.toContain("tokenHash");
     expect(detail.body.application.paymentLinks[0].key).toBe(commerce.linkKey);
@@ -486,6 +495,36 @@ describe.skipIf(!reachable)("applications and access tokens", () => {
     const summary = await admin("/applications/summary", "reader");
     expect(summary.body.total).toBeGreaterThanOrEqual(2);
     expect(summary.body.withoutWhitelist).toBeGreaterThanOrEqual(2);
+  });
+
+  test("the platform-wide token list exposes the application, environment and IP allowlist", async () => {
+    const list = await admin(`/access-tokens?merchantId=${commerce.merchantId}`, "reader");
+    expect(list.status).toBe(200);
+    expect(list.body.total).toBe(1);
+    const row = list.body.accessTokens[0];
+    expect(row.id).toBe(commerce.tokenId);
+    expect(row.application).toEqual({ id: commerce.applicationId, name: `App a ${RUN}` });
+    expect(row.merchant.id).toBe(commerce.merchantId);
+    expect(row.env).toBe("LIVE");
+    expect(row.ipWhitelistEnabled).toBe(true);
+    expect(row.cidrs).toEqual(["10.0.0.0/8"]);
+    expect(row.status).toBe("ACTIVE");
+    expect(list.raw).not.toContain(commerce.tokenHash);
+    expect(list.raw).not.toContain("tokenHash");
+
+    const filtered = await admin("/access-tokens?ipWhitelistEnabled=true&status=ACTIVE", "reader");
+    expect(filtered.body.accessTokens.some((entry: { id: string }) => entry.id === commerce.tokenId)).toBe(true);
+    const notRestricted = await admin(`/access-tokens?merchantId=${commerce.merchantId}&ipWhitelistEnabled=false`, "reader");
+    expect(notRestricted.body.accessTokens).toEqual([]);
+    expect((await admin("/access-tokens?status=BOGUS", "reader")).body.code).toBe("INVALID_FILTER");
+    expect((await admin("/access-tokens?ipWhitelistEnabled=yes", "reader")).body.code).toBe("INVALID_FILTER");
+
+    const summary = await admin("/access-tokens/summary", "reader");
+    expect(summary.status).toBe(200);
+    expect(summary.body.total).toBeGreaterThanOrEqual(1);
+    expect(summary.body.active).toBeGreaterThanOrEqual(1);
+    expect(summary.body.ipRestricted).toBeGreaterThanOrEqual(1);
+    expect(summary.body.ipCidrs).toBeGreaterThanOrEqual(1);
   });
 
   test("suspension is immediate and audited; it can not be mixed with configuration edits", async () => {

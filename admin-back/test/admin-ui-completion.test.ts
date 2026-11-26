@@ -82,6 +82,8 @@ const READ_ROUTES: ReadRoute[] = [
   { path: "/applications", core: "/internal/admin/applications", authority: "merchant:read" },
   { path: "/applications/summary", core: "/internal/admin/applications/summary", authority: "merchant:read" },
   { path: `/applications/${ID}`, core: `/internal/admin/applications/${ID}`, authority: "merchant:read" },
+  { path: "/access-tokens", core: "/internal/admin/access-tokens", authority: "merchant:read" },
+  { path: "/access-tokens/summary", core: "/internal/admin/access-tokens/summary", authority: "merchant:read" },
   { path: "/payment-links", core: "/internal/admin/payment-links", authority: "merchant:read" },
   { path: "/pos-terminals", core: "/internal/admin/pos-terminals", authority: "merchant:read" },
   { path: `/merchants/${ID}/beneficial-owners`, core: `/internal/admin/merchants/${ID}/beneficial-owners`, authority: "merchant:read" },

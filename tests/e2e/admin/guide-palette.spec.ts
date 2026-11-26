@@ -9,8 +9,8 @@ test.describe("admin guide command palette", () => {
     await expect(page.getByRole("heading", { name: "Interactive Guide" })).toBeVisible();
   });
 
-  test("Ctrl+K opens, Enter navigates and Escape closes with focus restored", async ({ page }) => {
-    await page.keyboard.press("Control+k");
+  test("Ctrl+Shift+K opens, Enter navigates and Escape closes with focus restored", async ({ page }) => {
+    await page.keyboard.press("Control+Shift+k");
     const input = page.getByRole("combobox", { name: /Search the guide/ });
     await expect(input).toBeVisible();
     await expect(input).toBeFocused();
@@ -22,10 +22,20 @@ test.describe("admin guide command palette", () => {
 
     await page.goto("/guide");
     await expect(page.getByRole("heading", { name: "Interactive Guide" })).toBeVisible();
-    await page.keyboard.press("Control+k");
+    await page.keyboard.press("Control+Shift+k");
     await expect(page.getByRole("combobox", { name: /Search the guide/ })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("combobox", { name: /Search the guide/ })).toBeHidden();
     await expect(page.getByRole("button", { name: /Search guide/ })).toBeFocused();
+  });
+
+  test("Ctrl+Shift+K opens the guide palette from a non-guide screen", async ({ page }) => {
+    await page.goto("/dashboard");
+    await expect(page.getByRole("button", { name: /Search everything/ })).toBeVisible();
+    await page.keyboard.press("Control+Shift+k");
+
+    const input = page.getByRole("combobox", { name: /Search the guide/ });
+    await expect(input).toBeVisible();
+    await expect(input).toBeFocused();
   });
 });

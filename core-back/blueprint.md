@@ -959,8 +959,9 @@ Four new router modules are mounted from `admin.ts` (next to `/system/backups`):
 | `GET /wallets/:id/statement` | Paginated posting lines of the wallet's GL account (the lines of `glAccountId`), `merchant:read`. Query: shared list params (`page`, `pageSize` ≤ 200, default 25, `sortKey` `createdAt`/`amount`, `from`/`to`), `direction` (`DEBIT`/`CREDIT`), `refType` (list), `search` (memo or reference). Response `{lines, total, page, pageSize, totals: {lineCount, totalDebit, totalCredit, netDebit}, currency, redactedFields}`; totals cover the whole filtered set. Roles without financial visibility get an empty page, `totals` money `null` and `redactedFields: ["statementLines"]`. `400 INVALID_FILTER`, `404 WALLET_NOT_FOUND`. Shared helper `api/internal/ledgerLines.ts`. |
 | `GET /wallets/:id/audit-events` | Status history of one wallet (`entityType=WALLET`: `WALLET_FROZEN`, `WALLET_UNFROZEN`), newest first, paginated, `merchant:read`; `before`/`after` (status, reason) are `null` with `redacted: true` without sensitive merchant access. |
 | `POST /wallets/:id/status` | FROZEN immediate (`WALLET_FROZEN`); ACTIVE = approval (`202`, subject `WALLET`). `409 WALLET_INVALID_TRANSITION`, `WALLET_APPROVAL_PENDING`. |
-| `GET /applications`, `/applications/summary`, `/applications/:id` | Real `railWhitelist` (`string[]\|null`) + mode/count, redirect domains (empty + `redactedFields` for non-sensitive principals), tokens (status ACTIVE/REVOKED/EXPIRED, CIDRs), payment links, POS terminals. |
+| `GET /applications`, `/applications/summary`, `/applications/:id` | Real `railWhitelist` (`string[]\|null`) + mode/count, redirect domains (empty + `redactedFields` for non-sensitive principals), token lifecycle and IP-allowlist counts (`tokenActiveCount`, `tokenRevokedCount`, `tokenExpiredCount`, `tokenIpRestrictedCount`, `tokenCidrCount`), tokens (status ACTIVE/REVOKED/EXPIRED, environment, CIDRs), payment links, POS terminals. |
 | `PATCH /applications/:id` | SUSPENDED alone immediate (`APPLICATION_SUSPENDED`); reactivation and any policy edit (rails, redirect domains, assigned wallet) = one approval (`202`, subject `APPLICATION`). Validates rails exist, https hostnames, same-merchant/currency ACTIVE wallet. |
+| `GET /access-tokens`, `/access-tokens/summary` | Platform-wide token oversight (`merchant:read`), no token hash. List rows carry name/last four, application, merchant, `env` (`LIVE`/`SANDBOX`), scopes, `ipWhitelistEnabled`, `cidrs`/`ipCount`, last used, expiry and lifecycle status; filters `status` (CSV), `env` (CSV), `ipWhitelistEnabled`, `applicationId`, `merchantId`, search and date ranges. Summary totals active/revoked/expired/IP-restricted tokens and CIDRs. |
 | `POST /applications/:id/tokens/:tokenId/revoke` | Irreversible, audited; `409 TOKEN_ALREADY_REVOKED`. Core has no token cache (`authDoubleCheck` reads the row each request). |
 | `GET /payment-links`, `POST /payment-links/:id/state` | Only PENDING->CANCELLED (`PAYMENT_LINK_CANCELLED`). |
 | `GET /pos-terminals`, `POST /pos-terminals/:id/status` | ACTIVE->INACTIVE/BLOCKED immediate; to ACTIVE = approval (subject `POS_TERMINAL`). |
@@ -4147,7 +4148,7 @@ It owns:
 - the query parser, token classification, match scoring and result sanitization in `core-back/lib/search/engine.ts`;
 - the core internal route `POST /internal/admin/search`;
 - the mTLS admin BFF proxy `POST /api/v1/admin/search` with its rate limiter;
-- the admin-front command palette (`Ctrl+K` / `Cmd+K`), local page/guide search, recent queries and the client-side target registry;
+- the admin-front command palette (`Ctrl+K` / `Cmd+K`), local page/guide search, recent queries and the client-side target registry; the guide-only palette uses `Ctrl+Shift+K` / `Cmd+Shift+K`;
 - the `useOpenQuery` deep-link composable that opens a record from a query parameter.
 
 It does not own domain authorization policy (the providers consume authority helpers but `core-back` remains the enforcement point), the underlying record APIs, or the guide content itself.
@@ -4468,7 +4469,7 @@ Relevant test files:
 
 - `core-back/test/globalSearch.test.ts` — parser/token/phone variants, match scoring, sanitization, registry, authority matrix, provider behavior.
 - `tests/unit/global-search.test.ts` — client target registry, local commands, recent-query storage, highlighting, access filtering.
-- `tests/e2e/admin/global-search.spec.ts` — app-bar trigger vs drawer guide search, `Ctrl+K`, debounce, Enter-to-open, one-character behavior, mocked API.
+- `tests/e2e/admin/global-search.spec.ts` — app-bar trigger vs drawer guide search, `Ctrl+K` on every route (including the guide), `Ctrl+Shift+K` for the guide palette, debounce, Enter-to-open, one-character behavior, mocked API.
 - `tests/e2e/exhaustive/exhaustive-admin-surface.spec.ts` — broader admin surface coverage that includes search interactions.
 
 Commands:
