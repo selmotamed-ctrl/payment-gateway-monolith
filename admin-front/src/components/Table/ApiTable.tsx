@@ -11,9 +11,9 @@ import {
 import { ThemedText } from "../ThemedText";
 import { TableFooter, TableHeader, useTableXlsx } from "./HeaderFooter";
 import { api } from "@/state/api";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useDisplay } from "@/utils/vuetify-compat";
-import { VBtn, VProgressCircular } from "vuetify/components";
+import { VBtn, VProgressCircular } from "@/components/vael/VuetifyShim";
 import { computed, provide, ref, watch, onMounted, onUnmounted } from "vue";
 import { defineComponent } from "@/utils/dc";
 import type { JsonValue } from "@/utils/common";
@@ -273,7 +273,7 @@ export const ApiTable = defineComponent(
                         iconName={props.iconName}
                     ></TableHeader>
                     {props.TopSlot ? props.TopSlot({ loading: loading.value, refresh, reset, refreshAsIs }) : null}
-                    {props.filters?.length ? (
+                    {false && props.filters?.length ? (
                         <TableFilters
                             filters={props.filters}
                             values={props.filterValues ?? {}}

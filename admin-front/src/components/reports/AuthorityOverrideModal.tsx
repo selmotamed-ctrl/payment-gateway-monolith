@@ -1,7 +1,7 @@
 import { computed, ref, watch, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VAlert, VCheckbox, VSelect, VTextarea } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VAlert, VCheckbox, VSelect, VTextarea } from "@/components/vael/VuetifyShim";
 import { FormField, FormModal } from "@/components/ui";
 
 export const OVERRIDE_JUSTIFICATION_MIN = 15;

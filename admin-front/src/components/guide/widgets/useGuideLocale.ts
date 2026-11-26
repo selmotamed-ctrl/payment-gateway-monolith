@@ -1,5 +1,5 @@
 import { computed } from "vue";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 
 export const useGuideLocale = () => {
     const { current } = useLocale();

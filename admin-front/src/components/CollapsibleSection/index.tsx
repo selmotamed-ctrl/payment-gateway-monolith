@@ -1,8 +1,8 @@
 import { ref, watch, type PropType, createSlot } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useDisplay, useTheme } from "@/utils/vuetify-compat";
-import { VCard, VCardText, VIcon } from "vuetify/components";
+import { VCard, VCardText, VIcon } from "@/components/vael/VuetifyShim";
 import { ThemedText } from "../ThemedText";
 import { ThemedView } from "../ThemedView";
 import { StatusChip, type StatusTone } from "../StatusChip";

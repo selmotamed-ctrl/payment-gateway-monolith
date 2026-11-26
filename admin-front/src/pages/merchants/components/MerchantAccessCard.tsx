@@ -1,8 +1,8 @@
 import { computed, ref, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
-import { useLocale } from "vuetify";
-import { VBtn } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn } from "@/components/vael/VuetifyShim";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { StatusBadge } from "@/components/ui/StatusBadge";

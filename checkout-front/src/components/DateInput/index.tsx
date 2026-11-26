@@ -1,4 +1,4 @@
-import { VDateInput } from "vuetify/labs/VDateInput";
+import { VDateInput } from "@/components/vael/VuetifyShim";
 
 
 const DateInput = VDateInput;

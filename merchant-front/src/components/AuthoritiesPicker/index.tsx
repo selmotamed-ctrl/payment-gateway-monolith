@@ -1,7 +1,7 @@
 import { t } from "@/plugins/localization";
 import { dc } from "@/utils/dc";
 import { ref, computed } from "vue";
-import { VBtn, VDivider, VExpandTransition, VIcon, VTextField, VTooltip } from "vuetify/components";
+import { VBtn, VDivider, VExpandTransition, VIcon, VTextField, VTooltip } from "@/components/vael/VuetifyShim";
 import { ThemedText } from "@/components/ThemedText";
 import { MetaPill } from "@/components/ui/MetaPill";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";

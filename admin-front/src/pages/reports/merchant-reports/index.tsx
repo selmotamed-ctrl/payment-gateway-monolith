@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { useLocale } from "vuetify";
-import { VBtn, VTextarea } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn, VTextarea } from "@/components/vael/VuetifyShim";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
 import { ApiTable } from "@/components/Table/ApiTable";

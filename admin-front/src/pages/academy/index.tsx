@@ -1,8 +1,8 @@
 import { computed, onMounted, ref, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { RouterLink } from "vue-router/experimental/vapor";
-import { useLocale } from "vuetify";
-import { VBtn, VIcon } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
 import { AcademyShell, Skeleton, useAcademyData, userRole } from "@/components/academy/AcademyShell";
 import { BadgeChip } from "@/components/academy/BadgeChip";
 import { ProgressRing } from "@/components/academy/ProgressRing";

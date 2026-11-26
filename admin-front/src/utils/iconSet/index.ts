@@ -1,5 +1,5 @@
 import { h } from "vue";
-import type { IconProps } from "vuetify";
+import type { IconProps } from "@/utils/vael-compat";
 
 import institution from "./icons/Institution";
 import institutionAdd from "./icons/InstitutionAdd";

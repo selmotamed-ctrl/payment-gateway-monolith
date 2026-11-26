@@ -1,6 +1,6 @@
 import { type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import type { ChecklistTask as ChecklistTaskType } from "@/content/academy";
 import type { ChecklistAnswer } from "../labScoring";
 import { choiceTag, renderInline } from "./PanelView";

@@ -1,5 +1,5 @@
 import { dc } from "@/utils/dc";
-import { VAutocomplete } from "vuetify/components";
+import { VAutocomplete } from "@/components/vael/VuetifyShim";
 
 
 const Autocomplete =  VAutocomplete;

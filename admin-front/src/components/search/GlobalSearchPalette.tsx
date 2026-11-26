@@ -1,7 +1,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter, type RouteLocationRaw } from "vue-router";
-import { VDialog, VIcon, VProgressLinear } from "vuetify/components";
+import { VDialog, VIcon, VProgressLinear } from "@/components/vael/VuetifyShim";
 import type { GuideSearchEntry } from "@/content/guide/types";
 import {
     cancelPendingGlobalSearch,

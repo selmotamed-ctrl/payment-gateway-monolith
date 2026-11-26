@@ -9877,7 +9877,9 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 
 ## 1. Purpose and scope
 
-This part owns the design system and shell used by `admin-front`: visual tokens, self-hosted fonts, Vuetify theme/default configuration, the 13 required UI primitives and their extras, the 248 px navigation drawer and 56 px app bar, the split-screen authentication layout, and the cross-workspace rollout rules.
+> **Current implementation (2026-11-26):** the four portals run the vael-ui Vapor UI layer described in §18. References to Vuetify files, theme configuration and defaults below describe the pre-migration baseline and are retained as historical context; the compatibility layer `components/vael/VuetifyShim.tsx` keeps the existing JSX names while rendering vael-ui components, and the Vuetify dependency is removed.
+
+This part owns the design system and shell used by `admin-front`: visual tokens, self-hosted fonts, vael-ui provider and `--pg-*` theme bridge, the 13 required UI primitives and their extras, the 248 px navigation drawer and 56 px app bar, the split-screen authentication layout, and the cross-workspace rollout rules.
 
 It does not own page-specific business logic, route authority decisions, table data contracts, or the guide content. Those are covered by `01-route-and-page-catalog.md`, `02-tables-filters-exports.md`, and `03-guide-and-academy.md`. It also does not replace the per-service rendering rules in the merchant and checkout parts.
 
@@ -9940,7 +9942,7 @@ No external font request is required. `tests/e2e/admin/a11y.spec.ts` and the she
 
 ### 3.3 Vuetify theme and defaults
 
-`admin-front/src/plugins/vuetify.ts` is the canonical Vuetify configuration and is copied almost verbatim to merchant and checkout.
+The pre-migration baseline used `admin-front/src/plugins/vuetify.ts` for Vuetify configuration; the current implementation uses `components/vael/VaelProvider.tsx` plus `styles/vael-theme.css`.
 
 - Light theme: background `#F8FAFC`, surface `#FFFFFF`, primary `#0F172A`, secondary/accent/info `#2563EB`, success `#16A34A`, warning `#D97706`, error `#DC2626`.
 - Dark theme: background `#09090B`, surface `#121215`, primary `#F8FAFC`, secondary/accent/info `#3B82F6`, success `#22C55E`, warning `#F59E0B`, error `#EF4444`.
@@ -10046,7 +10048,7 @@ However, the stale files are still physically present:
 
 | Surface | Location |
 | :--- | :--- |
-| Vuetify configuration | `admin-front/src/plugins/vuetify.ts`, `merchant-front/src/plugins/vuetify.ts`, `checkout-front/src/plugins/vuetify.ts` |
+| vael-ui provider | `admin-front/src/components/vael/VaelProvider.tsx`, `merchant-front/src/components/vael/VaelProvider.tsx`, `checkout-front/src/components/vael/VaelProvider.tsx` |
 | Tokens | `*/src/styles/fintech-minimal.css` |
 | Global styles | `*/src/styles/globals/app.scss`, `admin-front/src/styles/command-palette.css` |
 | Fonts | `*/src/assets/fonts/fonts.css` and the adjacent font files |
@@ -10064,7 +10066,7 @@ However, the stale files are still physically present:
 - Rendering money: use `MoneyDisplay`/`MoneyText` or decimal-backed utilities; never format money with floating point.
 - Adding a drawer/modal: use `SlideOverDrawer`/`FormModal` so focus, padding, and footer behavior stay consistent.
 - Totals rows go in a `<tfoot>` of a `.pg-unified-table`/`.pg-table-card` table: the shared stylesheet gives them the body-row padding, edge insets and a top rule (before 2026-11-07 a `tfoot` had no padding and its label touched the table border).
-- Changing the theme: edit `plugins/vuetify.ts` and the `--pg-*` tokens together; do not add page-local hard-coded palettes.
+- Changing the theme: edit `styles/vael-theme.css` / `state/theme.ts` and the `--pg-*` tokens together; do not add page-local hard-coded palettes.
 - Learning surfaces: the Guide (`styles/guide.css`) and the Academy (`styles/academy/*.css`, see `03-guide-and-academy.md` §7.6) are built from these primitives and tokens. A feature area may add its own stylesheet under `src/styles/` imported from `main.ts`, but must not inject runtime `<style>` blocks, introduce a second palette, or cap the page width below the `ScreenContainer`; only reading text takes a measure (75 ch).
 - Deploy-time visibility: set `ADMIN_SHOW_CHECKLISTS` and `ADMIN_SHOW_HELP_PANELS` in `deploy.env`; the deploy engine writes `runtime-config.js`. Rebuilding the SPA is not required for the runtime flags to change.
 
@@ -10121,7 +10123,7 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 ### Code paths
 
-- `admin-front/src/plugins/vuetify.ts`
+- `admin-front/src/components/vael/VaelProvider.tsx`
 - `admin-front/src/styles/fintech-minimal.css`
 - `admin-front/src/styles/globals/app.scss`
 - `admin-front/src/assets/fonts/fonts.css`
@@ -10190,11 +10192,21 @@ quarantine/AV queue; and the access audit trail. Authority-gated actions:
 (maintenance/rewrap/GC/scrub/AV scan), `system:storage:legal-hold`
 (place/lift hold with a written reason).
 
-## 18. Vue 3.6 / Vapor experimental migration (2026-11-26)
+## 18. vael-ui Vapor migration (2026-11-26)
 
-A worktree branch (`vapor-migration`) upgrades the four Vue portals to Vue `3.6.0-rc.16`, `vue-jsx` `3.3.0-rc.7` with `vapor: true`, Vue Router `5.5.2` (Vapor `RouterView`/`RouterLink`), Vuetify `3.13.8`, rolldown-vite `7.3.1` and `vue-tsc` `3.3.14`. All application components are wrapped with the local `dc`/`defineComponent` Vapor helper, all `.vue` SFCs are converted to TSX, auto-import/component plugins are removed, and the Vuetify composables `useTheme`/`useDisplay` are shimmed because their `getCurrentInstance` checks do not see Vapor setup instances.
+The four portals now run on the **vael-ui Vapor** UI layer. The branch `vael-ui-migration` starts from the `vapor-migration` TSX/Vapor baseline and replaces Vuetify end to end:
 
-The migration is deliberately **not merged or released**. Vuetify has no Vapor renderer; Vuetify components remain Virtual DOM through `vaporInteropPlugin`. The branch proves that Vapor app components, Vapor Router 5, Vapor slots (`createSlot`), Vuetify forms/dialogs/tooltips and the fake-rails portal work, but also exposes an interop limitation: a Vuetify component (for example `VBtn`) placed directly inside a nested Vapor slot can fail to mount, which leaves some admin/merchant page-header action groups empty. Until Vue 3.6/`vue-jsx` are stable and the Vuetify slot interop is resolved (or Vuetify provides Vapor components), the four portals must stay on the existing Vue 3.5/Vuetify 3.10 Virtual DOM implementation. The `fake-rails-front` Vapor pilot remains the reference implementation.
+- **Runtime:** `vue@3.6.0-rc.16`, `vue-jsx@3.3.0-rc.7` (`vapor: true`), Vue Router `5.5.2` (Vapor router), `vael-ui@0.5.8` (imports only from `vael-ui/vapor`), `vael-form@0.0.3` and `@mdi/js@7.4.47`. `vuetify`, `vite-plugin-vuetify`, `@mdi/font` and `vue-echarts` are removed from every workspace; `vaporInteropPlugin` is no longer installed.
+- **Provider:** each portal mounts `components/vael/VaelProvider.tsx` → `ConfigProvider` with the `--pg-*` theme bridge, `locale`, and the `Toaster`, `TooltipHost`, `DialogHost` and `PopoverHost` hosts.
+- **Compatibility layer:** `components/vael/VuetifyShim.tsx` exports the Vuetify component names used by the existing pages (`VBtn`, `VTextField`, `VSelect`, `VAlert`, `VTable` shells, `VApp`, `VNavigationDrawer`, …) and renders vael-ui Vapor primitives. This is the strangler seam: a page can keep its JSX names while the implementation and dependency graph are vael-ui. Renaming the remaining shim tags to vael-ui names is a follow-up cleanup, not a runtime dependency.
+- **Icons:** `scripts/generate-frontend-icons.ts` scans the source for `mdi-*` names and generates a per-portal `AppIcon/icons.generated.ts` from `@mdi/js` (238 admin, 138 merchant, 52 checkout, 35 Fake Rails). `AppIcon` renders inline SVG and supports RTL `directional` glyphs. The MDI webfont is gone.
+- **Charts:** `components/EChart/index.tsx` owns an ECharts instance from a Vapor DOM ref (`echarts.init`, `setOption`, `ResizeObserver`, `dispose`); `EChart/lazy.tsx` preserves the lazy 600 kB chunk. `vue-echarts` is gone.
+- **Composables:** `utils/vael-compat.ts` provides `useLocale` (vue-i18n singleton), `useDisplay` (matchMedia breakpoints), `useTheme` (the `--pg-*` palette) and `useRtl`; `utils/vuetify-compat.ts` is a re-export for the existing imports.
+- **CSS:** `styles/vael-theme.css` maps `--pg-*` onto `--ui-*`; `styles/vael-shim.css` supplies the grid shell, drawer/table/list surfaces and compact native-control fallbacks; `[data-theme="dark"]` replaces `.v-theme--dark` and `state/theme` sets both the root attribute and the `.v-application` compatibility class.
+- **Forms:** login is fully on `vael-form` (`useForm` + `validator`, `Field`, `Input`, `PasswordInput`, `OtpInput`, `Button`, `Message`). `FormField` and `FormModal` remain the primitives used by the rest of the portal; they render vael-ui `Field`/`Dialog`. The remaining page/modal forms still use their existing `rules` maps through the shim inputs. Converting every form to `useForm`/`Field` is the remaining form workstream (see GAP-2026-11-26-UI-01).
+- **Verification:** admin Playwright 79 passed / 11 live skips, merchant 22 passed, checkout 7 passed; all four portals type-check and build; admin Vitest 48 and merchant content 23 pass. The admin suite covers shell geometry, RTL, themes, tables, inline filters, row context menus, wallet/GL drawers, approvals/safeguard checklists, guide context/reader, object storage and backups.
+
+Known residuals: the shim tag names still read as Vuetify in JSX; all forms are not yet on `vael-form`; and the native `select`/checkbox fallbacks trade vael-ui search/motion for deterministic form behavior while the field adapters are completed. These are tracked as `GAP-2026-11-26-UI-01` and `GAP-2026-11-26-UI-02`.
 
 ---
 
@@ -13927,7 +13939,7 @@ The router guard redirects unauthenticated non-hosted routes to `/login` and kee
 
 The portal layout has four navigation links and an environment badge. `LiveTransactionFeed` opens the SSE stream with the query token and listens for a subset of event names. `WireInspectorDrawer` shows transaction fields, step events and webhook deliveries. `WebhookComposerModal` fires or disputes a webhook. `RailChaosCard` edits failure chance, latency, primary failure mode, duplicates, out-of-order and corruption.
 
-The SPA has light and dark Vuetify themes and an explicit System/Light/Dark theme menu in the portal app bar and the login card. `main.ts` calls `initTheme()` before mount and `plugins/vuetify.ts` uses `initialTheme()`, so the login page follows `prefers-color-scheme` on first paint; System mode tracks OS changes live. The theme mode is persisted in localStorage under `theme`. The SPA does not have the admin/merchant i18n catalogue. `tests/e2e/exhaustive/exhaustive-fake-rails-surface.spec.ts` visits `/login` across three viewports, two locales and two themes while mocking every portal API; it asserts shell geometry, no `#app` transform and no horizontal overflow.
+The SPA has light and dark vael-ui themes and an explicit System/Light/Dark theme menu in the portal app bar and the login card. `main.ts` calls `initTheme()` before mount and `state/theme.ts` applies `data-theme`, so the login page follows `prefers-color-scheme` on first paint; System mode tracks OS changes live. The theme mode is persisted in localStorage under `theme`. The SPA does not have the admin/merchant i18n catalogue. `tests/e2e/exhaustive/exhaustive-fake-rails-surface.spec.ts` visits `/login` across three viewports, two locales and two themes while mocking every portal API; it asserts shell geometry, no `#app` transform and no horizontal overflow.
 
 ## 4. Contracts and invariants
 

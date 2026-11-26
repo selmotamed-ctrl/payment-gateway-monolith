@@ -1,6 +1,6 @@
 import { type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import type { NumericTask as NumericTaskType } from "@/content/academy";
 import { parseDecimal, type NumericAnswer } from "../labScoring";
 

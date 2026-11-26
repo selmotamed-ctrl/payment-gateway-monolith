@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
-import { VAlert, VCol, VDivider, VRow } from "vuetify/components";
+import { VAlert, VCol, VDivider, VRow } from "@/components/vael/VuetifyShim";
 import PortalLayout from "@/layouts/portal";
 import LiveTransactionFeed from "@/components/LiveTransactionFeed";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";

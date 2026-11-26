@@ -5,8 +5,8 @@ import { dc } from "@/utils/dc";
 import { confirmDialogInstance } from "./utils/confirm";
 import { AwaitedConfirmationDialog } from "./components/ConfirmDialog";
 import { snackBarInstance } from "./utils/snackBar";
-import { VAlert, VApp, VBtn } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VAlert, VApp, VBtn } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { routeError } from "@/state/route";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
@@ -14,6 +14,7 @@ import { SnackBar } from "@/components/SnackBar/index";
 import { DetailsFieldsDialog } from "./components/detailsFieldsDialog";
 import { detailsDialogRef } from "./utils/showDetails/idnex";
 import { printProvider, PrintProvider } from "./utils/printJsx";
+import { VaelProvider } from "./components/vael/VaelProvider";
 
 const App = dc(() => {
     const { t } = useLocale();
@@ -25,6 +26,7 @@ const App = dc(() => {
                     width: "100%",
                 }}
             >
+                <VaelProvider>
                 <PrintProvider
                     ref={(r) => {
                         printProvider.value = r as any;
@@ -85,6 +87,7 @@ const App = dc(() => {
                 )}
 
                 <RouterView />
+                </VaelProvider>
             </VApp>
         );
     };

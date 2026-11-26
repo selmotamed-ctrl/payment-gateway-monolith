@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VTextField } from "@/components/vael/VuetifyShim";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import ThemeMenu from "@/components/ThemeMenu";

@@ -1,7 +1,7 @@
 import { useId, type PropType, type VNodeChild, createSlot } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VBtn, VDialog } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VBtn, VDialog } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 
 const WIDTH_MAP = { sm: 460, md: 580, lg: 760 } as const;
 

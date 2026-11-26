@@ -1,5 +1,4 @@
 import { createI18n } from "vue-i18n";
-import { en as vuetifyEn, ar as vuetifyAr } from "vuetify/locale";
 import { appCatalogue } from "@/constants/i18nCatalogue";
 import { landingCatalogue } from "@/constants/landingCatalogue";
 import { merchantReportCatalogue } from "@/constants/reportCatalogue";
@@ -20,11 +19,9 @@ const appMessages = buildAppMessages();
 export const messages = {
     en: {
         ...appMessages.en,
-        $vuetify: { ...vuetifyEn },
     },
     ar: {
         ...appMessages.ar,
-        $vuetify: { ...vuetifyAr },
     },
 };
 

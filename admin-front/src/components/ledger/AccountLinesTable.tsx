@@ -1,7 +1,7 @@
 import { ref, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";

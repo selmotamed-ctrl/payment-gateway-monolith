@@ -1,7 +1,7 @@
 import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VBtn } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VBtn } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 
 /**
  * A list of repeatable rows with add / remove. The row body is the default

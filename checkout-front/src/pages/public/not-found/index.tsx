@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
-import { VBtn } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VBtn } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { RouterLink } from "vue-router/experimental/vapor";
 
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";

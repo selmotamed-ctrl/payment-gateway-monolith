@@ -1,6 +1,6 @@
 import { createSlot, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 
 /**
  * Vapor-safe field shell.

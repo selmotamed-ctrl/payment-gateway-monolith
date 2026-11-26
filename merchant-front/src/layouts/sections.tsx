@@ -1,7 +1,8 @@
 import { computed } from "vue";
 import { hasOneOfAuthorities } from "@/state/user";
 import type { UserAuthorityType } from "@/utils/authorities";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
+import { localeVersion } from "@/plugins/localization";
 
 export type Route = {
     name: string;
@@ -48,6 +49,7 @@ export const useSections = () => {
     // `current.value` read registers the dependency explicitly.
     return computed<Section[]>(() => {
         void current.value;
+        void localeVersion.value;
         const sections: Section[] = [
         {
             title: t("Overview"),

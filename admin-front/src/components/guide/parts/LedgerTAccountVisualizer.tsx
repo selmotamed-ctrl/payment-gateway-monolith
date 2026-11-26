@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import Decimal from "decimal.js";
-import { VBtn, VCard, VCardText, VSelect, VTextField } from "vuetify/components";
+import { VBtn, VCard, VCardText, VSelect, VTextField } from "@/components/vael/VuetifyShim";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";

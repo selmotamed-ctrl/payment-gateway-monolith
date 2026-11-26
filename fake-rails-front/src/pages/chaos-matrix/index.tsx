@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
-import { VAlert, VCol, VRow } from "vuetify/components";
+import { VAlert, VCol, VRow } from "@/components/vael/VuetifyShim";
 import PortalLayout from "@/layouts/portal";
 import RailChaosCard from "@/components/RailChaosCard";
 import { TableRowActions } from "@/components/Table/TableRowActions";

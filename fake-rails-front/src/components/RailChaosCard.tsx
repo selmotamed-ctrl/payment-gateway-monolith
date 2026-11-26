@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
-import { VSelect, VSlider, VSwitch, VTextField } from "vuetify/components";
+import { VSelect, VSlider, VSwitch, VTextField } from "@/components/vael/VuetifyShim";
 import { SectionFields } from "@/components/SectionFields";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { TableRowActions } from "@/components/Table/TableRowActions";

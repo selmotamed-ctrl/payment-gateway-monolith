@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { computed, inject, onBeforeUnmount, onMounted, ref, watchEffect, type InjectionKey, type Ref } from "vue";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useDisplay } from "@/utils/vuetify-compat";
-import { VAutocomplete, VBtn, VIcon, VTextField } from "vuetify/components";
+import { VAutocomplete, VBtn, VIcon, VTextField } from "@/components/vael/VuetifyShim";
 import DateInput from "@/components/DateInput";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import {
@@ -148,6 +148,8 @@ const ApiAutocompleteControl = dc(
     { props: ["filter", "value", "onChange"] },
 );
 
+const EMPTY_SELECTION: any[] = [];
+
 const DataAutocompleteControl = dc(
     (props: { filter: Extract<TableFilter, { type: "data-autocomplete" | "boolean" }>; value: unknown; onChange: (value: unknown) => void }) => {
         const { t } = useLocale();
@@ -175,7 +177,7 @@ const DataAutocompleteControl = dc(
                 density="compact"
                 variant="outlined"
                 hideDetails
-                modelValue={(props.value ?? (multiple ? [] : null)) as any}
+                modelValue={(props.value ?? (multiple ? EMPTY_SELECTION : null)) as any}
                 onUpdate:modelValue={(value: any) => props.onChange(value)}
             />
         );

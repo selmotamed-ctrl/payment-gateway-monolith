@@ -1,7 +1,7 @@
 import { computed, onMounted, ref } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VBtn, VIcon } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
 import { AcademyShell, Skeleton } from "@/components/academy/AcademyShell";
 import { Callout } from "@/components/academy/ui/Callout";
 import { MarkdownView } from "@/components/guide/MarkdownView";

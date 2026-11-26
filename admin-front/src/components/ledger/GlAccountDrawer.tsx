@@ -1,8 +1,8 @@
 import Decimal from "decimal.js";
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VAlert, VBtn, VTextarea, VTextField } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VAlert, VBtn, VTextarea, VTextField } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { StatusBadge, formatHumanStatus } from "@/components/ui/StatusBadge";
 import { DescriptionList } from "@/components/ui/DescriptionList";
@@ -347,6 +347,7 @@ export const GlAccountDrawer = defineComponent({
         return (): VNodeChild => (
             <>
                 <SlideOverDrawer
+                    key={`${props.accountId ?? "none"}-${snapshot.value?.account.id ?? "loading"}`}
                     modelValue={!!props.accountId}
                     onUpdate:modelValue={(open: boolean) => {
                         if (!open) emit("close");

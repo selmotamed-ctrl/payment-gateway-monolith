@@ -1,7 +1,7 @@
 import { computed, ref, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VAlert, VBtn, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VAlert, VBtn, VSelect, VSwitch, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { hasOneOfAuthorities } from "@/state/user";

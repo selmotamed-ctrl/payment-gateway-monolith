@@ -1,7 +1,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
-import { VDialog, VIcon } from "vuetify/components";
+import { VDialog, VIcon } from "@/components/vael/VuetifyShim";
 import {
     getGoldenRuleArticles,
     getGuideSearchDocument,

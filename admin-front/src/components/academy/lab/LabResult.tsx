@@ -1,8 +1,8 @@
 import { onMounted, ref, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { RouterLink } from "vue-router/experimental/vapor";
-import { useLocale } from "vuetify";
-import { VBtn } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn } from "@/components/vael/VuetifyShim";
 import type { Lab, LabTask } from "@/content/academy";
 import { loadArticles } from "@/content/guide";
 import { StatusBadge } from "@/components/ui/StatusBadge";

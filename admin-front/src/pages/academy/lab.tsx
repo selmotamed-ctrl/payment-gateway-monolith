@@ -1,7 +1,7 @@
 import { computed, onMounted, ref } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRoute, useRouter } from "vue-router";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { AcademyShell, Skeleton } from "@/components/academy/AcademyShell";
 import { LabRunner } from "@/components/academy/lab/LabRunner";
 import type { LabScore } from "@/components/academy/labScoring";

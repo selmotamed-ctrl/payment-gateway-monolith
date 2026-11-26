@@ -71,16 +71,10 @@ test("Approve asks for the safeguard checklist and Cancel sends no request", asy
   await page.goto("/approvals?open=approval-1");
   await expect(page.getByText("MERCHANT", { exact: true }).first()).toBeVisible();
 
-  for (const label of [
-    "Diff reviewed",
-    "Subject context reviewed",
-    "Maker/checker separation verified",
-    "Risk assessed",
-  ]) {
-    const checkbox = page.getByLabel(label);
-    if ((await checkbox.count()) > 0) {
-      await checkbox.check();
-    }
+  const decisionChecklist = page.getByText("Decision checklist").locator("..");
+  const decisionBoxes = decisionChecklist.locator('input[type="checkbox"]');
+  for (let index = 0; index < (await decisionBoxes.count()); index += 1) {
+    await decisionBoxes.nth(index).check();
   }
 
   await page.getByRole("button", { name: "Approve", exact: true }).click();

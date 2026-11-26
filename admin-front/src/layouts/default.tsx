@@ -16,8 +16,8 @@ import {
     VMenu,
     VNavigationDrawer,
     VProgressLinear,
-} from "vuetify/components";
-import { useLocale } from "vuetify";
+} from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { useDisplay } from "@/utils/vuetify-compat";
 import LogoSvg from "@/assets/images/logo.svg";
 import { hasOneOfAuthorities, logout, user } from "@/state/user";
@@ -231,7 +231,7 @@ const DefaultLayout = dc(() => {
             >
                 {t("Skip to content")}
             </a>
-            <VAppBar flat height={56} color="surface" class="pg-app-bar">
+            <VAppBar>
                 <VBtn
                     icon
                     variant="text"
@@ -399,7 +399,7 @@ const DefaultLayout = dc(() => {
                 </div>
                 <VDivider />
 
-                <VList nav density="comfortable" class="pg-nav">
+                <ul class="pg-list pg-nav">
                     {sections.value.map((section, index) => {
                         const collapsed = isSectionCollapsed(index);
                         return (
@@ -447,7 +447,7 @@ const DefaultLayout = dc(() => {
                             </div>
                         );
                     })}
-                </VList>
+                </ul>
 
                 <div class="pg-drawer__footer">
                     <div class="pg-operator-card">

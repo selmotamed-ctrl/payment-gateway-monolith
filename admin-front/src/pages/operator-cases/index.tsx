@@ -1,9 +1,9 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VAutocomplete, VBtn, VCheckbox, VDivider, VSelect, VTextField } from "vuetify/components";
+import { VAlert, VAutocomplete, VBtn, VCheckbox, VDivider, VSelect, VTextField } from "@/components/vael/VuetifyShim";
 import { useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";

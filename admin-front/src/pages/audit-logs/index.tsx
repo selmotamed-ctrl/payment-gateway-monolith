@@ -1,9 +1,9 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VDivider } from "vuetify/components";
+import { VAlert, VBtn, VDivider } from "@/components/vael/VuetifyShim";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";

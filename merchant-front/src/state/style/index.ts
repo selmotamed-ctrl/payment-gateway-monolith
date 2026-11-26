@@ -1,5 +1,5 @@
 import { computed } from "vue";
-import { useDisplay } from "vuetify";
+import { useDisplay } from "@/utils/vael-compat";
 
 export const useDefaultPadding = () => {
     const display = useDisplay();

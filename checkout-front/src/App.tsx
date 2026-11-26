@@ -4,11 +4,12 @@ import { dc } from "@/utils/dc";
 import { confirmDialogInstance } from "./utils/confirm";
 import { AwaitedConfirmationDialog } from "./components/ConfirmDialog";
 import { snackBarInstance } from "./utils/snackBar";
-import { VApp } from "vuetify/components";
+import { VApp } from "@/components/vael/VuetifyShim";
 import { SnackBar } from "@/components/SnackBar/index";
 import { DetailsFieldsDialog } from "./components/detailsFieldsDialog";
 import { detailsDialogRef } from "./utils/showDetails/idnex";
 import { printProvider, PrintProvider } from "./utils/printJsx";
+import { VaelProvider } from "./components/vael/VaelProvider";
 
 const App = dc(() => {
     return () => {
@@ -19,6 +20,7 @@ const App = dc(() => {
                     width: "100%",
                 }}
             >
+                <VaelProvider>
                 <PrintProvider
                     ref={(r) => {
                         printProvider.value = r as any;
@@ -44,6 +46,7 @@ const App = dc(() => {
                 ></SnackBar>
 
                 <RouterView />
+                </VaelProvider>
             </VApp>
         );
     };

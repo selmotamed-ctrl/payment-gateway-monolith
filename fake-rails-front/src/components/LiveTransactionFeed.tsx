@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import { VList, VListItem, VListItemSubtitle, VListItemTitle } from "vuetify/components";
+import { VList, VListItem, VListItemSubtitle, VListItemTitle } from "@/components/vael/VuetifyShim";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { streamUrl } from "@/utils/api";

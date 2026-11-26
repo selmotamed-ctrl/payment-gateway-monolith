@@ -1,8 +1,8 @@
 import { ref } from "vue";
 import { dc } from "@/utils/dc";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
-import { VDivider, VMenu, VProgressCircular, VTooltip } from "vuetify/components";
+import { VDivider, VMenu, VProgressCircular, VTooltip } from "@/components/vael/VuetifyShim";
 import { ThemedView } from "../ThemedView";
 import { ThemedText } from "../ThemedText";
 import Icon from "@/components/Icon/index";

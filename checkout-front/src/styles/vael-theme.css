@@ -1,0 +1,28 @@
+/**
+ * Bridge the application's `--pg-*` design tokens onto vael-ui's `--ui-*`
+ * variables. The application keeps its existing visual system; vael-ui
+ * components inherit it instead of shipping their default palette.
+ */
+:root {
+    --ui-surface: var(--pg-bg-surface);
+    --ui-muted: var(--pg-bg-surface-subtle);
+    --ui-muted-hover: var(--pg-bg-surface-hover);
+    --ui-text: var(--pg-ink-primary);
+    --ui-text-muted: var(--pg-ink-muted);
+    --ui-border: var(--pg-border-subtle);
+    --ui-border-strong: var(--pg-border-strong);
+    --ui-primary: var(--pg-accent-primary);
+    --ui-primary-hover: var(--pg-accent-primary-hover);
+    --ui-info: var(--pg-accent-interactive);
+    --ui-danger: var(--pg-status-danger-dot);
+    --ui-success: var(--pg-status-success-dot);
+    --ui-warning: var(--pg-status-warning-dot);
+    --ui-radius: var(--pg-radius-sm);
+    --ui-radius-surface: var(--pg-radius-lg);
+    --ui-panel-shadow: var(--pg-shadow-menu);
+    --ui-overlay: rgb(15 23 42 / 0.45);
+}
+
+[data-theme="dark"] {
+    --ui-overlay: rgb(0 0 0 / 0.6);
+}

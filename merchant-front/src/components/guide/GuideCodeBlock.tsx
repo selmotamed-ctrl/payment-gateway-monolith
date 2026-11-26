@@ -1,7 +1,7 @@
 import { type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VBtn } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn } from "@/components/vael/VuetifyShim";
 import { showSnackBar } from "@/utils/snackBar";
 
 export const GuideCodeBlock = defineComponent({

@@ -1,8 +1,8 @@
 import { ref } from "vue";
 import { dc } from "@/utils/dc";
 import type { FieldProps } from "../Field";
-import { useLocale } from "vuetify";
-import { VBtn } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn } from "@/components/vael/VuetifyShim";
 import { FormModal } from "@/components/ui/FormModal";
 import { DescriptionList, type DescriptionItem } from "@/components/ui/DescriptionList";
 import { MonoRef } from "@/components/ui/MonoRef";

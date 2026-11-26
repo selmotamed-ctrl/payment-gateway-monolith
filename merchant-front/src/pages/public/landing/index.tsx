@@ -2,12 +2,13 @@ import type { Ref } from "vue";
 import "./landing.css";
 import { computed, h, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Component } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VBtn, VIcon } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
 import LogoSvg from "@/assets/images/logo.svg";
 import { setLocale } from "@/plugins/localization";
 import ThemeMenu from "@/components/ThemeMenu";
 import { HeroDemo } from "./HeroDemo";
+import { DeveloperSection } from "./DeveloperSection";
 import { FeePreview } from "./FeePreview";
 import { LedgerTicker } from "./LedgerTicker";
 import {
@@ -169,7 +170,6 @@ const LandingPage = defineComponent({
         const isRtl = computed(() => locale.value === "ar");
         const year = new Date().getFullYear();
 
-        const developer = useLazySection(() => import("./DeveloperSection"), () => reveal.refresh());
         const heroStage = ref<HTMLElement | null>(null);
         const marqueePaused = ref(false);
         const activeSection = useActiveSection(NAV.map((item) => item.id));
@@ -610,8 +610,8 @@ const LandingPage = defineComponent({
                                 "Create a link from your backend in one request",
                                 "A small, strict server API: create, read and cancel links, and look up payments by reference.",
                             )}
-                            <div ref={developer.anchor} class="pgl-lazy" data-loaded={developer.comp.value ? "" : undefined}>
-                                {developer.comp.value ? h(developer.comp.value.component) : <div class="pgl-lazy__placeholder" aria-hidden="true" />}
+                            <div class="pgl-lazy" data-loaded>
+                                <DeveloperSection />
                             </div>
                         </div>
                     </section>

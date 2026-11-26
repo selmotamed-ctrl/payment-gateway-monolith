@@ -1,6 +1,6 @@
 import { type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VIcon } from "vuetify/components";
+import { VIcon } from "@/components/vael/VuetifyShim";
 
 export type StepState = "done" | "current" | "todo" | "locked" | "partial" | "failed";
 

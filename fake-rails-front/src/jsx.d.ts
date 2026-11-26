@@ -26,12 +26,14 @@ type JsxEventHandlers = {
 declare module "vue/jsx-runtime" {
   namespace JSX {
     interface IntrinsicAttributes extends ReservedProps, JsxEventHandlers {}
+    type Element = any;
   }
 }
 
 declare global {
   namespace JSX {
     interface IntrinsicAttributes extends ReservedProps, JsxEventHandlers {}
+    type Element = any;
   }
 }
 

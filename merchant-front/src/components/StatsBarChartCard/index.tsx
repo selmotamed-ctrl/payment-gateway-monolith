@@ -1,9 +1,9 @@
 import { dc } from "@/utils/dc";
-import { VIcon, VProgressCircular } from "vuetify/components";
+import { VIcon, VProgressCircular } from "@/components/vael/VuetifyShim";
 import { useDisplay, useTheme } from "@/utils/vuetify-compat";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
-import VChart from "vue-echarts";
+import { LazyEChart as VChart } from "@/components/EChart/lazy";
 import * as echartsCore from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import { BarChart } from "echarts/charts";

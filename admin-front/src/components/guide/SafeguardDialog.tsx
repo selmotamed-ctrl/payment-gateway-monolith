@@ -1,6 +1,6 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VDialog } from "vuetify/components";
+import { VDialog } from "@/components/vael/VuetifyShim";
 import { loadCards, type Card } from "@/content/guide";
 import { MarkdownView } from "./MarkdownView";
 import { useSafeguardState } from "./useSafeguard";

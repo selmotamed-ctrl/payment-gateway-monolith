@@ -1,8 +1,8 @@
 import { computed, ref, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
-import { useLocale } from "vuetify";
-import { VIcon } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VIcon } from "@/components/vael/VuetifyShim";
 import type { Question } from "@/content/academy";
 import { Callout } from "./ui/Callout";
 

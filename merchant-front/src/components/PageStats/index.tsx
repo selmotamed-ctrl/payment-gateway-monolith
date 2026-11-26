@@ -1,9 +1,9 @@
 import Card from "@/components/Card/index";
 import ThemedView from "@/components/ThemedView/index";
 import { dc } from "@/utils/dc";
-import { VCard, VCardText, VIcon, VProgressCircular } from "vuetify/components";
+import { VCard, VCardText, VIcon, VProgressCircular } from "@/components/vael/VuetifyShim";
 import { useDisplay, useTheme } from "@/utils/vuetify-compat";
-import colors from "vuetify/util/colors";
+import colors from "@/utils/colors";
 
 export type PageStatItem = {
     title: string;

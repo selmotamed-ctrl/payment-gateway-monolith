@@ -1,7 +1,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, type PropType, type VNodeChild, createSlot } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { RouterLink } from "vue-router/experimental/vapor";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import ScreenContainer from "@/components/ScreenContainer";
 import { MetaPill } from "@/components/ui/MetaPill";
 import { user } from "@/state/user";

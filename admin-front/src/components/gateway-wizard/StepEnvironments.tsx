@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VSelect, VSwitch, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VSelect, VSwitch, VTextField } from "@/components/vael/VuetifyShim";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { FormField } from "@/components/ui/FormField";
 import { FormChecklist } from "@/components/ui/FormChecklist";

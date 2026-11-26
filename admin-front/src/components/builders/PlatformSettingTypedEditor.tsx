@@ -1,7 +1,7 @@
 import { ref, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VBtn, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VBtn, VSelect, VSwitch, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { FormField } from "@/components/ui/FormField";
 import { ChipListInput } from "./ChipListInput";
 import { StructuredValueEditor } from "./StructuredValueEditor";

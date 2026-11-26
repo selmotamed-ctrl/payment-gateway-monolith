@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VDivider, VIcon, VSwitch, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VDivider, VIcon, VSwitch, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";

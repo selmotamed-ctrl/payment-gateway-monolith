@@ -11,9 +11,9 @@ import {
 } from "./types";
 import { ThemedText } from "../ThemedText";
 import { TableFooter, TableHeader, useTableXlsx } from "./HeaderFooter";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useDisplay } from "@/utils/vuetify-compat";
-import { VBtn, VProgressCircular } from "vuetify/components";
+import { VBtn, VProgressCircular } from "@/components/vael/VuetifyShim";
 import { computed, onMounted, provide, ref, watch } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRoute } from "vue-router";

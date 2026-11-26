@@ -1,7 +1,7 @@
 import { computed, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VBtn, VTextField } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn, VTextField } from "@/components/vael/VuetifyShim";
 import { MAX_TIERS, emptyTier, type TierError, type TierErrorCode, type TierField, type TierRow } from "../commissionTiers";
 
 const ERROR_TEXT: Record<TierErrorCode, string> = {

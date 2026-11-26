@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { VBtn, VIcon, VList, VListItem, VMenu } from "vuetify/components";
+import { VBtn, VIcon, VList, VListItem, VMenu } from "@/components/vael/VuetifyShim";
 import { setThemeMode, themeMode, type ThemeMode } from "@/state/theme";
 
 type ThemeMenuProps = {

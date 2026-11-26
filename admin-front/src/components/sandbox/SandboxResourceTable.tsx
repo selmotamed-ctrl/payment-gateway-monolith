@@ -1,6 +1,6 @@
 import { ref, watch } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues, type TableFilter } from "@/components/Table/filters";

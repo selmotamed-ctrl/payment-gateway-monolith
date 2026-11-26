@@ -1,7 +1,7 @@
 import { useId, type VNodeChild, createSlot } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VBtn, VNavigationDrawer } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VBtn, VNavigationDrawer } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 
 export const SlideOverDrawer = defineComponent({
     name: "SlideOverDrawer",

@@ -1,7 +1,7 @@
 import { computed, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VAutocomplete, VBtn, VIcon, VTextField } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VAutocomplete, VBtn, VIcon, VTextField } from "@/components/vael/VuetifyShim";
 
 type Rule = (value: unknown) => true | string;
 

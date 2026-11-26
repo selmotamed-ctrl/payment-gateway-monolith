@@ -1,6 +1,6 @@
 import { type PropType, type VNodeChild, createSlot } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VIcon } from "vuetify/components";
+import { VIcon } from "@/components/vael/VuetifyShim";
 import type { BadgeTone } from "./StatusBadge";
 
 const toneForColor = (color: string): BadgeTone => {

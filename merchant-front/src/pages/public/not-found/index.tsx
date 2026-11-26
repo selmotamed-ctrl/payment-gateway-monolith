@@ -1,5 +1,5 @@
 import { dc } from "@/utils/dc";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
 
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";

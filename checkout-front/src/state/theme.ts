@@ -1,5 +1,4 @@
 import { computed, ref } from "vue";
-import vuetify from "@/plugins/vuetify";
 import {
     DARK_MEDIA_QUERY,
     THEME_STORAGE_KEY,
@@ -28,7 +27,13 @@ const apply = (mode: ThemeMode) => {
     if (typeof window === "undefined") {
         return;
     }
-    vuetify.theme.change(resolveTheme(mode));
+    const resolved = resolveTheme(mode);
+    document.documentElement.setAttribute("data-theme", resolved);
+    document.documentElement.classList.toggle("v-theme--dark", resolved === "dark");
+    document.querySelectorAll(".v-application").forEach((element) => {
+        element.classList.toggle("v-theme--dark", resolved === "dark");
+        element.classList.toggle("v-theme--light", resolved !== "dark");
+    });
 };
 
 /** Persist and apply a mode. */

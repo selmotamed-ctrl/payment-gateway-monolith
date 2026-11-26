@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed } from "vue";
-import { useLocale } from "vuetify";
-import { VTextField, VSelect } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VTextField, VSelect } from "@/components/vael/VuetifyShim";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { FormField } from "@/components/ui";

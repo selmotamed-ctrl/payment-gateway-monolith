@@ -1,7 +1,7 @@
 import { ref, watch, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VAlert, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VAlert, VSelect, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { FormModal } from "@/components/ui/FormModal";

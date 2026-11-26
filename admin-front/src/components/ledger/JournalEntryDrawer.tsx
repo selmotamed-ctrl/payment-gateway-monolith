@@ -1,8 +1,8 @@
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
-import { VBtn } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VBtn } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { StatusBadge, formatHumanStatus } from "@/components/ui/StatusBadge";
 import { DescriptionList } from "@/components/ui/DescriptionList";
@@ -219,6 +219,7 @@ export const JournalEntryDrawer = defineComponent({
         return (): VNodeChild => (
             <>
                 <SlideOverDrawer
+                    key={`${props.entryId ?? "none"}-${entry.value?.id ?? "loading"}`}
                     modelValue={!!props.entryId}
                     onUpdate:modelValue={closeDrawer}
                     title={t("Journal entry")}

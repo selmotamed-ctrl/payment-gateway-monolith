@@ -1,7 +1,7 @@
 import { ref, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VBtn, VTextField } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VBtn, VTextField } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { parseListEntry } from "./model/jsonTree";
 
 /**

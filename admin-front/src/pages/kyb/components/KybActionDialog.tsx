@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
-import { useLocale } from "vuetify";
-import { VAlert, VSelect, VTextarea } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VAlert, VSelect, VTextarea } from "@/components/vael/VuetifyShim";
 import { ThemedText } from "@/components/ThemedText";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";

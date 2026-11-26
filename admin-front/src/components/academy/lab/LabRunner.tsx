@@ -1,7 +1,7 @@
 import { computed, nextTick, reactive, ref, watch, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VBtn, VIcon } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
 import type { Lab, LabTask } from "@/content/academy";
 import { MetaPill } from "@/components/ui/MetaPill";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";

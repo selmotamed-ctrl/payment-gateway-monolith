@@ -3,14 +3,14 @@ import {} from "../../Table/types";
 import { PrintableThemedView } from "../PrintableThemedView";
 import { ThemedText } from "../../ThemedText";
 import { TableFooter, TableHeader } from "../../Table/HeaderFooter";
-import { useLocale, type IconProps } from "vuetify";
+import { useLocale, type IconProps } from "@/utils/vael-compat";
 import { useDisplay, useTheme } from "@/utils/vuetify-compat";
-import { VDivider, VProgressCircular } from "vuetify/components";
+import { VDivider, VProgressCircular } from "@/components/vael/VuetifyShim";
 import { computed, ref, watch, type StyleValue, onMounted } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { defaultBoxShadow } from "@/constants/styling";
 import { xlsxUIPipeline, type XlsxHeader } from "@/utils/xlsx";
-import { colors } from "@/plugins/vuetify";
+import colors from "@/utils/colors";
 
 type TableHeader<T> = {
     startSeparator?: boolean;

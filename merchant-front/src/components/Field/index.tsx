@@ -1,10 +1,10 @@
 import { dc } from "@/utils/dc";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { ThemedView } from "../ThemedView";
 import { copyToClipboard } from "@/utils/common";
 import { isEmpty } from "@/utils/clientValidationRules";
 import { showSnackBar } from "@/utils/snackBar";
-import { VIcon } from "vuetify/components";
+import { VIcon } from "@/components/vael/VuetifyShim";
 
 export type FieldProps = {
     value?: string | null | number;

@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { RouterLink } from "vue-router/experimental/vapor";
-import { useLocale } from "vuetify";
-import { VBtn, VIcon } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { MetaPill } from "@/components/ui/MetaPill";

@@ -85,13 +85,21 @@ export const GlossaryPopover = defineComponent({
             { immediate: true },
         );
 
+        const onWindowKeydown = (event: KeyboardEvent) => {
+            if (event.key !== "Escape" || !props.term) return;
+            event.preventDefault();
+            props.onClose();
+        };
+
         onMounted(() => {
             window.addEventListener("resize", updatePosition);
             window.addEventListener("scroll", updatePosition, true);
+            window.addEventListener("keydown", onWindowKeydown, true);
         });
         onBeforeUnmount(() => {
             window.removeEventListener("resize", updatePosition);
             window.removeEventListener("scroll", updatePosition, true);
+            window.removeEventListener("keydown", onWindowKeydown, true);
         });
 
         const openGlossary = () => {

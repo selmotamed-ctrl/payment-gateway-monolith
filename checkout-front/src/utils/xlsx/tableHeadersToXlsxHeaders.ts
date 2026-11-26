@@ -2,7 +2,7 @@ import type { TableHeader } from "@/components/Table/types";
 import type { XlsxHeader } from "./templateDownload";
 import { t } from "@/plugins/localization";
 import xlsxUIPipeline from ".";
-import { colors } from "@/plugins/vuetify";
+import colors from "@/utils/colors";
 import { recursiveSelect } from "kt-common";
 
 export const downloadTableData = async (props: { title: string; data: any[]; headers: TableHeader<any>[] }) => {

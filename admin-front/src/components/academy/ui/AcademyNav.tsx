@@ -2,7 +2,7 @@ import { computed } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRoute } from "vue-router";
 import { RouterLink } from "vue-router/experimental/vapor";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 
 /** Which of the four sections a route belongs to (sub-pages keep their section lit). */
 const SECTION_OF: Record<string, string> = {

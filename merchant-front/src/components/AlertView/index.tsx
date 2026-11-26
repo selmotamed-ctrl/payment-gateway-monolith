@@ -1,6 +1,6 @@
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { ThemedView } from "../ThemedView";
-import { VIcon } from "vuetify/components";
+import { VIcon } from "@/components/vael/VuetifyShim";
 import { Field } from "../Field";
 import { dc } from "@/utils/dc";
 import type { StyleValue } from "vue";

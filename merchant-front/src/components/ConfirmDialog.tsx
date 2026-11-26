@@ -1,7 +1,7 @@
 import type { Ref } from "vue";
 import { ref, type VNode } from "vue";
-import { VBtn, VForm } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VBtn, VForm } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { dc } from "@/utils/dc";
 import { extractApiError, UnknownError, type ApiError } from "@/utils/errors/extractor";
 import { AlertView } from "./AlertView";

@@ -1,6 +1,6 @@
 import type { SnackBarOptions } from "@/utils/snackBar/index";
-import { useLocale } from "vuetify";
-import { VSnackbar } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VSnackbar } from "@/components/vael/VuetifyShim";
 import Button from "@/components/Button";
 import { ref, type VNode } from "vue";
 import { dc } from "@/utils/dc";

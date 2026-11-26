@@ -7,7 +7,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import ThemedView from "@/components/ThemedView";
 import type { RulesList } from "@/utils/clientValidationRules";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useDisplay } from "@/utils/vuetify-compat";
 import { FormModal } from "@/components/ui/FormModal";
 export type Cords = {

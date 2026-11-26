@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
-import { VBtn, VSelect, VTextField } from "vuetify/components";
+import { VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
 import PortalLayout from "@/layouts/portal";
 import WireInspectorDrawer from "@/components/WireInspectorDrawer";
 import WebhookComposerModal from "@/components/WebhookComposerModal";

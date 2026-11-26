@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { VAlert, VBtn, VChip, VDivider, VSelect, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VChip, VDivider, VSelect, VTextField } from "@/components/vael/VuetifyShim";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { MonoRef, StatusBadge, SurfaceCard } from "@/components/ui";

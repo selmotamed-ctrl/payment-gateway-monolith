@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
-import { useLocale } from "vuetify";
-import { VBtn } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn } from "@/components/vael/VuetifyShim";
 import { areChecklistsVisible } from "@/constants/env";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";

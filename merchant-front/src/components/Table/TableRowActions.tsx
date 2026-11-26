@@ -1,7 +1,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VIcon, VMenu } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VIcon } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 
 export interface RowActionItem {
     key: string;
@@ -40,7 +40,7 @@ const closeActiveMenu = (): void => {
 const rowOwners = new WeakMap<HTMLElement, symbol>();
 
 const EDITABLE_TARGETS =
-    'input, textarea, select, [contenteditable="true"], .v-field, .v-checkbox, .v-switch, .v-radio, .v-slider';
+    'input, textarea, select, [contenteditable="true"], .v-field, .v-checkbox, .v-switch, .v-radio, .v-slider, .ui-input, .ui-select';
 const NATIVE_MENU_TARGETS = `${EDITABLE_TARGETS}, a, [data-no-row-context-menu]`;
 
 const matchesTarget = (target: EventTarget | null, selector: string): boolean =>
@@ -167,7 +167,7 @@ export const TableRowActions = defineComponent({
 
         const restoreFocus = (): void => {
             const active = document.activeElement as HTMLElement | null;
-            const inOverlay = Boolean(active?.closest?.(".v-overlay-container"));
+            const inOverlay = Boolean(active?.closest?.("[role=\"menu\"], .ui-menu, .ui-dialog"));
             if (!active || active === document.body || inOverlay || active === contextActivator.value) {
                 (actionsButton.value ?? primaryButton.value)?.focus({ preventScroll: true });
             }
@@ -289,7 +289,7 @@ export const TableRowActions = defineComponent({
                             }}
                         />
                     )}
-                    <span>{item.label}</span>
+                    <span>{t(item.label)}</span>
                 </button>
             </div>
         );
@@ -357,92 +357,74 @@ export const TableRowActions = defineComponent({
                             }}
                         >
                             {props.primaryAction.icon && <VIcon icon={props.primaryAction.icon} size={13} />}
-                            <span>{props.primaryAction.label}</span>
+                            <span>{t(props.primaryAction.label)}</span>
                         </button>
                     )}
                     {visible.length > 0 && (
-                        <VMenu
-                            modelValue={buttonMenuOpen.value}
-                            onUpdate:modelValue={(value: boolean) => {
-                                if (value) {
+                        <div style={{ position: "relative", display: "inline-flex" }}>
+                            <button
+                                ref={actionsButton}
+                                type="button"
+                                aria-label={t("Row actions")}
+                                aria-haspopup="menu"
+                                aria-keyshortcuts="Shift+F10"
+                                aria-expanded={buttonMenuOpen.value ? "true" : "false"}
+                                onClick={(event: MouseEvent) => {
+                                    event.stopPropagation();
+                                    if (buttonMenuOpen.value) {
+                                        closeButtonMenu();
+                                        return;
+                                    }
                                     closeActiveMenu();
                                     buttonMenuOpen.value = true;
                                     activeMenuCloser = closeButtonMenu;
-                                } else {
-                                    closeButtonMenu();
-                                }
-                            }}
-                            location="bottom end"
-                            offset={4}
-                        >
-                            {{
-                                activator: ({ props: activatorProps }: { props: Record<string, unknown> }) => (
-                                    <button
-                                        type="button"
-                                        {...activatorProps}
-                                        ref={composeActivatorRef(actionsButton, activatorProps.ref)}
-                                        aria-label={t("Row actions")}
-                                        aria-keyshortcuts="Shift+F10"
-                                        style={{
-                                            display: "inline-flex",
-                                            alignItems: "center",
-                                            justifyContent: "center",
-                                            width: "26px",
-                                            height: "26px",
-                                            borderRadius: "var(--pg-radius-sm)",
-                                            backgroundColor: buttonMenuOpen.value
-                                                ? "var(--pg-bg-surface-subtle)"
-                                                : "transparent",
-                                            color: "var(--pg-ink-secondary)",
-                                            border: buttonMenuOpen.value
-                                                ? "1px solid var(--pg-border-subtle)"
-                                                : "1px solid transparent",
-                                            cursor: "pointer",
-                                        }}
-                                    >
-                                        <VIcon icon="mdi-dots-horizontal" size={16} />
-                                    </button>
-                                ),
-                                default: () => renderMenuPanel(null, visible, closeButtonMenu),
-                            }}
-                        </VMenu>
+                                }}
+                                style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    width: "26px",
+                                    height: "26px",
+                                    borderRadius: "var(--pg-radius-sm)",
+                                    backgroundColor: buttonMenuOpen.value
+                                        ? "var(--pg-bg-surface-subtle)"
+                                        : "transparent",
+                                    color: "var(--pg-ink-secondary)",
+                                    border: buttonMenuOpen.value
+                                        ? "1px solid var(--pg-border-subtle)"
+                                        : "1px solid transparent",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                <VIcon icon="mdi-dots-horizontal" size={16} />
+                            </button>
+                            {buttonMenuOpen.value && (
+                                <div
+                                    class="v-menu v-overlay--active"
+                                    style={{
+                                        position: "absolute",
+                                        insetInlineEnd: 0,
+                                        top: "30px",
+                                        zIndex: 50,
+                                    }}
+                                >
+                                    {renderMenuPanel(null, visible, closeButtonMenu)}
+                                </div>
+                            )}
+                        </div>
                     )}
-                    {props.contextMenu && hasContextItems.value && (
-                        <VMenu
-                            modelValue={contextOpen.value}
-                            onUpdate:modelValue={(value: boolean) => {
-                                contextOpen.value = value;
-                                if (!value) {
-                                    removeEscapeListener();
-                                    if (activeMenuCloser === closeContextMenu) {
-                                        activeMenuCloser = null;
-                                    }
-                                    restoreFocus();
-                                }
+                    {contextOpen.value && (
+                        <div
+                            class="v-menu v-overlay--active"
+                            style={{
+                                position: "fixed",
+                                left: `${contextPoint.value.x}px`,
+                                top: `${contextPoint.value.y}px`,
+                                zIndex: 60,
                             }}
-                            location="bottom start"
-                            offset={4}
                         >
-                            {{
-                                activator: ({ props: activatorProps }: { props: Record<string, unknown> }) => (
-                                    <span
-                                        {...activatorProps}
-                                        ref={composeActivatorRef(contextActivator, activatorProps.ref)}
-                                        aria-hidden="true"
-                                        tabindex={-1}
-                                        style={{
-                                            position: "fixed",
-                                            left: `${contextPoint.value.x}px`,
-                                            top: `${contextPoint.value.y}px`,
-                                            width: "0px",
-                                            height: "0px",
-                                            pointerEvents: "none",
-                                        }}
-                                    />
-                                ),
-                                default: () => renderMenuPanel(primaryMenuItem.value, visible, closeContextMenu),
-                            }}
-                        </VMenu>
+                            {renderMenuPanel(primaryMenuItem.value, visible, closeContextMenu)}
+                        </div>
                     )}
                 </div>
             );

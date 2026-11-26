@@ -1,11 +1,11 @@
 import { ref } from "vue";
-import vuetify from "@/plugins/vuetify";
+
 import { adaptedLocale } from "@/plugins/localization";
 import { api } from "@/state/api";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { urlsMap } from "@/constants/urlsMap";
 
-export const drawer = ref(!vuetify.display.mobile.value);
+export const drawer = ref(typeof window === "undefined" ? true : window.innerWidth >= 960);
 
 export const toggleDrawer = () => {
     drawer.value = !drawer.value;

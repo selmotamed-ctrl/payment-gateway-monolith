@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { PrintableField, type FieldProps } from "../PrintableField";
-import { VDivider } from "vuetify/components";
+import { VDivider } from "@/components/vael/VuetifyShim";
 import { useTheme } from "@/utils/vuetify-compat";
 import { PrintableThemedView } from "../PrintableThemedView.tsx";
 

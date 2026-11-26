@@ -1,7 +1,7 @@
 import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VTextField } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VTextField } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { FormField } from "@/components/ui/FormField";
 import { ChipListInput, OptionChips } from "./ChipListInput";
 import { MISMATCH_ERROR_MESSAGE, SCOPE_ERROR_MESSAGES } from "./messages";

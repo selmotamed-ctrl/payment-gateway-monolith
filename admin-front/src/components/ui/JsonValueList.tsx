@@ -1,6 +1,6 @@
 import { computed, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { DescriptionList, type DescriptionItem } from "./DescriptionList";
 import { JsonValueCell } from "./JsonValueCell";
 import { entryView, humanizeSegment, payloadEntries } from "./jsonDiffModel";

@@ -1,7 +1,7 @@
 import { type PropType, type VNode } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VIcon } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VIcon } from "@/components/vael/VuetifyShim";
 import type { Panel } from "@/content/academy";
 
 /** Safe inline renderer: turns `**bold**` into <strong>; everything else stays plain text (no v-html). */

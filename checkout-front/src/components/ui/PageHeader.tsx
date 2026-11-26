@@ -1,8 +1,8 @@
 import { type PropType, type VNodeChild, createSlot } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { RouterLink } from "vue-router/experimental/vapor";
-import { VBtn } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VBtn } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { StatusBadge, type BadgeTone } from "./StatusBadge";
 
 export interface BreadcrumbItem {

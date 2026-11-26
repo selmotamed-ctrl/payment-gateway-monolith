@@ -1,7 +1,7 @@
 import { computed, onMounted, onUnmounted, ref, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VAlert } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VAlert } from "@/components/vael/VuetifyShim";
 import { api } from "@/utils/api";
 import DataTable from "./DataTable";
 import type { TableHeader } from "./types";

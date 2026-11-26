@@ -1,7 +1,7 @@
 import { nextTick, ref, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VBtn } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn } from "@/components/vael/VuetifyShim";
 import type { OrderTask as OrderTaskType } from "@/content/academy";
 import type { OrderAnswer } from "../labScoring";
 import { choiceTag, plainInline, renderInline } from "./PanelView";

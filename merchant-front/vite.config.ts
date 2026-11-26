@@ -1,17 +1,15 @@
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig, loadEnv } from "vite";
 import vueJsx from "vue-jsx/vite";
-import Vuetify from "vite-plugin-vuetify";
 
 export default ({ mode }: any) => {
     process.env = { ...process.env, ...loadEnv(mode, process.cwd()) };
     return defineConfig({
         plugins: [
             vueJsx({ vapor: true }),
-            Vuetify({ autoImport: false, styles: { configFile: "src/styles/settings.scss" } }),
         ],
         build: { assetsInlineLimit: 0 },
-        optimizeDeps: { exclude: ["vuetify", "vue-router"] },
+        optimizeDeps: { exclude: ["vue-router"] },
         define: { "process.env": {} },
         resolve: {
             alias: {

@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import { VAlert, VBtn, VIcon, VProgressCircular } from "vuetify/components";
+import { VAlert, VBtn, VIcon, VProgressCircular } from "@/components/vael/VuetifyShim";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import CheckoutLayout from "@/layouts/checkout";

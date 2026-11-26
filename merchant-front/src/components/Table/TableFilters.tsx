@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { computed, inject, onBeforeUnmount, onMounted, ref, watchEffect, type InjectionKey, type Ref } from "vue";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useDisplay } from "@/utils/vuetify-compat";
-import { VAutocomplete, VBtn, VIcon, VTextField } from "vuetify/components";
+import { VAutocomplete, VBtn, VIcon, VTextField } from "@/components/vael/VuetifyShim";
 import DateInput from "@/components/DateInput";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import {

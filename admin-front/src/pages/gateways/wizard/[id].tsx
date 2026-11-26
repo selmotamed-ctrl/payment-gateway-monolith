@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn } from "vuetify/components";
+import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge } from "@/components/ui/StatusBadge";

@@ -1,7 +1,7 @@
 import { ref, watch, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VRadio, VRadioGroup } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VRadio, VRadioGroup } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { FormModal } from "@/components/ui";
 import { buildLocaleOptions } from "../utils/localeMeta";
 

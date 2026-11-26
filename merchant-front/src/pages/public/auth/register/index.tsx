@@ -1,7 +1,7 @@
 import { GOOGLE_REDIRECT_PATHS, isAllowedIdentityRedirect, parseIdentityHosts } from "@/utils/security/identityRedirect";
 import { dc } from "@/utils/dc";
-import { VAlert, VBtn, VTextField } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VAlert, VBtn, VTextField } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { ref } from "vue";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";

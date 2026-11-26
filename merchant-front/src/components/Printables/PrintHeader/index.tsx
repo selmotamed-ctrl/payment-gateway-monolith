@@ -1,9 +1,9 @@
 import ThemedView from "@/components/ThemedView/index";
 import { dc } from "@/utils/dc";
 import LogoSvg from "@/assets/images/logo.svg";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
-import { VDivider } from "vuetify/components";
+import { VDivider } from "@/components/vael/VuetifyShim";
 
 export const PrintHeader = dc(() => {
     const { t } = useLocale();

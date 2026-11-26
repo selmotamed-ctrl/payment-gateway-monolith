@@ -1,6 +1,6 @@
 import { defineComponent } from "@/utils/dc";
 import { useRoute } from "vue-router";
-import { VIcon } from "vuetify/components";
+import { VIcon } from "@/components/vael/VuetifyShim";
 import { useContextHelp } from "./useContextHelp";
 
 export const ContextHelpButton = defineComponent({

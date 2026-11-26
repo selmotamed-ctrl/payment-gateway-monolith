@@ -1,7 +1,7 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VIcon } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VIcon } from "@/components/vael/VuetifyShim";
 import Decimal from "decimal.js";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { formatMoney } from "@/utils/money";

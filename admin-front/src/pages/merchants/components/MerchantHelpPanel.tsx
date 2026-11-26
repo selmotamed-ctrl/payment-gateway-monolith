@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
-import { useLocale } from "vuetify";
-import { VExpansionPanel, VExpansionPanelText, VExpansionPanelTitle, VExpansionPanels } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VExpansionPanel, VExpansionPanelText, VExpansionPanelTitle, VExpansionPanels } from "@/components/vael/VuetifyShim";
 import { ThemedText } from "@/components/ThemedText";
 import { areHelpPanelsVisible } from "@/constants/env";
 import { MERCHANT_HELP_SECTIONS } from "../merchantHelp";

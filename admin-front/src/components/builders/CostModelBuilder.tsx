@@ -1,7 +1,7 @@
 import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VSelect, VSwitch, VTextField } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VSelect, VSwitch, VTextField } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { FormField } from "@/components/ui/FormField";
 import { RepeatableRows } from "./RepeatableRows";
 import { COST_ERROR_MESSAGES } from "./messages";

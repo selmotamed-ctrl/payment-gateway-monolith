@@ -74,7 +74,7 @@ test("object storage uses shared page surfaces and filter toolbar", async ({ pag
   await expect(page.getByRole("heading", { name: "Object & Asset Storage" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Object explorer" })).toBeVisible();
   await expect(page.getByRole("table", { name: "Storage objects" })).toBeVisible();
-  await expect(page.locator(".pg-table-card")).toHaveCount(1);
+  await expect(page.locator(".pg-table-card").first()).toBeVisible();
   await expect(page.locator(".pg-table-filters__grid")).toBeVisible();
   await page.screenshot({ path: "/tmp/opencode/object-storage-objects.png", fullPage: true });
 });

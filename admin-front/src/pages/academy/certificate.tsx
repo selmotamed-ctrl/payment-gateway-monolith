@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { AcademyShell, Skeleton } from "@/components/academy/AcademyShell";
 import { CertificateView } from "@/components/academy/CertificateView";
 import { badgeStateOf, useAcademyProgress } from "@/components/academy/useAcademyProgress";

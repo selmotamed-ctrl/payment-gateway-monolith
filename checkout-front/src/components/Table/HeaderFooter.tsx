@@ -1,7 +1,7 @@
 import { type IconProps, type RefreshMethodWithNextSkip, type TableHeader as TableHeaderType } from "./types";
 import { xlsxUIPipeline, type XlsxHeader } from "@/utils/xlsx";
-import { colors } from "@/plugins/vuetify";
-import { useLocale } from "vuetify";
+import colors from "@/utils/colors";
+import { useLocale } from "@/utils/vael-compat";
 import { useDisplay } from "@/utils/vuetify-compat";
 import {
     VAutocomplete,
@@ -10,7 +10,7 @@ import {
     VIcon,
     VTextField,
     VTooltip,
-} from "vuetify/components";
+} from "@/components/vael/VuetifyShim";
 import { computed, ref, watch } from "vue";
 import { defineComponent } from "@/utils/dc";
 

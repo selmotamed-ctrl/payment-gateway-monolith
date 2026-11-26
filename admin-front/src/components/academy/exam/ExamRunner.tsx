@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
-import { useLocale } from "vuetify";
-import { VBtn, VDialog, VIcon } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn, VDialog, VIcon } from "@/components/vael/VuetifyShim";
 import { MetaPill } from "@/components/ui/MetaPill";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import type { ExamAnswer, ExamQuestionPublic, ExamStartResponse } from "@/content/academy/apiTypes";

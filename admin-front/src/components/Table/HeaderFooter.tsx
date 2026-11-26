@@ -1,7 +1,7 @@
 import { type IconProps, type RefreshMethodWithNextSkip, type TableHeader as TableHeaderType } from "./types";
 import { xlsxUIPipeline, type XlsxHeader } from "@/utils/xlsx";
-import { colors } from "@/plugins/vuetify";
-import { useLocale } from "vuetify";
+import colors from "@/utils/colors";
+import { useLocale } from "@/utils/vael-compat";
 import { useDisplay } from "@/utils/vuetify-compat";
 import {
     VAutocomplete,
@@ -10,7 +10,7 @@ import {
     VIcon,
     VTextField,
     VTooltip,
-} from "vuetify/components";
+} from "@/components/vael/VuetifyShim";
 import { computed, ref, watch } from "vue";
 import { defineComponent } from "@/utils/dc";
 
@@ -639,27 +639,22 @@ const TableFooterRight = defineComponent(
 
             return (
                 <div class="pg-page-size">
-                    <VForm>
-                        <VAutocomplete
-                            variant="outlined"
-                            density="compact"
-                            hideDetails
-                            type={"data"}
-                            color="primary"
-                            ref={(r) => {
-                                autocompleteRef.value = r as any;
-                            }}
-                            items={props.numberOfItemsPerPageChoices || []}
-                            onUpdate:modelValue={(item) => {
-                                selectedNumberOfItemsPerPage.value = item;
-                                props.setNumberOfItemsPerPage?.(item.value);
-                                autocompleteRef.value?.blur();
-                            }}
-                            itemValue={(item) => item}
-                            modelValue={selectedNumberOfItemsPerPage.value}
-                            itemTitle={(item) => item.label}
-                        ></VAutocomplete>
-                    </VForm>
+                    <select
+                        aria-label="Rows per page"
+                        value={String(selectedNumberOfItemsPerPage.value?.value ?? props.numberOfItemsPerPage ?? "")}
+                        onChange={(event: Event) => {
+                            const value = Number((event.target as HTMLSelectElement).value);
+                            const choice = props.numberOfItemsPerPageChoices?.find((item) => item.value === value) ?? null;
+                            selectedNumberOfItemsPerPage.value = choice;
+                            props.setNumberOfItemsPerPage?.(value);
+                        }}
+                    >
+                        {(props.numberOfItemsPerPageChoices || []).map((choice) => (
+                            <option key={choice.value} value={choice.value}>
+                                {choice.label}
+                            </option>
+                        ))}
+                    </select>
                 </div>
             );
         };

@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { useLocale } from "vuetify";
-import { VCard, VCardText, VChip, VDialog, VList, VListItem, VTextField } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VCard, VCardText, VChip, VDialog, VList, VListItem, VTextField } from "@/components/vael/VuetifyShim";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";

@@ -1,5 +1,5 @@
 import { createSlot } from "vue";
-import { VBtn } from "vuetify/components";
+import { VBtn } from "@/components/vael/VuetifyShim";
 import { dc } from "@/utils/dc";
 
 /**

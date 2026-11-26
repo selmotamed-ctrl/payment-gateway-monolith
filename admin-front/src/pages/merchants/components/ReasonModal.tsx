@@ -1,7 +1,7 @@
 import { computed, ref, watch, type PropType, type VNodeChild, createSlot } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VAlert, VTextarea } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VAlert, VTextarea } from "@/components/vael/VuetifyShim";
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
 import { REASON_MAX_LENGTH, reasonProblem, reasonProblemMessage, type GovernanceMode } from "../commerceGovernance";

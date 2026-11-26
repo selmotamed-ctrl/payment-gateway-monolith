@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VCheckbox, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VCheckbox, VSelect, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { api } from "@/state/api";

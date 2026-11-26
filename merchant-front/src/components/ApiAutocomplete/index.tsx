@@ -5,7 +5,7 @@ import { api } from "@/state/api";
 import { extractApiError, type ApiError } from "@/utils/errors/extractor";
 import type { Merge } from "kt-common";
 import { dc, type DCExpose } from "@/utils/dc";
-import { VAutocomplete } from "vuetify/components";
+import { VAutocomplete } from "@/components/vael/VuetifyShim";
 
 type ApiAutocompleteProps<T> = Merge<
     {

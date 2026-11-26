@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
-import { VBtn, VCard, VCardText, VChip, VMenu } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VBtn, VCard, VCardText, VChip, VMenu } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { lookupTerm } from "@/content/guide/legacy";

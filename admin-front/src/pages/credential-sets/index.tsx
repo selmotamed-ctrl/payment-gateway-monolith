@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { useLocale } from "vuetify";
-import { VAlert, VAutocomplete, VBtn, VSelect, VTextField } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VAlert, VAutocomplete, VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
 import { areChecklistsVisible } from "@/constants/env";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";

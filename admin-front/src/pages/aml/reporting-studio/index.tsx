@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import { VAlert, VBtn, VFileInput, VSelect, VTextarea, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VFileInput, VSelect, VTextarea, VTextField } from "@/components/vael/VuetifyShim";
 import { fileToBase64 } from "@/utils/FileToB64";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";

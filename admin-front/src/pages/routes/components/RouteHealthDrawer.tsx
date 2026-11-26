@@ -1,7 +1,7 @@
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VAlert, VBtn, VSelect, VTextarea, VTextField } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VAlert, VBtn, VSelect, VTextarea, VTextField } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { EmptyState } from "@/components/ui/EmptyState";

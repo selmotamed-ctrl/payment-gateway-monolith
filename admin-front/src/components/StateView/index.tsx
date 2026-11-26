@@ -1,7 +1,7 @@
 import { createSlot } from "vue";
 import { dc } from "@/utils/dc";
-import { VBtn, VIcon, VProgressCircular } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VBtn, VIcon, VProgressCircular } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 

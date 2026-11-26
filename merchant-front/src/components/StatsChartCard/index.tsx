@@ -1,12 +1,12 @@
 import Card from "@/components/Card/index";
 import ThemedView from "@/components/ThemedView/index";
 import { dc } from "@/utils/dc";
-import { VCard, VCardText, VIcon, VProgressCircular } from "vuetify/components";
+import { VCard, VCardText, VIcon, VProgressCircular } from "@/components/vael/VuetifyShim";
 import { useDisplay } from "@/utils/vuetify-compat";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
-import colors from "vuetify/util/colors";
-import VChart from "vue-echarts";
+import colors from "@/utils/colors";
+import { LazyEChart as VChart } from "@/components/EChart/lazy";
 import * as echartsCore from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import { LineChart } from "echarts/charts";

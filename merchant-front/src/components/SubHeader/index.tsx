@@ -1,4 +1,4 @@
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { ThemedView } from "../ThemedView";
 import { dc } from "@/utils/dc";
 

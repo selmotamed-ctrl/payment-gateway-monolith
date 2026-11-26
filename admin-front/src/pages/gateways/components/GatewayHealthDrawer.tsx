@@ -1,8 +1,8 @@
 import Decimal from "decimal.js";
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VBtn } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VBtn } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";

@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
-import { useLocale } from "vuetify";
-import { VAlert, VBtn, VSelect, VTextField } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VAlert, VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";

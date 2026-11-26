@@ -390,7 +390,7 @@
 | `tests/e2e/admin/guide-context.spec.ts` | 128 | 2 |
 | `tests/e2e/admin/guide-palette.spec.ts` | 32 | 1 |
 | `tests/e2e/admin/guide-reader.spec.ts` | 116 | 5 |
-| `tests/e2e/admin/guide-safeguard.spec.ts` | 104 | 1 |
+| `tests/e2e/admin/guide-safeguard.spec.ts` | 98 | 1 |
 | `tests/e2e/admin/jobs-outbox.spec.ts` | 57 | 2 |
 | `tests/e2e/admin/merchants.spec.ts` | 90 | 2 |
 | `tests/e2e/admin/object-storage-style.spec.ts` | 81 | 1 |
@@ -399,7 +399,7 @@
 | `tests/e2e/admin/shell.spec.ts` | 254 | 17 |
 | `tests/e2e/admin/table-and-padding-geometry.spec.ts` | 235 | 3 |
 | `tests/e2e/admin/table-row-context-menu.spec.ts` | 217 | 8 |
-| `tests/e2e/admin/wallet-details.spec.ts` | 302 | 12 |
+| `tests/e2e/admin/wallet-details.spec.ts` | 301 | 12 |
 | `tests/e2e/checkout/a11y.spec.ts` | 13 | 1 |
 | `tests/e2e/checkout/certificate-verify.spec.ts` | 52 | 3 |
 | `tests/e2e/checkout/pay.spec.ts` | 46 | 3 |

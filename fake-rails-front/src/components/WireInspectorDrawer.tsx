@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { ref, watch } from "vue";
-import { VBtn, VDivider, VNavigationDrawer } from "vuetify/components";
+import { VBtn, VDivider, VNavigationDrawer } from "@/components/vael/VuetifyShim";
 import { DataTable } from "@/components/Table/DataTable";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";

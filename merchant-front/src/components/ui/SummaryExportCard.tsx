@@ -1,7 +1,7 @@
 import { type PropType, type VNodeChild, createSlot } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VBtn } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VBtn } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { MetricStrip, type MetricItem } from "./MetricStrip";
 import { SurfaceCard } from "./SurfaceCard";
 import { FormChecklist, type ChecklistItem } from "./FormChecklist";

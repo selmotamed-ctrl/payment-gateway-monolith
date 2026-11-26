@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import vuetify from "@/plugins/vuetify";
+
 import { adaptedLocale } from "@/plugins/localization";
 
 export const drawer = ref(false);

@@ -1,7 +1,7 @@
 import { onBeforeUnmount, ref, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VIcon } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VIcon } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 
 export const MonoRef = defineComponent({
     name: "MonoRef",

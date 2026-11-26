@@ -1,7 +1,7 @@
 import { createSlot } from "vue";
 import { dc } from "@/utils/dc";
 import { useRoute, useRouter } from "vue-router";
-import { VAppBar, VAppBarTitle, VBtn, VMain, VSpacer } from "vuetify/components";
+import { VAppBar, VAppBarTitle, VBtn, VMain, VSpacer } from "@/components/vael/VuetifyShim";
 import { ScreenContainer } from "@/components/ScreenContainer";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import ThemeMenu from "@/components/ThemeMenu";

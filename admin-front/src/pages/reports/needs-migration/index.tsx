@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import { VBtn } from "vuetify/components";
+import { VBtn } from "@/components/vael/VuetifyShim";
 import { FormChecklist } from "@/components/ui/FormChecklist";
 import { FormModal } from "@/components/ui/FormModal";
 import { areChecklistsVisible } from "@/constants/env";

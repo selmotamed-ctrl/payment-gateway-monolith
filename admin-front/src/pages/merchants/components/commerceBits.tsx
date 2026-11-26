@@ -1,8 +1,8 @@
 import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
-import { useLocale } from "vuetify";
-import { VAlert, VBtn } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
 import { MetaPill } from "@/components/ui/MetaPill";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { MonoRef } from "@/components/ui/MonoRef";

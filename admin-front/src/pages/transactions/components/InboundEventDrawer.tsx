@@ -1,7 +1,7 @@
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VBtn } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VBtn } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { DescriptionList } from "@/components/ui/DescriptionList";

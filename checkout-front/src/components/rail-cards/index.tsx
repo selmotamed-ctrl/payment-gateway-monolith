@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VIcon } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VIcon } from "@/components/vael/VuetifyShim";
 import { ThemedText } from "@/components/ThemedText";
 import { MetaPill, SurfaceCard } from "@/components/ui";
 import type { RailDescriptor } from "@/components/renderers/types";

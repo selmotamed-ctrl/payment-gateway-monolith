@@ -1,8 +1,8 @@
 import ThemedView from "@/components/ThemedView/index";
 import { dc } from "@/utils/dc";
 import ScreenContainer from "./ScreenContainer";
-import { VProgressCircular } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VProgressCircular } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 
 const LoadingScreen = dc(
     (props: { msg?: string }) => {

@@ -1,7 +1,7 @@
 import { type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VIcon } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VIcon } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 
 /**
  * A reference that opens its record (journal entry, GL account...) instead of copying itself.

@@ -1,7 +1,7 @@
 import { computed, onMounted, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VAlert, VBtn, VFileInput, VSelect } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VAlert, VBtn, VFileInput, VSelect } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";

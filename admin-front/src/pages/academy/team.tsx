@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { useLocale } from "vuetify";
-import { VBtn, VTextField } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn, VTextField } from "@/components/vael/VuetifyShim";
 import { AcademyShell } from "@/components/academy/AcademyShell";
 import { TeamTable } from "@/components/academy/TeamTable";
 import { fmtDateTime } from "@/components/academy/format";

@@ -1,7 +1,7 @@
 import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VCheckbox } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VCheckbox } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 
 export interface ChecklistItem {
     key: string;

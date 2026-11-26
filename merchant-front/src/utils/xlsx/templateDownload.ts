@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import * as xlsx from "xlsx";
-import colors from "vuetify/util/colors";
+import colors from "@/utils/colors";
 
 export type XlsxHeader = {
     text: string;

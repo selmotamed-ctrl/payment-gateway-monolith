@@ -8,8 +8,8 @@ import type { RulesList } from "@/utils/clientValidationRules";
 import { bytesValueToReadable } from "@/utils/common";
 import { fileToBase64 } from "@/utils/FileToB64";
 import { dc } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VFileInput } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VFileInput } from "@/components/vael/VuetifyShim";
 import { isEmpty } from "@/utils/clientValidationRules";
 
 export const _1mb = 1024 * 1024;

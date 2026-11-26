@@ -1,7 +1,7 @@
 import { computed, nextTick, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VList, VListItem, VTextField } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VList, VListItem, VTextField } from "@/components/vael/VuetifyShim";
 import { FormModal } from "@/components/ui/FormModal";
 import { MetaPill } from "@/components/ui/MetaPill";
 import { StatusBadge } from "@/components/ui/StatusBadge";

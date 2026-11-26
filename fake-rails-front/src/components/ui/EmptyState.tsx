@@ -1,6 +1,6 @@
 import { type PropType, type VNodeChild, createSlot } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VBtn, VIcon } from "vuetify/components";
+import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
 
 export const EmptyState = defineComponent({
     name: "EmptyState",

@@ -7,9 +7,9 @@ import { ref, onMounted, onBeforeUnmount, computed, nextTick, watch } from "vue"
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import ThemedView from "@/components/ThemedView";
-import { VCard, VCardActions, VCardText, VDialog } from "vuetify/components";
+import { VCard, VCardActions, VCardText, VDialog } from "@/components/vael/VuetifyShim";
 import type { RulesList } from "@/utils/clientValidationRules";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useDisplay } from "@/utils/vuetify-compat";
 export type Cords = {
     latitude: string;

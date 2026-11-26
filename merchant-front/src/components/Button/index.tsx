@@ -2,8 +2,8 @@ import ThemedView from "@/components/ThemedView/index";
 import { createSlot } from "vue";
 import { dc } from "@/utils/dc";
 import _Button from "../_Button/index";
-import { VIcon } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VIcon } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 
 const Button = dc(
     (

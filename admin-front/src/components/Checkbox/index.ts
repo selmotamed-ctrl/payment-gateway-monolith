@@ -1,4 +1,4 @@
-import { VCheckbox } from "vuetify/components";
+import { VCheckbox } from "@/components/vael/VuetifyShim";
 
 const Checkbox = VCheckbox;
 export default Checkbox;

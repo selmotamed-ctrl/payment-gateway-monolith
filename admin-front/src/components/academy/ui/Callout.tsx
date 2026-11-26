@@ -1,6 +1,6 @@
 import { computed, type PropType, createSlot } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VIcon } from "vuetify/components";
+import { VIcon } from "@/components/vael/VuetifyShim";
 
 export type CalloutTone = "neutral" | "info" | "success" | "warning" | "danger";
 

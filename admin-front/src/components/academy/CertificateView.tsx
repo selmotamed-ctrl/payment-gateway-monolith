@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { RouterLink } from "vue-router/experimental/vapor";
-import { useLocale } from "vuetify";
-import { VBtn, VIcon } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
 import LogoSvg from "@/assets/images/logo.svg";
 import { GuideMarkdown } from "@/components/guide/GuideMarkdown";
 import { showSnackBar } from "@/utils/snackBar";

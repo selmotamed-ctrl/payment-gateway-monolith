@@ -1,13 +1,13 @@
 import { computed, onMounted, reactive, watch, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import {
   VAutocomplete,
   VChip,
   VSelect,
   VSwitch,
   VTextField,
-} from "vuetify/components";
+} from "@/components/vael/VuetifyShim";
 import { FormField } from "@/components/ui/FormField";
 import DateInput from "@/components/DateInput";
 import type { ReportDescriptorSpec, ReportInputFieldSpec } from "../types/reportSpec";

@@ -1,7 +1,7 @@
 import { onBeforeUnmount, ref, useId, watch, type VNodeChild, createSlot } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VBtn, VNavigationDrawer } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VBtn, VNavigationDrawer } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 
 /**
  * Open drawers, oldest first. Vuetify gives EARLIER registered layout items the HIGHER z-index,

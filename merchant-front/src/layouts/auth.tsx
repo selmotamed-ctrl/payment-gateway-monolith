@@ -1,6 +1,6 @@
 import { createSlot } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import LogoSvg from "@/assets/images/logo.svg";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import ThemeMenu from "@/components/ThemeMenu";

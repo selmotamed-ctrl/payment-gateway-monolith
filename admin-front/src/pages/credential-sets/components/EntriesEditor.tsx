@@ -1,7 +1,7 @@
 import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VBtn, VSelect, VSwitch, VTextField } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn, VSelect, VSwitch, VTextField } from "@/components/vael/VuetifyShim";
 import {
     ENTRY_TYPES,
     MAX_ENTRIES,

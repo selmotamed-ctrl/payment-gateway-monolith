@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VSelect, VTextField } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VSelect, VTextField } from "@/components/vael/VuetifyShim";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { FormField } from "@/components/ui/FormField";

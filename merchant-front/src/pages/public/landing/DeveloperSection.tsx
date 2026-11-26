@@ -1,7 +1,7 @@
 import { onBeforeUnmount, ref, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VBtn, VIcon } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import {
     LANDING_SNIPPETS,

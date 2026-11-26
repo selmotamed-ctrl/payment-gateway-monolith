@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { Field, type FieldProps } from "../Field";
-import { VCol, VContainer, VDivider, VRow } from "vuetify/components";
+import { VCol, VContainer, VDivider, VRow } from "@/components/vael/VuetifyShim";
 import { useDisplay, useTheme } from "@/utils/vuetify-compat";
 import { defaultBoxShadow } from "@/constants/styling";
 import { ThemedView } from "../ThemedView";

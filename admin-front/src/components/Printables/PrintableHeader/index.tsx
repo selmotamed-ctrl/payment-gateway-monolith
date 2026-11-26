@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
-import { VIcon } from "vuetify/components";
+import { VIcon } from "@/components/vael/VuetifyShim";
 import { PrintableThemedView } from "../PrintableThemedView.tsx";
 
 export type HeaderProps = {

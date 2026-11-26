@@ -1,11 +1,14 @@
 import { dc } from "@/utils/dc";
 import { RouterView } from "vue-router/experimental/vapor";
-import { VApp } from "vuetify/components";
+import { VApp } from "@/components/vael/VuetifyShim";
+import { VaelProvider } from "@/components/vael/VaelProvider";
 
 const App = dc(() => {
   return () => (
     <VApp>
-      <RouterView />
+      <VaelProvider>
+        <RouterView />
+      </VaelProvider>
     </VApp>
   );
 });

@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
-import { VAlert, VDivider } from "vuetify/components";
+import { VAlert, VDivider } from "@/components/vael/VuetifyShim";
 import HostedLayout from "@/layouts/hosted";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import { StatusBadge } from "@/components/ui/StatusBadge";

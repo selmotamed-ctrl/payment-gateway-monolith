@@ -2,9 +2,9 @@ import ThemedView from "@/components/ThemedView/index";
 import { ref } from "vue";
 import { setLocale } from "@/plugins/localization";
 import { dc } from "@/utils/dc";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
-import { VBtn, VIcon, VList, VListItem, VMenu } from "vuetify/components";
+import { VBtn, VIcon, VList, VListItem, VMenu } from "@/components/vael/VuetifyShim";
 import ThemeMenu from "@/components/ThemeMenu";
 
 const ThemedAndLanguageControls = dc(() => {

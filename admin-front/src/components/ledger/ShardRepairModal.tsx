@@ -1,8 +1,8 @@
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
-import { useLocale } from "vuetify";
-import { VAlert, VBtn, VTextarea } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VAlert, VBtn, VTextarea } from "@/components/vael/VuetifyShim";
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
 import { DescriptionList } from "@/components/ui/DescriptionList";

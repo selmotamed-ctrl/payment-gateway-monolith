@@ -1,10 +1,10 @@
 import { dc } from "@/utils/dc";
 import { computed, onMounted, ref, watch } from "vue";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
-import { VAlert, VBtn, VBtnToggle, VCol, VFileInput, VRow, VSelect } from "vuetify/components";
+import { VAlert, VBtn, VBtnToggle, VCol, VFileInput, VRow, VSelect } from "@/components/vael/VuetifyShim";
 import { FormChecklist } from "@/components/ui/FormChecklist";
 import { FormModal } from "@/components/ui/FormModal";
 import { areChecklistsVisible } from "@/constants/env";

@@ -1,6 +1,6 @@
 import { type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VIcon } from "vuetify/components";
+import { VIcon } from "@/components/vael/VuetifyShim";
 
 /** Rounded square holding one MDI icon (track identity, empty states, certificate seal). */
 export const IconTile = defineComponent({

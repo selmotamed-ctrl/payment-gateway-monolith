@@ -1,7 +1,7 @@
 import { computed, onMounted, ref, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VAutocomplete, VFileInput, VSelect, VSwitch, VTextarea, VTextField } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VAutocomplete, VFileInput, VSelect, VSwitch, VTextarea, VTextField } from "@/components/vael/VuetifyShim";
 import { api } from "@/utils/api";
 
 type Rule = (value: unknown) => true | string;

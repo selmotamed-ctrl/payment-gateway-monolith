@@ -1,7 +1,6 @@
 import { defineVaporComponent } from "vue-jsx";
 import { DynamicFragment } from "@vue/runtime-vapor";
 import { computed, provide, renderEffect } from "vue";
-import vuetify from "@/plugins/vuetify";
 import type { DefineVaporSetupFnComponent } from "vue";
 
 export type DCExpose<T extends Record<string, any>> = (exposed?: {
@@ -38,7 +37,7 @@ const invokeRender = (render: any): any => (typeof render === "function" ? rende
  */
 const hasEarlyReturn = (render: any): boolean => {
     try {
-        return false;
+        return true;
     } catch {
         return false;
     }
@@ -57,16 +56,9 @@ const wrapRender = (render: any, force = false): (() => any) => {
     };
 };
 
-const provideVuetifyContext = (): void => {
-    const instance = vuetify as any;
-    provide(Symbol.for("vuetify:locale") as any, instance.locale);
-    provide(Symbol.for("vuetify:theme") as any, instance.theme);
-    provide(Symbol.for("vuetify:display") as any, instance.display);
-    if (instance.defaults) provide(Symbol.for("vuetify:defaults") as any, instance.defaults);
-};
+
 
 const renderSetup = (setup: any, props: any, ctx: any, dcMode: boolean, force = false): any => {
-    provideVuetifyContext();
     const result = dcMode ? setup(props, ctx.expose, ctx) : setup(props, ctx);
     return typeof result === "function" ? wrapRender(result, force)() : result;
 };

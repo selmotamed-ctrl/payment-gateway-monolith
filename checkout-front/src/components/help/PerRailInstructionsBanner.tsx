@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { VBtn, VIcon } from "vuetify/components";
+import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { MetaPill } from "@/components/ui";

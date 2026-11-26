@@ -75,7 +75,7 @@
   --pg-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-.v-theme--dark {
+.v-theme--dark, [data-theme="dark"] {
   --pg-bg-canvas: #09090b;
   --pg-bg-surface: #121215;
   --pg-bg-surface-subtle: #18181c;

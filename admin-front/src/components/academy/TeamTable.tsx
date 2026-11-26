@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { useLocale } from "vuetify";
-import { VBtn, VSelect, VTextField } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { MetaPill } from "@/components/ui/MetaPill";
 import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";

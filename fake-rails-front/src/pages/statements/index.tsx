@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
-import { VAlert, VBtn, VCol, VRow, VSelect, VSlider, VSwitch, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VCol, VRow, VSelect, VSlider, VSwitch, VTextField } from "@/components/vael/VuetifyShim";
 import PortalLayout from "@/layouts/portal";
 import { SectionFields } from "@/components/SectionFields";
 import { DataTable } from "@/components/Table/DataTable";

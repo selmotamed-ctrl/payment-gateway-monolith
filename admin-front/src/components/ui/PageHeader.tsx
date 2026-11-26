@@ -1,7 +1,7 @@
 import { type PropType, type VNodeChild, createSlot } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { RouterLink } from "vue-router/experimental/vapor";
-import { VBtn } from "vuetify/components";
+import { VBtn } from "@/components/vael/VuetifyShim";
 import { adaptedLocale } from "@/plugins/localization";
 import { StatusBadge, type BadgeTone } from "./StatusBadge";
 import { ContextHelpButton } from "@/components/guide/ContextHelpButton";
@@ -114,6 +114,7 @@ export const PageHeader = defineComponent({
                         alignSelf: "center",
                     }}
                 >
+                    <ContextHelpButton />
                     {props.helpChapterId && props.onOpenHelp && (
                         <VBtn
                             variant="outlined"

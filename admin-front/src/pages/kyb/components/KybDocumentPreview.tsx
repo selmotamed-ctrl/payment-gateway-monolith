@@ -1,8 +1,8 @@
 import { safePreviewMime } from "@/utils/safeBlob";
 import { dc } from "@/utils/dc";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { useLocale } from "vuetify";
-import { VAlert, VBtn, VProgressCircular } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VAlert, VBtn, VProgressCircular } from "@/components/vael/VuetifyShim";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { api } from "@/state/api";

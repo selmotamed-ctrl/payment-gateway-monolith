@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
-import { VBtn, VIcon } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
 import { isAuthenticated } from "@/state/user";
 

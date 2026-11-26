@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { useLocale } from "vuetify";
-import { VAlert, VBtn, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VAlert, VBtn, VSelect, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { FormField } from "@/components/ui/FormField";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";

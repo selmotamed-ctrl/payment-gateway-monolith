@@ -7,8 +7,8 @@ import DateInput from "@/components/DateInput/index";
 import { computed, ref } from "vue";
 import { isEmpty, type RulesList } from "@/utils/clientValidationRules";
 import { dc } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VIcon, VForm } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VIcon, VForm } from "@/components/vael/VuetifyShim";
 import { MetaPill } from "@/components/ui/MetaPill";
 
 export type FilterField<T, Key = string> =

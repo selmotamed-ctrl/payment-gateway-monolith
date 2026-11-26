@@ -1,8 +1,8 @@
 import { computed, ref, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VAlert, VBtn } from "vuetify/components";
+import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
 import { areChecklistsVisible } from "@/constants/env";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";

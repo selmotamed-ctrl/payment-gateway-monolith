@@ -1,11 +1,11 @@
 import { dc } from "@/utils/dc";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
 import { ThemedView } from "../ThemedView";
 import { copyToClipboard } from "@/utils/common";
 import { isEmpty } from "@/utils/clientValidationRules";
 import { showSnackBar } from "@/utils/snackBar";
-import { VIcon, VTooltip } from "vuetify/components";
+import { VIcon, VTooltip } from "@/components/vael/VuetifyShim";
 
 let fieldIdSequence = 0;
 

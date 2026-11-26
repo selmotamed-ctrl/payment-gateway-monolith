@@ -24,7 +24,7 @@ import {
     VBtn,
     VExpandTransition,
     VTooltip,
-} from "vuetify/components";
+} from "@/components/vael/VuetifyShim";
 import { useTheme } from "@/utils/vuetify-compat";
 import Checkbox from "@/components/Checkbox";
 import { ThemedText } from "@/components/ThemedText";

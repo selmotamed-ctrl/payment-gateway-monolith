@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { computed } from "vue";
 import type Decimal from "decimal.js";
-import { useLocale } from "vuetify";
-import { VSelect, VTextField } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VSelect, VTextField } from "@/components/vael/VuetifyShim";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { FormField } from "@/components/ui/FormField";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";

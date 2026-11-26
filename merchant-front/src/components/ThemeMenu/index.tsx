@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { useLocale } from "vuetify";
-import { VBtn, VIcon, VList, VListItem, VMenu } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn, VIcon, VList, VListItem, VMenu } from "@/components/vael/VuetifyShim";
 import { setThemeMode, themeMode, type ThemeMode } from "@/state/theme";
 
 type ThemeMenuProps = {

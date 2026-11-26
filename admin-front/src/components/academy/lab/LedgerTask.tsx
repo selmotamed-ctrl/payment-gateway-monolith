@@ -1,6 +1,6 @@
 import { type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import Decimal from "decimal.js";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import type { LedgerTask as LedgerTaskType } from "@/content/academy";

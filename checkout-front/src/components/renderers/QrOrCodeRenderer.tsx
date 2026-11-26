@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { ref, watch } from "vue";
-import { useLocale } from "vuetify";
-import { VAlert, VProgressCircular } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VAlert, VProgressCircular } from "@/components/vael/VuetifyShim";
 import QRCode from "qrcode";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";

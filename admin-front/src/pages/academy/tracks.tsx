@@ -1,7 +1,7 @@
 import { computed, onMounted, ref, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
-import { VBtn } from "vuetify/components";
+import { useLocale } from "@/utils/vael-compat";
+import { VBtn } from "@/components/vael/VuetifyShim";
 import { AcademyShell, Skeleton, useAcademyData, userRole } from "@/components/academy/AcademyShell";
 import { TrackCard } from "@/components/academy/TrackCard";
 import { trackStats } from "@/components/academy/nextStep";

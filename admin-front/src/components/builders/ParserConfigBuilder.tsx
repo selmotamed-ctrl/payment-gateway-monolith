@@ -1,7 +1,7 @@
 import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VAlert, VSelect, VSwitch, VTextField } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { VAlert, VSelect, VSwitch, VTextField } from "@/components/vael/VuetifyShim";
+import { useLocale } from "@/utils/vael-compat";
 import { FormField } from "@/components/ui/FormField";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { PARSER_ERROR_MESSAGES } from "./messages";

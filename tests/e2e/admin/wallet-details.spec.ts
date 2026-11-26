@@ -265,8 +265,7 @@ test.describe("wallet details page", () => {
     await page.goto(`/wallets/${WALLET}?tab=statement`);
     await expect(page.getByText("Payment 1", { exact: true })).toBeVisible();
     if (!(await page.locator(".pg-table-filters__grid").first().isVisible())) await page.locator(".pg-filter-trigger:visible").first().click();
-    await page.getByRole("combobox", { name: "Side", exact: true }).first().click();
-    await page.getByRole("option", { name: "Debit" }).click();
+    await page.getByRole("combobox", { name: "Side", exact: true }).first().selectOption({ label: "Debit" });
     await expect.poll(() => calls.some((entry) => entry.includes("/statement") && entry.includes("direction=DEBIT"))).toBe(true);
   });
 

@@ -1,6 +1,6 @@
 import { computed, ref, useId } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { useLocale } from "vuetify";
+import { useLocale } from "@/utils/vael-compat";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { formatMoney } from "@/utils/money";
 import { LANDING_FEE_BEARERS, computeLandingFees, type LandingFeeBearer } from "@/content/landing/landingModel";
