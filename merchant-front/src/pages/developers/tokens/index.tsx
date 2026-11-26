@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
 import { VBtn, VTextField } from "vuetify/components";
@@ -220,10 +220,7 @@ const DeveloperTokensPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Developer Tokens")}
-                    subtitle={t("API credentials and IP allow-lists for integrations.")}
-                    end={() => (
+                <PageHeader title={t("Developer Tokens")} subtitle={t("API credentials and IP allow-lists for integrations.")}>(
                         <VBtn
                             variant="tonal"
                             onClick={() => {
@@ -234,8 +231,7 @@ const DeveloperTokensPage = dc(() => {
                         >
                             {t("Create Token")}
                         </VBtn>
-                    )}
-                />
+                    )</PageHeader>
 
                 {createdSecret.value && (
                     <SurfaceCard title={t("Secret")}>

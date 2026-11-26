@@ -1,4 +1,5 @@
-import { defineComponent, ref, type PropType, type VNodeChild } from "vue";
+import { ref, type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
 import { useLocale } from "vuetify";
 import { ApiTable } from "@/components/Table/ApiTable";

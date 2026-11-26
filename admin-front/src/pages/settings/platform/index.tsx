@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
@@ -451,10 +451,7 @@ const PlatformSettingsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Platform Settings")}
-                    subtitle={t("Governed platform configuration with versioned changes.")}
-                    end={() => tab.value !== "settings" ? null : (
+                <PageHeader title={t("Platform Settings")} subtitle={t("Governed platform configuration with versioned changes.")}>tab.value !== "settings" ? null : (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
                                 {t("Refresh")}
@@ -469,8 +466,7 @@ const PlatformSettingsPage = dc(() => {
                                 {t("New setting")}
                             </VBtn>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 <SegmentedTabs
                     modelValue={tab.value}

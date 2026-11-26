@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { VAlert, VBtn, VTextField } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { computed, ref } from "vue";

@@ -1,4 +1,5 @@
-import { defineComponent, type PropType, type VNodeChild } from "vue";
+import { type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 
 export type StepBarItem = {
     key: string;

@@ -1,4 +1,5 @@
-import { defineComponent, type PropType, type VNodeChild } from "vue";
+import { type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { MoneyDisplay } from "./MoneyDisplay";
 import { DEFAULT_CURRENCY } from "@/utils/money";
 
@@ -19,8 +20,7 @@ export const DescriptionList = defineComponent({
     },
     setup(props) {
         return (): VNodeChild => {
-            if (!props.items.length) return null;
-            return (
+            return (!props.items.length ? null : (
                 <dl
                     aria-label={props.ariaLabel || undefined}
                     style={{
@@ -77,7 +77,7 @@ export const DescriptionList = defineComponent({
                         </div>
                     ))}
                 </dl>
-            );
+            ));
         };
     },
 });

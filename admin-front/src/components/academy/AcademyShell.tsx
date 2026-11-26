@@ -1,5 +1,6 @@
-import { computed, defineComponent, onBeforeUnmount, onMounted, ref, type PropType, type VNodeChild } from "vue";
-import { RouterLink } from "vue-router";
+import { computed, onBeforeUnmount, onMounted, ref, type PropType, type VNodeChild, createSlot } from "vue";
+import { defineComponent } from "@/utils/dc";
+import { RouterLink } from "vue-router/experimental/vapor";
 import { useLocale } from "vuetify";
 import ScreenContainer from "@/components/ScreenContainer";
 import { MetaPill } from "@/components/ui/MetaPill";
@@ -122,7 +123,7 @@ export const AcademyShell = defineComponent({
                             </span>
                         )}
                     </div>
-                    {slots.default?.()}
+                    {createSlot("default")}
                     <footer class="ac-footer">
                         {t("Stuck?")} <RouterLink to={{ name: "AdminGuide" }}>{t("Open the Guide article")}</RouterLink>
                         {t(", or ask your trainer.")}

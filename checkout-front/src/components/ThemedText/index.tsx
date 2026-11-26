@@ -1,4 +1,5 @@
-import { defineComponent, type HTMLAttributes, type ReservedProps } from "vue";
+import { type HTMLAttributes, type ReservedProps, createSlot } from "vue";
+import { defineComponent } from "@/utils/dc";
 
 export type ThemedTextProps = HTMLAttributes &
     ReservedProps & {
@@ -47,7 +48,7 @@ export const ThemedText = defineComponent<ThemedTextProps>(
                         ]}
                         {...rest}
                     >
-                        {ctx.slots.default?.()}
+                        {createSlot("default")}
                     </span>
                 </>
             );

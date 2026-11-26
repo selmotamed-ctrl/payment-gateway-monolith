@@ -1,4 +1,5 @@
-import { computed, defineComponent, ref, watch, type PropType } from "vue";
+import { computed, ref, watch, type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VAlert, VCheckbox, VSelect, VTextarea } from "vuetify/components";
 import { FormField, FormModal } from "@/components/ui";

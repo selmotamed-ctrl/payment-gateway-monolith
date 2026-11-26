@@ -1,4 +1,5 @@
-import { defineComponent, ref, type PropType, type VNodeChild } from "vue";
+import { ref, type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VIcon, VMenu } from "vuetify/components";
 import { useLocale } from "vuetify";
 

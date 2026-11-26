@@ -1,4 +1,5 @@
-import { computed, defineComponent, type PropType, type VNodeChild } from "vue";
+import { computed, type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { DescriptionList, type DescriptionItem } from "./DescriptionList";
 import { JsonValueCell } from "./JsonValueCell";

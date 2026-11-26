@@ -1,4 +1,5 @@
-import { computed, defineComponent, ref, watch, type PropType, type VNodeChild } from "vue";
+import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VAlert, VBtn, VCheckbox, VSelect, VTextField } from "vuetify/components";
 import { api } from "@/state/api";

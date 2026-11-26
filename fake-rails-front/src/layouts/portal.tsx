@@ -1,4 +1,5 @@
-import { dc } from "kt-dc";
+import { createSlot } from "vue";
+import { dc } from "@/utils/dc";
 import { useRoute, useRouter } from "vue-router";
 import { VAppBar, VAppBarTitle, VBtn, VMain, VSpacer } from "vuetify/components";
 import { ScreenContainer } from "@/components/ScreenContainer";
@@ -48,7 +49,7 @@ export const PortalLayout = dc(
           <VBtn variant="text" onClick={logout}>Logout</VBtn>
         </VAppBar>
         <VMain>
-          <ScreenContainer>{slots.default?.()}</ScreenContainer>
+          <ScreenContainer>{createSlot("default")}</ScreenContainer>
         </VMain>
       </div>
     );

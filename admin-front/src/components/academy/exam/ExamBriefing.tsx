@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, type VNodeChild } from "vue";
 import { useLocale } from "vuetify";
 import { VBtn } from "vuetify/components";

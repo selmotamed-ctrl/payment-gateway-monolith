@@ -1,5 +1,6 @@
 import { dc } from "@/utils/dc";
-import { defineComponent, type HTMLAttributes, type ReservedProps } from "vue";
+import { type HTMLAttributes, type ReservedProps, createSlot } from "vue";
+import { defineComponent } from "@/utils/dc";
 
 type ThemedViewProps = HTMLAttributes &
     ReservedProps
@@ -20,7 +21,7 @@ export const PrintableThemedView = dc(
                         props.style,
                     ]}
                 >
-                    {slots.default?.()}
+                    {createSlot("default")}
                 </div>
             );
         };

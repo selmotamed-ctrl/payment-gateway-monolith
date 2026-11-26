@@ -1,4 +1,5 @@
-import { computed, defineComponent, onMounted, ref, type PropType, type VNodeChild } from "vue";
+import { computed, onMounted, ref, type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VAutocomplete, VBtn, VIcon, VSelect, VTextField } from "vuetify/components";
 import {
@@ -86,8 +87,7 @@ export const TableFilters = defineComponent({
     });
 
     return (): VNodeChild => {
-      if (!props.filters?.length) return null;
-      return (
+      return (!props.filters?.length ? null : (
         <div class="pg-table-filters">
           {props.expanded && (
             <div
@@ -258,7 +258,7 @@ export const TableFilters = defineComponent({
             </span>
           )}
         </div>
-      );
+      ));
     };
   },
 });

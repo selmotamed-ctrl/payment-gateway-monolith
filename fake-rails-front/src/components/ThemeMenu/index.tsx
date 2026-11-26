@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { VBtn, VIcon, VList, VListItem, VMenu } from "vuetify/components";
 import { setThemeMode, themeMode, type ThemeMode } from "@/state/theme";

@@ -1,4 +1,5 @@
-import { defineComponent, type PropType } from "vue";
+import { type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VIcon } from "vuetify/components";
 
 export type StepState = "done" | "current" | "todo" | "locked" | "partial" | "failed";

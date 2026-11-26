@@ -1,6 +1,7 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { useLocale, useTheme } from "vuetify";
+import { useLocale } from "vuetify";
+import { useTheme } from "@/utils/vuetify-compat";
 import { VSelect } from "vuetify/components";
 
 import ScreenContainer from "@/components/ScreenContainer";
@@ -166,10 +167,7 @@ const DashboardPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Dashboard")}
-                    subtitle={t("Your wallet, payment volume, and settlement posture.")}
-                    end={() => (
+                <PageHeader title={t("Dashboard")} subtitle={t("Your wallet, payment volume, and settlement posture.")}>(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             <SegmentedTabs
                                 modelValue={period.value}
@@ -192,8 +190,7 @@ const DashboardPage = dc(() => {
                                 style={{ maxWidth: "110px" }}
                             />
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />

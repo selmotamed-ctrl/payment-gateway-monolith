@@ -1,4 +1,5 @@
-import { defineComponent, type PropType, type VNodeChild } from "vue";
+import { type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { MoneyDisplay } from "./MoneyDisplay";
 import { StatusBadge, type BadgeTone } from "./StatusBadge";
 import { DEFAULT_CURRENCY } from "@/utils/money";

@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
@@ -164,10 +164,7 @@ const WalletsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Wallets")}
-                    subtitle={t("Available, pending, and reserved balances by wallet.")}
-                    end={() => (
+                <PageHeader title={t("Wallets")} subtitle={t("Available, pending, and reserved balances by wallet.")}>(
                         <VBtn
                             variant="tonal"
                             onClick={() => {
@@ -179,8 +176,7 @@ const WalletsPage = dc(() => {
                         >
                             {t("Create")}
                         </VBtn>
-                    )}
-                />
+                    )</PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />

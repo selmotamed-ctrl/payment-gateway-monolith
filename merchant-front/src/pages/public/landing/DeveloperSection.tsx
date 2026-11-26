@@ -1,4 +1,5 @@
-import { defineComponent, onBeforeUnmount, ref, type VNodeChild } from "vue";
+import { onBeforeUnmount, ref, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VBtn, VIcon } from "vuetify/components";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";

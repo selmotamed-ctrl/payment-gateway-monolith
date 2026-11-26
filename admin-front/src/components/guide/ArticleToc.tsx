@@ -1,4 +1,5 @@
-import { computed, defineComponent, type PropType } from "vue";
+import { computed, type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
 import type { ArticleHeading } from "@/content/guide";
 
 export const ArticleToc = defineComponent({
@@ -15,8 +16,7 @@ export const ArticleToc = defineComponent({
             target?.focus?.();
         };
         return () => {
-            if (visible.value.length === 0) return null;
-            return (
+            return (visible.value.length === 0 ? null : (
                 <nav class="guide-toc" aria-label="On this page">
                     <p class="guide-toc__title">On this page</p>
                     <ol>
@@ -32,7 +32,7 @@ export const ArticleToc = defineComponent({
                         ))}
                     </ol>
                 </nav>
-            );
+            ));
         };
     },
 });

@@ -1,5 +1,6 @@
-import { computed, defineComponent, onMounted, ref, type VNodeChild } from "vue";
-import { RouterLink } from "vue-router";
+import { computed, onMounted, ref, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
+import { RouterLink } from "vue-router/experimental/vapor";
 import { useLocale } from "vuetify";
 import { VBtn, VIcon } from "vuetify/components";
 import { AcademyShell, Skeleton, useAcademyData, userRole } from "@/components/academy/AcademyShell";
@@ -299,15 +300,11 @@ export const AdminAcademyPage = defineComponent({
             return (
                 <AcademyShell
                     header={() => (
-                        <PageHeader
-                            title={t("My learning")}
-                            subtitle={t("Learn, check, do, prove: one next step at a time.")}
-                            end={() => (
+                        <PageHeader title={t("My learning")} subtitle={t("Learn, check, do, prove: one next step at a time.")}>(
                                 <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyLearningSummary()}>
                                     {t("Copy learning summary")}
                                 </VBtn>
-                            )}
-                        />
+                            )</PageHeader>
                     )}
                 >
                     {body()}

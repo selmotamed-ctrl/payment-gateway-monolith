@@ -1,3 +1,4 @@
+import { computed } from "vue";
 import { hasOneOfAuthorities } from "@/state/user";
 import type { UserAuthorityType } from "@/utils/authorities";
 import { useLocale } from "vuetify";

@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
@@ -458,18 +458,12 @@ const AmlScreeningsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("AML Screenings")}
-                    subtitle={t("Review sanctions and PEP screening results and disposition unresolved matches.")}
-                    badge="AML-CONFIDENTIAL"
-                    badgeTone="danger"
-                    end={() => (
+                <PageHeader title={t("AML Screenings")} subtitle={t("Review sanctions and PEP screening results and disposition unresolved matches.")} badge="AML-CONFIDENTIAL" badgeTone="danger">(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
                 <VAlert type="error" variant="tonal">
                     {t("AML-CONFIDENTIAL · Screening results and matches are restricted to Compliance, MLRO and authorised AML reviewers.")}
                 </VAlert>

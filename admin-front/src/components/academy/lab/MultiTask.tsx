@@ -1,4 +1,5 @@
-import { defineComponent, type PropType, type VNode } from "vue";
+import { type PropType, type VNode } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import type { MultiTask as MultiTaskType } from "@/content/academy";
 import type { MultiAnswer } from "../labScoring";

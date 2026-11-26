@@ -1,7 +1,9 @@
 import Decimal from "decimal.js";
-import { computed, defineComponent, ref, watch, type PropType, type VNodeChild } from "vue";
+import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VBtn } from "vuetify/components";
-import { useLocale, useTheme } from "vuetify";
+import { useLocale } from "vuetify";
+import { useTheme } from "@/utils/vuetify-compat";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";

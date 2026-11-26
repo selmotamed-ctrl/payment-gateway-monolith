@@ -1,7 +1,8 @@
 import { type IconProps, type RefreshMethodWithNextSkip, type TableHeader as TableHeaderType } from "./types";
 import { xlsxUIPipeline, type XlsxHeader } from "@/utils/xlsx";
 import { colors } from "@/plugins/vuetify";
-import { useDisplay, useLocale } from "vuetify";
+import { useLocale } from "vuetify";
+import { useDisplay } from "@/utils/vuetify-compat";
 import {
     VAutocomplete,
     VBtn,
@@ -10,7 +11,8 @@ import {
     VTextField,
     VTooltip,
 } from "vuetify/components";
-import { computed, defineComponent, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
+import { defineComponent } from "@/utils/dc";
 
 export const useTableXlsx = (options: {
     headers: () => TableHeaderType<any>[];
@@ -90,8 +92,7 @@ export const TableFooter = defineComponent<{
         const isMobile = computed(() => display.mobile.value);
 
         return () => {
-            if (isMobile.value) {
-                return (
+            return (isMobile.value ? (
                     <TableFooterMobile
                         totalDataLength={props.totalDataLength}
                         loading={props.loading}
@@ -106,9 +107,7 @@ export const TableFooter = defineComponent<{
                         setNumberOfItemsPerPage={props.setNumberOfItemsPerPage}
                         numberOfPages={props.numberOfPages}
                     ></TableFooterMobile>
-                );
-            }
-            return (
+                ) : (
                 <TableFooterDesktop
                     numberOfItemsPerPageChoices={props.numberOfItemsPerPageChoices}
                     setNumberOfItemsPerPage={props.setNumberOfItemsPerPage}
@@ -123,7 +122,7 @@ export const TableFooter = defineComponent<{
                     goToPage={props.goToPage}
                     numberOfPages={props.numberOfPages}
                 ></TableFooterDesktop>
-            );
+            ));
         };
     },
     {
@@ -168,11 +167,7 @@ export const TableHeader = defineComponent<TableHeaderProps>(
         const display = useDisplay();
         const isMobile = computed(() => display.mobile.value);
         return () => {
-            if (isMobile.value) {
-                return <TableHeaderMobile {...props}></TableHeaderMobile>;
-            }
-
-            return <TableHeaderDesktop {...props}></TableHeaderDesktop>;
+            return (isMobile.value ? <TableHeaderMobile {...props}></TableHeaderMobile> : <TableHeaderDesktop {...props}></TableHeaderDesktop>);
         };
     },
     {
@@ -310,11 +305,7 @@ const Search = defineComponent<{
         const locale = useLocale();
         const { t } = locale;
         return () => {
-            if (!props.onSearch || !props.setSearchValue) {
-                return <></>;
-            }
-
-            return (
+            return (!props.onSearch || !props.setSearchValue ? <></> : (
                 <VTextField
                     class="pg-table-search"
                     variant="outlined"
@@ -344,7 +335,7 @@ const Search = defineComponent<{
                         ),
                     }}
                 </VTextField>
-            );
+            ));
         };
     },
     {
@@ -480,11 +471,7 @@ const TableFooterLeft = defineComponent(
         return () => {
             const isMobile = display.mobile.value;
 
-            if (!props.totalDataLength || props.totalDataLength == 0) {
-                return <></>;
-            }
-
-            return (
+            return (!props.totalDataLength || props.totalDataLength == 0 ? <></> : (
                 <div
                     class="pg-pagination"
                     {...{ role: "navigation", "aria-label": t("Pagination") }}
@@ -499,7 +486,7 @@ const TableFooterLeft = defineComponent(
                     ></PagesNumbers>
                     <NextButton loading={props.loading} hasNext={props.hasNext} next={props.next}></NextButton>
                 </div>
-            );
+            ));
         };
     },
     {

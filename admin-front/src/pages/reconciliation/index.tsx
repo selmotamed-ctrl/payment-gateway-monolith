@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
@@ -775,17 +775,11 @@ const ReconciliationPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Reconciliation")}
-                    subtitle={t("Upload statements, monitor reconciliation runs, and resolve mismatches between gateway and ledger records.")}
-                    badge={t("Daily control")}
-                    badgeTone="info"
-                    end={() => (
+                <PageHeader title={t("Reconciliation")} subtitle={t("Upload statements, monitor reconciliation runs, and resolve mismatches between gateway and ledger records.")} badge={t("Daily control")} badgeTone="info">(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => { void load(); runRefreshHook.value?.refreshAsIs(); }}>{t("Refresh")}</VBtn>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />

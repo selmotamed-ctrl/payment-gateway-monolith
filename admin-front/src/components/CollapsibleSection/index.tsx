@@ -1,5 +1,7 @@
-import { defineComponent, ref, watch, type PropType } from "vue";
-import { useDisplay, useLocale, useTheme } from "vuetify";
+import { ref, watch, type PropType, createSlot } from "vue";
+import { defineComponent } from "@/utils/dc";
+import { useLocale } from "vuetify";
+import { useDisplay, useTheme } from "@/utils/vuetify-compat";
 import { VCard, VCardText, VIcon } from "vuetify/components";
 import { ThemedText } from "../ThemedText";
 import { ThemedView } from "../ThemedView";
@@ -118,7 +120,7 @@ const CollapsibleSection = defineComponent({
                         </button>
                         {open.value && (
                             <div style={{ padding: display.mobile.value ? "0 12px 16px" : "0 16px 18px" }}>
-                                {slots.default?.()}
+                                {createSlot("default")}
                             </div>
                         )}
                     </VCardText>

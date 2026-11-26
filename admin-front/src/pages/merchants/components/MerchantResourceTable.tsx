@@ -1,4 +1,5 @@
-import { defineComponent, ref, watch } from "vue";
+import { ref, watch } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";

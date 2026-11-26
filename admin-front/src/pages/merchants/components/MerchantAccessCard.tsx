@@ -1,4 +1,5 @@
-import { computed, defineComponent, ref, type PropType, type VNodeChild } from "vue";
+import { computed, ref, type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
 import { useLocale } from "vuetify";
 import { VBtn } from "vuetify/components";

@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute } from "vue-router";
@@ -355,10 +355,7 @@ const MerchantReportStudioPage = dc(() => {
   return () => (
     <ScreenContainer>
       <ThemedView style={{ gap: "18px" }}>
-        <PageHeader
-          title={t("Report Studio")}
-          subtitle={t("Author your own merchant reports with the AI transcript, verify them and publish")}
-          end={() => (
+        <PageHeader title={t("Report Studio")} subtitle={t("Author your own merchant reports with the AI transcript, verify them and publish")}>(
             <div class="d-flex flex-wrap ga-2">
               <VBtn variant="tonal" prependIcon="mdi-download" loading={busy.value} onClick={() => void downloadTranscript()}>
                 {t("Download AI transcript")}
@@ -367,8 +364,7 @@ const MerchantReportStudioPage = dc(() => {
                 {t("Refresh")}
               </VBtn>
             </div>
-          )}
-        />
+          )</PageHeader>
 
         {route.query.from === "migration" && (
           <VAlert type="warning" variant="tonal">

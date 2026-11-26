@@ -1,6 +1,7 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { useLocale, useTheme } from "vuetify";
+import { useLocale } from "vuetify";
+import { useTheme } from "@/utils/vuetify-compat";
 import { VBtn } from "vuetify/components";
 import { useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
@@ -529,12 +530,7 @@ const KybReviewPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("KYB Review")}
-                    subtitle={t("Review KYB evidence, document integrity and expiry posture before accepting or rejecting a merchant.")}
-                    badge={t("KYB review")}
-                    badgeTone="info"
-                    end={() => (
+                <PageHeader title={t("KYB Review")} subtitle={t("Review KYB evidence, document integrity and expiry posture before accepting or rejecting a merchant.")} badge={t("KYB review")} badgeTone="info">(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                             <StatusBadge status="info" label={`${total.value} ${t("documents")}`} toneOverride="info" showDot={false} />
                             <StatusBadge status="success" label={`${actionableCount.value} ${t("actionable")}`} toneOverride="success" showDot={false} />
@@ -542,8 +538,7 @@ const KybReviewPage = dc(() => {
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 {summary.value && (
                     <SummaryExportCard

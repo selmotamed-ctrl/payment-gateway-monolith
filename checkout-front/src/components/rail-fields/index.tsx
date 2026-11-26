@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed } from "vue";
 import { useLocale } from "vuetify";
 import { VTextField, VSelect } from "vuetify/components";

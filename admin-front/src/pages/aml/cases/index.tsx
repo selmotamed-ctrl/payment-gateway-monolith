@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
@@ -623,18 +623,12 @@ const AmlCasesPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("AML Cases")}
-                    subtitle={t("Investigate, disposition, and escalate AML cases under restricted compliance access.")}
-                    badge="AML-CONFIDENTIAL"
-                    badgeTone="danger"
-                    end={() => (
+                <PageHeader title={t("AML Cases")} subtitle={t("Investigate, disposition, and escalate AML cases under restricted compliance access.")} badge="AML-CONFIDENTIAL" badgeTone="danger">(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { caseExportChecklist.value = {}; caseExportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 <VAlert type="error" variant="tonal">
                     {t("AML-CONFIDENTIAL · This queue is restricted to Compliance, MLRO and authorised AML reviewers. Never disclose case details to the merchant or payer.")}

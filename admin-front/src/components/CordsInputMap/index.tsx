@@ -1,13 +1,16 @@
+import TextField from "@/components/TextField/index";
+import Button from "@/components/Button/index";
 import { devLog } from "@/utils/devLog";
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 
-import { ref, onMounted, onBeforeUnmount } from "vue";
+import { ref, onMounted, onBeforeUnmount, computed, nextTick, watch } from "vue";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import ThemedView from "@/components/ThemedView";
 import { VCard, VCardActions, VCardText, VDialog } from "vuetify/components";
 import type { RulesList } from "@/utils/clientValidationRules";
-import { useDisplay, useLocale } from "vuetify";
+import { useLocale } from "vuetify";
+import { useDisplay } from "@/utils/vuetify-compat";
 export type Cords = {
     latitude: string;
     longitude: String;

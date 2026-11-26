@@ -1,4 +1,5 @@
-import { defineComponent, type PropType, type StyleValue } from "vue";
+import { type PropType, type StyleValue } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import type { MoneyInput } from "@/utils/money";
 

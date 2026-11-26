@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
@@ -438,10 +438,7 @@ const AdminCheckoutHelpPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Checkout Help")}
-                    subtitle={t("Payer-facing guidance and per-rail instructions.")}
-                    end={() => (
+                <PageHeader title={t("Checkout Help")} subtitle={t("Payer-facing guidance and per-rail instructions.")}>(
                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                             <StatusBadge
                                 status={isDirty.value ? "PENDING" : "SAVED"}
@@ -458,8 +455,7 @@ const AdminCheckoutHelpPage = dc(() => {
                                 </VBtn>
                             )}
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 <VAlert type="warning" variant="tonal" density="comfortable">
                     <ThemedView style={{ gap: "4px" }}>

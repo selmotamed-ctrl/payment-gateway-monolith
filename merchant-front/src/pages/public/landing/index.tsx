@@ -1,17 +1,7 @@
+import type { Ref } from "vue";
 import "./landing.css";
-import {
-    computed,
-    defineComponent,
-    h,
-    markRaw,
-    nextTick,
-    onBeforeUnmount,
-    onMounted,
-    ref,
-    shallowRef,
-    watch,
-    type Component,
-} from "vue";
+import { computed, h, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Component } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VBtn, VIcon } from "vuetify/components";
 import LogoSvg from "@/assets/images/logo.svg";

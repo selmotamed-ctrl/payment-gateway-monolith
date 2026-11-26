@@ -1,5 +1,7 @@
-import { computed, defineComponent, ref } from "vue";
-import { RouterLink, useRoute } from "vue-router";
+import { computed, ref } from "vue";
+import { defineComponent } from "@/utils/dc";
+import { useRoute } from "vue-router";
+import { RouterLink } from "vue-router/experimental/vapor";
 import { PageHeader } from "@/components/ui/PageHeader";
 import ScreenContainer from "@/components/ScreenContainer";
 import { useGuideLocale } from "@/components/guide/widgets/useGuideLocale";
@@ -68,19 +70,14 @@ export const AdminGuideToolsPage = defineComponent({
 
         return () => (
             <ScreenContainer>
-                <PageHeader
-                    title={L("Tools and simulators", "الأدوات والمحاكيات")}
-                    subtitle={L(
+                <PageHeader title={L("Tools and simulators", "الأدوات والمحاكيات")} subtitle={L(
                         "Safe, client-only teaching tools. They are not connected to any real system.",
                         "أدوات تعليمية آمنة تعمل في المتصفح فقط. غير متصلة بأي نظام حقيقي.",
-                    )}
-                    breadcrumbs={[{ label: L("Guide", "الدليل"), to: "/guide" }, { label: L("Tools", "الأدوات") }]}
-                    end={() => selected.value ? (
+                    )} breadcrumbs={[{ label: L("Guide", "الدليل"), to: "/guide" }, { label: L("Tools", "الأدوات") }]}>selected.value ? (
                         <button type="button" class="guide-secondary-button" onClick={() => void copyToolLink()}>
                             {linkCopied.value ? L("Link copied", "تم نسخ الرابط") : L("Copy link", "نسخ الرابط")}
                         </button>
-                    ) : null}
-                />
+                    ) : null</PageHeader>
                 <div class="guide-tools-page">
                     <nav class="guide-tool-picker" aria-label={L("Choose a tool", "اختر أداة")}>
                         {TOOLS.map((tool) => (

@@ -1,5 +1,5 @@
 import { buildCheckoutUrl } from "@/utils/security/checkoutUrl";
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
 import { VBtn, VTextField } from "vuetify/components";
@@ -267,10 +267,7 @@ const LinksPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Payment Links")}
-                    subtitle={t("Create, track, and expire customer payment links.")}
-                    end={() => (
+                <PageHeader title={t("Payment Links")} subtitle={t("Create, track, and expire customer payment links.")}>(
                         <VBtn
                             variant="tonal"
                             onClick={() => {
@@ -289,8 +286,7 @@ const LinksPage = dc(() => {
                         >
                             {t("Create")}
                         </VBtn>
-                    )}
-                />
+                    )</PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />

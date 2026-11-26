@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute } from "vue-router";
@@ -263,15 +263,11 @@ const StatementsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Statements")}
-                    subtitle={t("Settlement statements and downloadable reconciliation records.")}
-                    end={() => (
+                <PageHeader title={t("Statements")} subtitle={t("Settlement statements and downloadable reconciliation records.")}>(
                         <VBtn variant="tonal" disabled={!walletId.value} onClick={() => void exportStatement()}>
                             {t("Export")}
                         </VBtn>
-                    )}
-                />
+                    )</PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void loadStatement()} />

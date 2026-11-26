@@ -1,4 +1,5 @@
-import { computed, defineComponent, ref, useId } from "vue";
+import { computed, ref, useId } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { formatMoney } from "@/utils/money";

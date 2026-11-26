@@ -1,4 +1,5 @@
-import { computed, defineComponent, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VDialog } from "vuetify/components";
 import { loadCards, type Card } from "@/content/guide";
 import { MarkdownView } from "./MarkdownView";

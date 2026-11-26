@@ -2,7 +2,7 @@ import { useLocale } from "vuetify";
 import { ThemedView } from "../ThemedView";
 import { VIcon } from "vuetify/components";
 import { Field } from "../Field";
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import type { StyleValue } from "vue";
 
 export type AlertViewProps = {

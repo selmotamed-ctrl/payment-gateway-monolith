@@ -1,12 +1,5 @@
-import {
-    defineComponent,
-    nextTick,
-    onBeforeUnmount,
-    onMounted,
-    ref,
-    watch,
-    type PropType,
-} from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, watch, type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
 
 export interface RefPreview {
     kindLabel: string;
@@ -104,8 +97,7 @@ export const ReferencePreviewPopover = defineComponent({
 
         return () => {
             const preview = props.preview;
-            if (!preview) return null;
-            return (
+            return (!preview ? null : (
                 <div class="guide-popover-layer" onClick={() => props.onClose()}>
                     <div
                         ref={panel}
@@ -155,7 +147,7 @@ export const ReferencePreviewPopover = defineComponent({
                         </div>
                     </div>
                 </div>
-            );
+            ));
         };
     },
 });

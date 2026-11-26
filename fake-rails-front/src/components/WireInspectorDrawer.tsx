@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { ref, watch } from "vue";
 import { VBtn, VDivider, VNavigationDrawer } from "vuetify/components";
 import { DataTable } from "@/components/Table/DataTable";

@@ -1,4 +1,5 @@
-import { computed, defineComponent, onMounted, ref, watch, type PropType, type VNodeChild } from "vue";
+import { computed, onMounted, ref, watch, type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VAlert, VBtn, VFileInput, VSelect } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { api } from "@/state/api";

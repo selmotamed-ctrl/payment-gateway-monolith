@@ -1,8 +1,8 @@
 import { h } from "vue";
 import type { IconProps } from "vuetify";
 
-import institution from "./icons/Institution.vue";
-import institutionAdd from "./icons/InstitutionAdd.vue";
+import institution from "./icons/Institution";
+import institutionAdd from "./icons/InstitutionAdd";
 
 const Icons: any = {
     institutionAdd,

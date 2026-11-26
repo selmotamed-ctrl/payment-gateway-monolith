@@ -1,5 +1,5 @@
 import { safePreviewMime } from "@/utils/safeBlob";
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
@@ -710,12 +710,7 @@ const JoinRequestDetailPage = dc(() => {
         return (
             <ScreenContainer>
                 <ThemedView style={{ gap: "18px" }}>
-                    <PageHeader
-                        title={merchant.value?.tradeName || t("Join request")}
-                        subtitle={t("Inspect merchant and owner evidence, keep the review checklist current, and record a defensible decision.")}
-                        badge={entry.fourEyesRequired ? t("Four eyes") : t("KYB review")}
-                        badgeTone={entry.fourEyesRequired ? "warning" : "info"}
-                        end={() => (
+                    <PageHeader title={merchant.value?.tradeName || t("Join request")} subtitle={t("Inspect merchant and owner evidence, keep the review checklist current, and record a defensible decision.")} badge={entry.fourEyesRequired ? t("Four eyes") : t("KYB review")} badgeTone={entry.fourEyesRequired ? "warning" : "info"}>(
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                 <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "JoinRequests" })}>
                                     {t("Queue")}
@@ -729,8 +724,7 @@ const JoinRequestDetailPage = dc(() => {
                                     </VBtn>
                                 )}
                             </ThemedView>
-                        )}
-                    />
+                        )</PageHeader>
 
                     <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
                         <span title={statusHelp.value.meaning}>

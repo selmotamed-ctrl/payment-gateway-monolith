@@ -1,4 +1,5 @@
-import { defineComponent, type PropType } from "vue";
+import { type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { lookupTerm } from "@/content/guide/legacy";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 

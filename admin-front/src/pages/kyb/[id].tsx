@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
@@ -262,10 +262,7 @@ const KybReviewDetailPage = dc(() => {
         return (
             <ScreenContainer>
                 <ThemedView style={{ gap: "18px" }}>
-                    <PageHeader
-                        title={`${typeHelp.label} · ${entry.merchantName}`}
-                        subtitle={t("Inspect document identity, scanning status, expiry evidence and duplicate-document risk.")}
-                        end={() => (
+                    <PageHeader title={`${typeHelp.label} · ${entry.merchantName}`} subtitle={t("Inspect document identity, scanning status, expiry evidence and duplicate-document risk.")}>(
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                 <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "KybReview" })}>
                                     {t("Queue")}
@@ -301,8 +298,7 @@ const KybReviewDetailPage = dc(() => {
                                     </VBtn>
                                 )}
                             </ThemedView>
-                        )}
-                    />
+                        )</PageHeader>
 
                     <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                         <span title={statusHelp.meaning}>

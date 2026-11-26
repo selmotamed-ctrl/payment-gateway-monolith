@@ -1,4 +1,5 @@
-import { computed, defineComponent, nextTick, ref, watch, type PropType, type VNodeChild } from "vue";
+import { computed, nextTick, ref, watch, type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VList, VListItem, VTextField } from "vuetify/components";
 import { FormModal } from "@/components/ui/FormModal";

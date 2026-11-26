@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
@@ -738,10 +738,7 @@ const OperatorCaseDetailPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={`${t("Operator Case")} ${caseRef.value}`}
-                    subtitle={t("Inspect the case, evidence, identifiers and maker-checker resolution path.")}
-                    end={() => (
+                <PageHeader title={`${t("Operator Case")} ${caseRef.value}`} subtitle={t("Inspect the case, evidence, identifiers and maker-checker resolution path.")}>(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => router.push({ name: "OperatorCases" })}>
                                 {t("Back")}
@@ -779,8 +776,7 @@ const OperatorCaseDetailPage = dc(() => {
                                 </>
                             )}
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />

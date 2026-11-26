@@ -1,4 +1,5 @@
-import { defineComponent, type PropType, type VNode } from "vue";
+import { type PropType, type VNode } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VIcon } from "vuetify/components";
 import type { Panel } from "@/content/academy";

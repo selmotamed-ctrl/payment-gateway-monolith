@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "vuetify";
@@ -573,13 +573,7 @@ const ApplicationsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Applications")}
-                    subtitle={t("Merchant applications, their payment links and POS terminals: allowlists, tokens and containment.")}
-                    badge={t("Commerce")}
-                    badgeTone="info"
-                    end={() => <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>}
-                />
+                <PageHeader title={t("Applications")} subtitle={t("Merchant applications, their payment links and POS terminals: allowlists, tokens and containment.")} badge={t("Commerce")} badgeTone="info"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn></PageHeader>
 
                 {notice.value && <ApprovalSubmittedNotice approvalRequestId={notice.value.approvalRequestId} onDismiss={() => (notice.value = null)} />}
 

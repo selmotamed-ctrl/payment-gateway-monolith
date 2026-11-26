@@ -1,10 +1,12 @@
+import ThemedView from "@/components/ThemedView/index";
+import Card from "@/components/Card/index";
 import { defaultNumberOfItemsPerPageChoicesWithAll } from "@/components/Table/types";
 import { urlsMap } from "@/constants/urlsMap";
 import { t } from "@/plugins/localization";
 import { api } from "@/state/api";
 import { rules } from "@/utils/clientValidationRules";
 import { extractApiError, UnknownError, type ApiError } from "@/utils/errors/extractor";
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { ref, computed } from "vue";
 import {
     VChip,
@@ -23,7 +25,7 @@ import {
     VExpandTransition,
     VTooltip,
 } from "vuetify/components";
-import { useTheme } from "vuetify";
+import { useTheme } from "@/utils/vuetify-compat";
 import Checkbox from "@/components/Checkbox";
 import { ThemedText } from "@/components/ThemedText";
 import { clip } from "@/utils/common";

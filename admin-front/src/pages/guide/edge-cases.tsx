@@ -1,4 +1,5 @@
-import { computed, defineComponent, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useRoute } from "vue-router";
 import { PageHeader } from "@/components/ui/PageHeader";
 import ScreenContainer from "@/components/ScreenContainer";

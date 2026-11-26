@@ -1,4 +1,4 @@
-import { defineComponent } from "vue";
+import { defineComponent } from "@/utils/dc";
 
 export const ReadToggle = defineComponent({
     name: "ReadToggle",

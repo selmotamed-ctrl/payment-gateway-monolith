@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { VAlert, VBtn, VSelect, VTextField } from "vuetify/components";
@@ -595,12 +595,7 @@ const SystemBackupsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Backup management")}
-                    subtitle={t("Monitor WAL archiving, storage target health, backups, and restore drills.")}
-                    badge={t("Disaster recovery")}
-                    badgeTone="info"
-                    end={() => (
+                <PageHeader title={t("Backup management")} subtitle={t("Monitor WAL archiving, storage target health, backups, and restore drills.")} badge={t("Disaster recovery")} badgeTone="info">(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             <VBtn
                                 variant="tonal"
@@ -642,8 +637,7 @@ const SystemBackupsPage = dc(() => {
                                 </VBtn>
                             )}
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />

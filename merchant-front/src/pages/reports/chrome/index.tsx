@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
@@ -312,10 +312,7 @@ const Page = dc(() => {
   return () => (
     <ScreenContainer>
       <ThemedView style={{ gap: "18px" }}>
-        <PageHeader
-          title={t("Report Branding")}
-          subtitle={t("Upload a logo and add your company name to your reports")}
-          end={() => (
+        <PageHeader title={t("Report Branding")} subtitle={t("Upload a logo and add your company name to your reports")}>(
             <div class="d-flex flex-wrap ga-2">
               <VBtn variant="tonal" prependIcon="mdi-alert-decagram-outline" onClick={() => void router.push({ name: "MerchantReportsChromeNeedsMigration" })}>
                 {t("Needs Migration")}
@@ -324,8 +321,7 @@ const Page = dc(() => {
                 {t("Download branding transcript")}
               </VBtn>
             </div>
-          )}
-        />
+          )</PageHeader>
 
         {migrationOpen.value && editingRow.value && (
           <VAlert type="warning" variant="tonal">

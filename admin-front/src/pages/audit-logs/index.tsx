@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useLocale } from "vuetify";
@@ -365,16 +365,12 @@ const AuditLogsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Audit Log")}
-                    subtitle={t("Immutable operator and system activity across the platform.")}
-                    end={() => (
+                <PageHeader title={t("Audit Log")} subtitle={t("Immutable operator and system activity across the platform.")}>(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 <VAlert type="info" variant="tonal">
                     {t("Every privileged action is recorded here. Before and after payloads are read-only and cannot be edited or deleted from the portal.")}

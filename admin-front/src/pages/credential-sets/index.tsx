@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "vuetify";
@@ -574,12 +574,7 @@ const CredentialSetsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Credential Sets")}
-                    subtitle={t("Provider credentials held in the vault. Secrets are write-only and are never displayed.")}
-                    badge={t("Vault")}
-                    badgeTone="info"
-                    end={() => (
+                <PageHeader title={t("Credential Sets")} subtitle={t("Provider credentials held in the vault. Secrets are write-only and are never displayed.")} badge={t("Vault")} badgeTone="info">(
                         <>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshTable}>
                                 {t("Refresh")}
@@ -590,8 +585,7 @@ const CredentialSetsPage = dc(() => {
                                 </VBtn>
                             )}
                         </>
-                    )}
-                />
+                    )</PageHeader>
                 <ApiTable<CredentialRow>
                     title={t("Credential sets")}
                     url={urlsMap.credentialSetsList}

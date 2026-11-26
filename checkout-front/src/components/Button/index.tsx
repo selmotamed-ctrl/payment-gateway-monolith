@@ -1,5 +1,7 @@
-import { dc } from "kt-dc";
-import _Button from "../_Button/index.vue";
+import ThemedView from "@/components/ThemedView/index";
+import { createSlot } from "vue";
+import { dc } from "@/utils/dc";
+import _Button from "../_Button/index";
 import { VIcon } from "vuetify/components";
 import { useLocale } from "vuetify";
 
@@ -40,14 +42,13 @@ const Button = dc(
                                 </ThemedView>
                             </>
                         )}
-                        {slots.default?.()}
+                        {createSlot("default")}
                     </_Button>
                 </>
             );
 
             const href = attrs.href;
-            if (typeof href == "string" && !!href) {
-                return (
+            return (typeof href == "string" && !!href ? (
                     <a
                         onClick={(e) => {
                             if (attrs.onClick) {
@@ -82,13 +83,10 @@ const Button = dc(
                                     </ThemedView>
                                 </>
                             )}
-                            {slots.default?.()}
+                            {createSlot("default")}
                         </_Button>
                     </a>
-                );
-            }
-
-            return main;
+                ) : main);
         };
     },
 );

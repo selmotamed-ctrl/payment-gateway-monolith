@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
@@ -615,19 +615,13 @@ const AdjustmentsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Adjustments")}
-                    subtitle={t("Draft and review adjustments under maker-checker governance. Every adjustment requires independent finance approval before execution.")}
-                    badge={t("Four-Eyes Required")}
-                    badgeTone="warning"
-                    end={() => (
+                <PageHeader title={t("Adjustments")} subtitle={t("Draft and review adjustments under maker-checker governance. Every adjustment requires independent finance approval before execution.")} badge={t("Four-Eyes Required")} badgeTone="warning">(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                             <VBtn color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("Propose")}</VBtn>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 <VAlert type="info" variant="tonal">
                     {t("Every adjustment is a draft plus an approval request. Money moves only after a different finance checker approves it.")}

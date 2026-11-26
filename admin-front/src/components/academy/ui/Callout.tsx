@@ -1,4 +1,5 @@
-import { computed, defineComponent, type PropType } from "vue";
+import { computed, type PropType, createSlot } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VIcon } from "vuetify/components";
 
 export type CalloutTone = "neutral" | "info" | "success" | "warning" | "danger";
@@ -34,7 +35,7 @@ export const Callout = defineComponent({
                 <VIcon class="ac-callout__icon" icon={props.icon || ICON[props.tone]} size={18} aria-hidden="true" />
                 <div class="ac-callout__body">
                     {props.title ? <strong class="ac-callout__title">{props.title}</strong> : null}
-                    {slots.default?.()}
+                    {createSlot("default")}
                 </div>
             </div>
         );

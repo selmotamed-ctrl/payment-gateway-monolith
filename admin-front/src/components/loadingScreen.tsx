@@ -1,4 +1,5 @@
-import { dc } from "kt-dc";
+import ThemedView from "@/components/ThemedView/index";
+import { dc } from "@/utils/dc";
 import ScreenContainer from "./ScreenContainer";
 import { VProgressCircular } from "vuetify/components";
 import { useLocale } from "vuetify";

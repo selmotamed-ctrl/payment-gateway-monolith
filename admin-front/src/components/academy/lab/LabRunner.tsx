@@ -1,4 +1,5 @@
-import { computed, defineComponent, nextTick, reactive, ref, watch, type PropType } from "vue";
+import { computed, nextTick, reactive, ref, watch, type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VBtn, VIcon } from "vuetify/components";
 import type { Lab, LabTask } from "@/content/academy";

@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
@@ -457,10 +457,7 @@ const GatewayWizardPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Gateway Wizard")}
-                    subtitle={t("Eight steps from identity to a governed live release.")}
-                    end={() => (
+                <PageHeader title={t("Gateway Wizard")} subtitle={t("Eight steps from identity to a governed live release.")}>(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
                             {gatewayCode.value && <MonoRef value={gatewayCode.value} />}
                             {versionNumber.value !== null && (
@@ -473,8 +470,7 @@ const GatewayWizardPage = dc(() => {
                                 {dirty.value ? t("Unsaved changes") : `${t("Step")} ${step.value} ${t("of Steps")} ${STEPS.length}`}
                             </MetaPill>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />

@@ -1,4 +1,5 @@
-import { defineComponent, ref, watch, type PropType } from "vue";
+import { ref, watch, type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VRadio, VRadioGroup } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { FormModal } from "@/components/ui";

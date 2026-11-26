@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
@@ -66,7 +66,7 @@ const SandboxApplicationDetailPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={detail.value?.application.name ?? t("Sandbox Application")} subtitle={detail.value?.application.id ?? applicationId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Applications"), to: "/sandbox/applications" }, { label: detail.value?.application.name ?? applicationId() }]} end={() => <VBtn variant="tonal" onClick={() => void router.push("/sandbox/applications")}>{t("Back")}</VBtn>} />
+            <PageHeader title={detail.value?.application.name ?? t("Sandbox Application")} subtitle={detail.value?.application.id ?? applicationId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Applications"), to: "/sandbox/applications" }, { label: detail.value?.application.name ?? applicationId() }]}><VBtn variant="tonal" onClick={() => void router.push("/sandbox/applications")}>{t("Back")}</VBtn></PageHeader>
             <SandboxBanner />
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             <StateView loading={loading.value} minHeight="200px">

@@ -1,4 +1,5 @@
-import { defineComponent, type VNodeChild } from "vue";
+import { type VNodeChild, createSlot } from "vue";
+import { defineComponent } from "@/utils/dc";
 
 export const WizardSection = defineComponent({
     name: "WizardSection",
@@ -61,7 +62,7 @@ export const WizardSection = defineComponent({
                         )}
                     </div>
                 )}
-                {slots.default?.()}
+                {createSlot("default")}
             </section>
         );
     },

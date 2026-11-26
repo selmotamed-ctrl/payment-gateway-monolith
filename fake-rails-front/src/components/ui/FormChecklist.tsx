@@ -1,4 +1,5 @@
-import { defineComponent, type PropType, type VNodeChild } from "vue";
+import { type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VCheckbox } from "vuetify/components";
 import { useLocale } from "vuetify";
 
@@ -24,8 +25,7 @@ export const FormChecklist = defineComponent({
             emit("update:modelValue", { ...props.modelValue, [key]: Boolean(value) });
         };
         return (): VNodeChild => {
-            if (!props.show || props.checks.length === 0) return null;
-            return (
+            return (!props.show || props.checks.length === 0 ? null : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                     {props.title && (
                         <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--pg-ink-primary)" }}>
@@ -46,7 +46,7 @@ export const FormChecklist = defineComponent({
                         <div style={{ fontSize: "11px", color: "var(--pg-ink-muted)" }}>{props.incompleteMessage}</div>
                     )}
                 </div>
-            );
+            ));
         };
     },
 });

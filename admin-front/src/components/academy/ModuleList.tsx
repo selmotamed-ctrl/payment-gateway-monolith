@@ -1,5 +1,6 @@
-import { defineComponent, type PropType } from "vue";
-import { RouterLink } from "vue-router";
+import { type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
+import { RouterLink } from "vue-router/experimental/vapor";
 import { useLocale } from "vuetify";
 import { MetaPill } from "@/components/ui/MetaPill";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";

@@ -1,6 +1,8 @@
-import { dc } from "kt-dc";
+import ThemedView from "@/components/ThemedView/index";
+import { dc } from "@/utils/dc";
 import LogoSvg from "@/assets/images/logo.svg";
-import { useLocale, useTheme } from "vuetify";
+import { useLocale } from "vuetify";
+import { useTheme } from "@/utils/vuetify-compat";
 import { VDivider } from "vuetify/components";
 
 export const PrintHeader = dc(() => {

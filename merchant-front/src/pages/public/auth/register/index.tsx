@@ -1,5 +1,5 @@
 import { GOOGLE_REDIRECT_PATHS, isAllowedIdentityRedirect, parseIdentityHosts } from "@/utils/security/identityRedirect";
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { VAlert, VBtn, VTextField } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { ref } from "vue";
@@ -7,7 +7,7 @@ import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { setLocale } from "@/plugins/localization";
-import { RouterLink } from "vue-router";
+import { RouterLink } from "vue-router/experimental/vapor";
 import { normalizePhone } from "@/utils/arabic";
 import AuthLayout from "@/layouts/auth";
 import { FormField } from "@/components/ui/FormField";

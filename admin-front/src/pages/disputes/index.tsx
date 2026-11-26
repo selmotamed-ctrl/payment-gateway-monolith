@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
@@ -673,18 +673,12 @@ const DisputesPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Disputes")}
-                    subtitle={t("Track chargeback disputes, evidence deadlines, and adjustment linkage. No money moves until a finance checker approves the adjustment.")}
-                    badge={t("Chargebacks")}
-                    badgeTone="info"
-                    end={() => (
+                <PageHeader title={t("Disputes")} subtitle={t("Track chargeback disputes, evidence deadlines, and adjustment linkage. No money moves until a finance checker approves the adjustment.")} badge={t("Chargebacks")} badgeTone="info">(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 <VAlert type="info" variant="tonal">
                     {t("A dispute creates a chargeback adjustment draft. No money moves until a finance checker approves it. Submit evidence before the due date.")}

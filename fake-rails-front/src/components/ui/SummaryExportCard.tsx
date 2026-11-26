@@ -1,4 +1,5 @@
-import { defineComponent, type PropType, type VNodeChild } from "vue";
+import { type PropType, type VNodeChild, createSlot } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VBtn } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { MetricStrip, type MetricItem } from "./MetricStrip";
@@ -51,7 +52,7 @@ export const SummaryExportCard = defineComponent({
                         incompleteMessage={t("Complete all summary export checklist items before exporting")}
                     />
                     <MetricStrip items={props.metrics} />
-                    {slots.default?.()}
+                    {createSlot("default")}
                 </div>
             </SurfaceCard>
         );

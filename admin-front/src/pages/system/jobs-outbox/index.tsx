@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "vuetify";
@@ -455,12 +455,7 @@ const JobsOutboxPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("System Jobs & Outbox")}
-                    subtitle={t("Delivery health of the transactional outbox, the audit outbox, background jobs and notifications.")}
-                    badge={t("Operations")}
-                    badgeTone="info"
-                    end={() => (
+                <PageHeader title={t("System Jobs & Outbox")} subtitle={t("Delivery health of the transactional outbox, the audit outbox, background jobs and notifications.")} badge={t("Operations")} badgeTone="info">(
                         <>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>
                                 {t("Refresh")}
@@ -469,8 +464,7 @@ const JobsOutboxPage = dc(() => {
                                 {t("Copy monitor summary")}
                             </VBtn>
                         </>
-                    )}
-                />
+                    )</PageHeader>
                 {summary.value && <MetricStrip items={metricItems.value} />}
                 <SegmentedTabs
                     modelValue={tab.value}

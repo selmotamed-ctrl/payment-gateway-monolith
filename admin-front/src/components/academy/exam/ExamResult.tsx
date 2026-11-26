@@ -1,6 +1,6 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { RouterLink } from "vue-router";
+import { RouterLink } from "vue-router/experimental/vapor";
 import { useLocale } from "vuetify";
 import { VBtn, VIcon } from "vuetify/components";
 import { DescriptionList } from "@/components/ui/DescriptionList";

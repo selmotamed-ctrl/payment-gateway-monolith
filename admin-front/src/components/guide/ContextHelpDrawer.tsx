@@ -1,4 +1,5 @@
-import { computed, defineComponent, onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
 import { VNavigationDrawer } from "vuetify/components";
 import {

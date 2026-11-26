@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { VBtn, VSelect, VTextField } from "vuetify/components";
@@ -275,17 +275,11 @@ const WebhooksPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Webhooks")}
-                    subtitle={t("Receive signed notifications when payments, disputes and cash-outs change.")}
-                    end={() =>
-                        canManage.value ? (
+                <PageHeader title={t("Webhooks")} subtitle={t("Receive signed notifications when payments, disputes and cash-outs change.")}>canManage.value ? (
                             <VBtn variant="tonal" onClick={openCreate} disabled={applications.value.length === 0}>
                                 {t("Add Endpoint")}
                             </VBtn>
-                        ) : null
-                    }
-                />
+                        ) : null</PageHeader>
 
                 {shownSecret.value && (
                     <SurfaceCard title={t("Signing Secret")}>
@@ -307,10 +301,7 @@ const WebhooksPage = dc(() => {
                     <DataTable title={t("Webhooks")} data={endpoints.value} headers={endpointHeaders} loading={loading.value} showNumber={true} xlsx={false} noElevation={true} />
                 )}
 
-                <PageHeader
-                    title={t("Deliveries")}
-                    subtitle={t("The latest deliveries. A parked delivery failed every attempt and can be redelivered.")}
-                    end={() => (
+                <PageHeader title={t("Deliveries")} subtitle={t("The latest deliveries. A parked delivery failed every attempt and can be redelivered.")}>(
                         <VSelect
                             modelValue={deliveryFilter.value}
                             onUpdate:modelValue={(value: string | null) => {
@@ -327,8 +318,7 @@ const WebhooksPage = dc(() => {
                             hideDetails
                             style={{ minWidth: "160px" }}
                         />
-                    )}
-                />
+                    )</PageHeader>
                 <DataTable title={t("Deliveries")} data={deliveries.value} headers={deliveryHeaders} loading={deliveriesLoading.value} showNumber={true} xlsx={false} noElevation={true} />
             </ThemedView>
 

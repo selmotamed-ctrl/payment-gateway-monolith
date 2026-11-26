@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
@@ -241,13 +241,7 @@ const Page = dc(() => {
   return () => (
     <ScreenContainer>
       <ThemedView style={{ gap: "18px" }}>
-        <PageHeader
-          title={t("Headers & Footers Needing Migration")}
-          subtitle={t("Platform headers and footers that must be migrated before dependent reports can run")}
-          badge="NEEDS_MIGRATION"
-          badgeLabel={t("Needs migration")}
-          badgeTone="danger"
-          end={() => (
+        <PageHeader title={t("Headers & Footers Needing Migration")} subtitle={t("Platform headers and footers that must be migrated before dependent reports can run")} badge="NEEDS_MIGRATION" badgeLabel={t("Needs migration")} badgeTone="danger">(
             <div class="d-flex flex-wrap ga-2">
               <VBtn variant="tonal" prependIcon="mdi-file-chart-outline" onClick={() => void router.push({ name: "ReportsNeedsMigration" })}>
                 {t("Report migration")}
@@ -261,8 +255,7 @@ const Page = dc(() => {
                 {t("Refresh")}
               </VBtn>
             </div>
-          )}
-        />
+          )</PageHeader>
         {defaultIssues.value.length > 0 && (
           <VAlert type="warning" variant="tonal">
             {defaultIssues.value.join(" · ")}

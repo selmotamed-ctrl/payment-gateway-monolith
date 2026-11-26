@@ -1,4 +1,5 @@
-import { defineComponent, useId, type PropType, type VNodeChild } from "vue";
+import { useId, type PropType, type VNodeChild, createSlot } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VBtn, VDialog } from "vuetify/components";
 import { useLocale } from "vuetify";
 
@@ -59,7 +60,7 @@ export const FormModal = defineComponent({
                                 {props.errorMessage}
                             </div>
                         )}
-                        {slots.default?.()}
+                        {createSlot("default")}
                     </div>
                     {slots.footer ? (
                         <div

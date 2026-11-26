@@ -1,6 +1,7 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
-import { useLocale, useTheme } from "vuetify";
+import { useLocale } from "vuetify";
+import { useTheme } from "@/utils/vuetify-compat";
 import { useRoute, useRouter } from "vue-router";
 import { areChecklistsVisible } from "@/constants/env";
 import { VAlert, VBtn, VSelect, VTextField } from "vuetify/components";
@@ -656,18 +657,14 @@ const RoutesPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Routes")}
-                    subtitle={t("Routing priority, limits, and circuit-breaker health.")}
-                    end={() => (
+                <PageHeader title={t("Routes")} subtitle={t("Routing priority, limits, and circuit-breaker health.")}>(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                             <VBtn color="primary" variant="flat" prependIcon={"mdi-plus"} onClick={() => void openCreateRoute()}>
                                 {t("Add Route")}
                             </VBtn>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 <VAlert type="info" variant="tonal">
                     {t("A route binds a rail to a gateway. Health and circuit-breaker state are operational facts, not editable fields.")}

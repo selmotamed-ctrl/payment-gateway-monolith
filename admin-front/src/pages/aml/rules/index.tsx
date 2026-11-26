@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
@@ -468,19 +468,13 @@ const AmlRulesPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("AML Rules")}
-                    subtitle={t("Manage AML rule versions and thresholds through maker-checker approval.")}
-                    badge="AML-CONFIDENTIAL"
-                    badgeTone="danger"
-                    end={() => tab.value !== "rules" ? null : (
+                <PageHeader title={t("AML Rules")} subtitle={t("Manage AML rule versions and thresholds through maker-checker approval.")} badge="AML-CONFIDENTIAL" badgeTone="danger">tab.value !== "rules" ? null : (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                             <VBtn color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("Draft rule")}</VBtn>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
                 <SegmentedTabs
                     modelValue={tab.value}
                     onUpdate:modelValue={(value: string) => (tab.value = value === "reporting" ? "reporting" : "rules")}

@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "vuetify";
@@ -506,12 +506,7 @@ const WalletDetailPage = dc(() => {
         return (
             <ScreenContainer>
                 <ThemedView style={{ gap: "18px" }}>
-                    <PageHeader
-                        title={title}
-                        subtitle={current ? `${t("Wallet")} · ${current.currency}` : ""}
-                        badge={current ? current.status.replaceAll("_", " ") : ""}
-                        badgeTone={current ? toBadgeTone(current.status) : "neutral"}
-                        end={() => (
+                    <PageHeader title={title} subtitle={current ? `${t("Wallet")} · ${current.currency}` : ""} badge={current ? current.status.replaceAll("_", " ") : ""} badgeTone={current ? toBadgeTone(current.status) : "neutral"}>(
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                 {actions.value.map((action) => (
                                     <VBtn
@@ -534,8 +529,7 @@ const WalletDetailPage = dc(() => {
                                 <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={refreshAll}>{t("Refresh")}</VBtn>
                                 <VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!current} onClick={() => void copyWalletSummary()}>{t("Copy summary")}</VBtn>
                             </ThemedView>
-                        )}
-                    />
+                        )</PageHeader>
 
                     {error.value ? (
                         <StateView error={error.value} onRetry={() => void load(walletId.value)} />

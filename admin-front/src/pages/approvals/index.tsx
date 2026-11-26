@@ -1,6 +1,7 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { useLocale, useTheme } from "vuetify";
+import { useLocale } from "vuetify";
+import { useTheme } from "@/utils/vuetify-compat";
 import { useRouter } from "vue-router";
 import { VAlert, VBtn, VCheckbox, VProgressCircular, VSelect, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
@@ -783,18 +784,12 @@ const ApprovalsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Approvals")}
-                    subtitle={t("Review maker-checker requests, inspect the proposed diff and decide with an independent check.")}
-                    badge={summary.value ? `${summary.value.totalPending} ${t("Pending")}` : t("Four eyes")}
-                    badgeTone={summary.value && summary.value.totalPending > 0 ? "warning" : "success"}
-                    end={() => (
+                <PageHeader title={t("Approvals")} subtitle={t("Review maker-checker requests, inspect the proposed diff and decide with an independent check.")} badge={summary.value ? `${summary.value.totalPending} ${t("Pending")}` : t("Four eyes")} badgeTone={summary.value && summary.value.totalPending > 0 ? "warning" : "success"}>(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 <VAlert type="info" variant="tonal">
                     {t("Maker and checker must always be different people. Read the diff before deciding. All decisions are audited.")}

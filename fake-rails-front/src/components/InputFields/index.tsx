@@ -1,4 +1,5 @@
-import { computed, defineComponent, onMounted, ref, type PropType, type VNodeChild } from "vue";
+import { computed, onMounted, ref, type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VAutocomplete, VFileInput, VSelect, VSwitch, VTextarea, VTextField } from "vuetify/components";
 import { api } from "@/utils/api";

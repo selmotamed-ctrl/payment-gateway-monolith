@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
@@ -1236,10 +1236,7 @@ const GatewayAiImportPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Smart AI Integration")}
-                    subtitle={t("Verify an AI-generated gateway specification before binding live secrets.")}
-                    end={() => (
+                <PageHeader title={t("Smart AI Integration")} subtitle={t("Verify an AI-generated gateway specification before binding live secrets.")}>(
                         <div class="d-flex flex-wrap ga-2">
                             <VBtn variant="text" prependIcon="mdi-restart" onClick={() => void startOver()}>
                                 {t("Start over")}
@@ -1252,8 +1249,7 @@ const GatewayAiImportPage = dc(() => {
                                 {t("Back to Gateways")}
                             </VBtn>
                         </div>
-                    )}
-                />
+                    )</PageHeader>
 
                 <VAlert type="info" variant="tonal">
                     <ThemedView style={{ gap: "4px" }}>

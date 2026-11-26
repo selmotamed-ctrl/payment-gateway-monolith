@@ -1,4 +1,5 @@
-import { defineComponent, type PropType, type VNodeChild } from "vue";
+import { type PropType, type VNodeChild, createSlot } from "vue";
+import { defineComponent } from "@/utils/dc";
 import type { BadgeTone } from "./StatusBadge";
 
 const TONE_STYLES: Record<BadgeTone, { bg: string; border: string }> = {
@@ -95,7 +96,7 @@ export const SurfaceCard = defineComponent({
                             gap: props.bodyGap || undefined,
                         }}
                     >
-                        {slots.default?.()}
+                        {createSlot("default")}
                     </div>
                     {slots.footer && (
                         <div
@@ -121,7 +122,7 @@ export const SurfaceCard = defineComponent({
 export const SurfaceCardText = defineComponent({
     name: "SurfaceCardText",
     setup(_, { slots }) {
-        return (): VNodeChild => <div style={{ padding: 0 }}>{slots.default?.()}</div>;
+        return (): VNodeChild => <div style={{ padding: 0 }}>{createSlot("default")}</div>;
     },
 });
 

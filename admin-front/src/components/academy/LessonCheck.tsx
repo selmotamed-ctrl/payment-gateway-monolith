@@ -1,4 +1,5 @@
-import { computed, defineComponent, ref, type PropType } from "vue";
+import { computed, ref, type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
 import { useLocale } from "vuetify";
 import { VIcon } from "vuetify/components";
@@ -29,7 +30,7 @@ export const LessonCheck = defineComponent({
         titles: { type: Object as PropType<Record<string, string>>, default: () => ({}) },
     },
     emits: { answered: (_firstTry: boolean) => true },
-    setup(props, { emit }) {
+    setup(props: { question: Question; index: number; total: number; titles: Record<string, string> }, { emit }) {
         const { t } = useLocale();
         const router = useRouter();
         const options = computed(() => shuffle(props.question.options));

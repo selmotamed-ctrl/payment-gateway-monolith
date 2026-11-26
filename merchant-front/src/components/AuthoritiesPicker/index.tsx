@@ -1,5 +1,5 @@
 import { t } from "@/plugins/localization";
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { ref, computed } from "vue";
 import { VBtn, VDivider, VExpandTransition, VIcon, VTextField, VTooltip } from "vuetify/components";
 import { ThemedText } from "@/components/ThemedText";

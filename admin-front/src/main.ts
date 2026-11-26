@@ -2,29 +2,20 @@
   return this.toString();
 };
 
-
 import { registerPlugins } from "@/plugins";
 import { initTheme } from "@/state/theme";
 
-import { createApp } from "vue";
+import { createVaporApp, vaporInteropPlugin } from "vue";
 import App from "./App";
 
 import "@/assets/fonts/fonts.css";
-import '@vuepic/vue-datepicker/dist/main.css';
 import "@/styles/fintech-minimal.css";
 import "@/styles/command-palette.css";
 import "@/styles/guide.css";
 import "@/styles/academy/index.css";
 
-
-import { VueDatePicker } from '@vuepic/vue-datepicker';
-
-
-const app = createApp(App);
-
+const app = createVaporApp(App);
+app.use(vaporInteropPlugin);
 registerPlugins(app);
 initTheme();
-
-app.component('VueDatePicker',VueDatePicker)
-
 app.mount("#app");

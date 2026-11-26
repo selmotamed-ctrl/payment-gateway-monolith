@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import { VAlert, VDivider } from "vuetify/components";

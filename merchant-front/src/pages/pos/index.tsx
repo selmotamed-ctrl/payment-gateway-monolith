@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
@@ -174,10 +174,7 @@ const PosTerminalsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("POS Terminals")}
-                    subtitle={t("Point-of-sale terminals and payment screens.")}
-                    end={() => (
+                <PageHeader title={t("POS Terminals")} subtitle={t("Point-of-sale terminals and payment screens.")}>(
                         <VBtn
                             variant="tonal"
                             onClick={() => {
@@ -188,8 +185,7 @@ const PosTerminalsPage = dc(() => {
                         >
                             {t("Create")}
                         </VBtn>
-                    )}
-                />
+                    )</PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />

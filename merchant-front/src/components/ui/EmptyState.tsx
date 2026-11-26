@@ -1,4 +1,5 @@
-import { defineComponent, type PropType, type VNodeChild } from "vue";
+import { type PropType, type VNodeChild, createSlot } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VBtn, VIcon } from "vuetify/components";
 
 export const EmptyState = defineComponent({
@@ -53,7 +54,7 @@ export const EmptyState = defineComponent({
                         {props.description}
                     </div>
                 )}
-                {slots.default?.()}
+                {createSlot("default")}
                 {props.actionLabel && (
                     <VBtn
                         size="small"

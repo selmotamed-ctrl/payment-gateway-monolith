@@ -1,4 +1,5 @@
-import { defineComponent, type PropType } from "vue";
+import { type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import type { ChecklistTask as ChecklistTaskType } from "@/content/academy";
 import type { ChecklistAnswer } from "../labScoring";

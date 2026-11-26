@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "vuetify";
@@ -497,17 +497,11 @@ const TransactionsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Transactions")}
-                    subtitle={t("Every payment attempt and provider callback across all merchants.")}
-                    badge={t("Operations")}
-                    badgeTone="info"
-                    end={() => (
+                <PageHeader title={t("Transactions")} subtitle={t("Every payment attempt and provider callback across all merchants.")} badge={t("Operations")} badgeTone="info">(
                         <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>
                             {t("Refresh")}
                         </VBtn>
-                    )}
-                />
+                    )</PageHeader>
                 <SegmentedTabs
                     modelValue={tab.value}
                     onUpdate:modelValue={(value: string) => (tab.value = value as TabKey)}

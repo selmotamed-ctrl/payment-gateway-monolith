@@ -1,5 +1,5 @@
-import { defineComponent } from "vue";
-import { RouterLink } from "vue-router";
+import { defineComponent } from "@/utils/dc";
+import { RouterLink } from "vue-router/experimental/vapor";
 
 /** The high-visibility Sandbox frame shown on every `/sandbox/*` page. */
 export const SandboxBanner = defineComponent({

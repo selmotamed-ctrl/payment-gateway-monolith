@@ -1,4 +1,5 @@
-import { defineComponent, type PropType, type VNodeChild } from "vue";
+import { type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VIcon } from "vuetify/components";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { splitHighlightSegments } from "./highlight";

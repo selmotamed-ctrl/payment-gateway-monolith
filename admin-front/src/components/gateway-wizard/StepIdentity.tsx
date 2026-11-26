@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VSelect, VTextField } from "vuetify/components";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";

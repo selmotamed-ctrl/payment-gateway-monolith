@@ -1,7 +1,7 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { VBtn } from "vuetify/components";
 import { useLocale } from "vuetify";
-import { RouterLink } from "vue-router";
+import { RouterLink } from "vue-router/experimental/vapor";
 
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 const NotFoundPage = dc(() => {

@@ -1,5 +1,5 @@
-import { dc } from "kt-dc";
-import { RouterLink } from "vue-router";
+import { dc } from "@/utils/dc";
+import { RouterLink } from "vue-router/experimental/vapor";
 import { useLocale } from "vuetify";
 import { VBtn, VIcon } from "vuetify/components";
 import LogoSvg from "@/assets/images/logo.svg";

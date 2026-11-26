@@ -1,6 +1,6 @@
 import "./styles/globals/app.scss";
-import { RouterView } from "vue-router";
-import { dc } from "kt-dc";
+import { RouterView } from "vue-router/experimental/vapor";
+import { dc } from "@/utils/dc";
 import { confirmDialogInstance } from "./utils/confirm";
 import { AwaitedConfirmationDialog } from "./components/ConfirmDialog";
 import { snackBarInstance } from "./utils/snackBar";

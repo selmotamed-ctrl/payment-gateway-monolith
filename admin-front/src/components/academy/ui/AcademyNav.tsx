@@ -1,5 +1,7 @@
-import { computed, defineComponent } from "vue";
-import { RouterLink, useRoute } from "vue-router";
+import { computed } from "vue";
+import { defineComponent } from "@/utils/dc";
+import { useRoute } from "vue-router";
+import { RouterLink } from "vue-router/experimental/vapor";
 import { useLocale } from "vuetify";
 
 /** Which of the four sections a route belongs to (sub-pages keep their section lit). */

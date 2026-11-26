@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
@@ -529,18 +529,12 @@ const CashoutsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Cash-Outs")}
-                    subtitle={t("Review and process merchant cash-out requests with wallet, destination, and AML checks.")}
-                    badge={t("Payouts")}
-                    badgeTone="info"
-                    end={() => (
+                <PageHeader title={t("Cash-Outs")} subtitle={t("Review and process merchant cash-out requests with wallet, destination, and AML checks.")} badge={t("Payouts")} badgeTone="info">(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 <VAlert type="info" variant="tonal">
                     {t("A cash-out moves money only when a finance checker approves it. Pending requests show the current wallet balance and the masked destination.")}

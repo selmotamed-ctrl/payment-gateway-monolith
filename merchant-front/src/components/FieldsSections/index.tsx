@@ -1,7 +1,7 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { Field, type FieldProps } from "../Field";
 import { VDivider } from "vuetify/components";
-import { useDisplay } from "vuetify";
+import { useDisplay } from "@/utils/vuetify-compat";
 import { ThemedView } from "../ThemedView";
 
 const FieldsSections = dc(

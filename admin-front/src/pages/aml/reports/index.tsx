@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
@@ -796,19 +796,13 @@ const AmlReportsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("AML Reports")}
-                    subtitle={t("Draft, approve, submit, and acknowledge regulatory reports under restricted access.")}
-                    badge="AML-CONFIDENTIAL"
-                    badgeTone="danger"
-                    end={() => (
+                <PageHeader title={t("AML Reports")} subtitle={t("Draft, approve, submit, and acknowledge regulatory reports under restricted access.")} badge="AML-CONFIDENTIAL" badgeTone="danger">(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                             <VBtn color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("Draft report")}</VBtn>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
                 <VAlert type="error" variant="tonal">
                     {t("AML-CONFIDENTIAL · Regulatory reports are restricted to Compliance, MLRO and authorised reporting roles. Never disclose an STR or its existence to the subject.")}
                 </VAlert>

@@ -1,4 +1,5 @@
-import { defineComponent, type PropType } from "vue";
+import { type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import type { TrackId } from "@/content/academy";

@@ -1,4 +1,5 @@
-import { computed, defineComponent, onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VBtn, VIcon } from "vuetify/components";
 import { AcademyShell, Skeleton } from "@/components/academy/AcademyShell";
@@ -43,15 +44,11 @@ export const AdminAcademyHelpPage = defineComponent({
             }
         };
         const header = () => (
-            <PageHeader
-                title={t("Help")}
-                subtitle={t("How the Academy works, how scoring works, and common questions.")}
-                end={() => (
+            <PageHeader title={t("Help")} subtitle={t("How the Academy works, how scoring works, and common questions.")}>(
                     <VBtn variant="tonal" prependIcon="mdi-link-variant" onClick={() => void copyHelpLink()}>
                         {linkCopied.value ? t("Link copied") : t("Copy help link")}
                     </VBtn>
-                )}
-            />
+                )</PageHeader>
         );
 
         const rail = () => (

@@ -1,4 +1,5 @@
-import { computed, defineComponent, ref, type VNodeChild } from "vue";
+import { computed, ref, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VAlert, VBtn } from "vuetify/components";
 import { areChecklistsVisible } from "@/constants/env";
 import { useLocale } from "vuetify";

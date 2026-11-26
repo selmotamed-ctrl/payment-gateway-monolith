@@ -1,4 +1,5 @@
-import { computed, defineComponent, onMounted, reactive, watch, type PropType } from "vue";
+import { computed, onMounted, reactive, watch, type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import {
   VAutocomplete,
@@ -448,14 +449,11 @@ export const ReportInputForm = defineComponent({
 
     return () => {
       const grouped = sections.value;
-      if (grouped.length === 0) {
-        return (
+      return (grouped.length === 0 ? (
           <div class="pg-report-form">
             <div class="pg-report-empty">{t("This report has no parameters.")}</div>
           </div>
-        );
-      }
-      return (
+        ) : (
         <div class="pg-report-form">
           {grouped.map((section) => (
             <section class="pg-report-section" key={section.id}>
@@ -471,7 +469,7 @@ export const ReportInputForm = defineComponent({
             </section>
           ))}
         </div>
-      );
+      ));
     };
   },
 });

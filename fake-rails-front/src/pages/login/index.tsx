@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useRouter } from "vue-router";
 import { VAlert, VBtn, VTextField } from "vuetify/components";

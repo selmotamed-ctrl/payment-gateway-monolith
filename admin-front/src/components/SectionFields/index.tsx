@@ -1,4 +1,5 @@
-import { defineComponent, type PropType, type VNodeChild } from "vue";
+import { type PropType, type VNodeChild, createSlot } from "vue";
+import { defineComponent } from "@/utils/dc";
 
 export const SectionFields = defineComponent({
     name: "SectionFields",
@@ -10,8 +11,7 @@ export const SectionFields = defineComponent({
     },
     setup(props, { slots }) {
         return (): VNodeChild => {
-            if (props.layout === "split") {
-                return (
+            return (props.layout === "split" ? (
                     <section
                         style={{
                             display: "grid",
@@ -38,16 +38,13 @@ export const SectionFields = defineComponent({
                         <div class="pg-section-fields" style={{ marginBottom: 0 }}>
                             <div class="pg-section-fields__body">
                                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px 20px" }}>
-                                    {slots.default?.()}
+                                    {createSlot("default")}
                                 </div>
                             </div>
                             {slots.footer && <div class="pg-section-fields__footer">{slots.footer()}</div>}
                         </div>
                     </section>
-                );
-            }
-
-            return (
+                ) : (
                 <section class="pg-section-fields">
                     {(props.title || slots.headerActions) && (
                         <div class="pg-section-fields__header">
@@ -75,12 +72,12 @@ export const SectionFields = defineComponent({
                                 alignItems: "start",
                             }}
                         >
-                            {slots.default?.()}
+                            {createSlot("default")}
                         </div>
                     </div>
                     {slots.footer && <div class="pg-section-fields__footer">{slots.footer()}</div>}
                 </section>
-            );
+            ));
         };
     },
 });

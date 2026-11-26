@@ -1,8 +1,8 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { ref, watch } from "vue";
 import { Field, type FieldProps } from "../Field";
 import { VDivider, VIcon } from "vuetify/components";
-import { useDisplay, useTheme } from "vuetify";
+import { useDisplay, useTheme } from "@/utils/vuetify-compat";
 import { ThemedView } from "../ThemedView";
 import { ThemedText } from "../ThemedText";
 import type { SectionCommand } from "../CollapsibleSection";

@@ -1,3 +1,4 @@
+import { ref } from "vue";
 import { DetailsFieldsDialog } from "@/components/detailsFieldsDialog";
 import type { FieldProps } from "@/components/Field";
 

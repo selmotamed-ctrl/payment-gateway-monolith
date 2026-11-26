@@ -1,4 +1,5 @@
-import { defineComponent, ref } from "vue";
+import { ref } from "vue";
+import { defineComponent } from "@/utils/dc";
 import {
     COMMON_SIGNATURE_FAILURES,
     hmacSha256,

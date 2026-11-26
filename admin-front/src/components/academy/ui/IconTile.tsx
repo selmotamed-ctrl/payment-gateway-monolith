@@ -1,4 +1,5 @@
-import { defineComponent, type PropType } from "vue";
+import { type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VIcon } from "vuetify/components";
 
 /** Rounded square holding one MDI icon (track identity, empty states, certificate seal). */

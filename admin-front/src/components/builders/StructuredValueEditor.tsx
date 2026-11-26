@@ -1,4 +1,5 @@
-import { defineComponent, ref, type PropType, type VNodeChild } from "vue";
+import { ref, type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VBtn, VSelect, VSwitch, VTextField } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { ChipListInput } from "./ChipListInput";

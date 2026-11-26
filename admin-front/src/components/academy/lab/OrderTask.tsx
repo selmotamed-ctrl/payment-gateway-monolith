@@ -1,4 +1,5 @@
-import { defineComponent, nextTick, ref, type PropType } from "vue";
+import { nextTick, ref, type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VBtn } from "vuetify/components";
 import type { OrderTask as OrderTaskType } from "@/content/academy";

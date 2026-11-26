@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
@@ -188,18 +188,12 @@ const FilingAdaptersPage = dc(() => {
     };
     return () => (
         <ScreenContainer>
-            <PageHeader
-                title={t("Filing Adapters")}
-                subtitle={t("Configure the manual or HTTPS channel used to file an approved regulatory report")}
-                badge="AML-CONFIDENTIAL"
-                badgeTone="danger"
-                end={() => (
+            <PageHeader title={t("Filing Adapters")} subtitle={t("Configure the manual or HTTPS channel used to file an approved regulatory report")} badge="AML-CONFIDENTIAL" badgeTone="danger">(
                     <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                         <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => refreshHook.value?.refreshAsIs()}>{t("Refresh")}</VBtn>
                         <VBtn color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("New adapter")}</VBtn>
                     </ThemedView>
-                )}
-            />
+                )</PageHeader>
             <ApiTable<Adapter>
                 title={t("Filing adapter registry")}
                 url={urlsMap.filingAdapters}

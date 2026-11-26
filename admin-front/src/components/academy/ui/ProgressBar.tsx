@@ -1,4 +1,5 @@
-import { computed, defineComponent, type PropType } from "vue";
+import { computed, type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
 
 export type BarTone = "auto" | "info" | "success" | "warning" | "danger";
 

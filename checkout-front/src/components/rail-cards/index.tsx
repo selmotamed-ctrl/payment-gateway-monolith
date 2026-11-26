@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VIcon } from "vuetify/components";
 import { ThemedText } from "@/components/ThemedText";

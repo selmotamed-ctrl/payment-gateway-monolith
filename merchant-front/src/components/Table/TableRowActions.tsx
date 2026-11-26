@@ -1,13 +1,5 @@
-import {
-    computed,
-    defineComponent,
-    nextTick,
-    onBeforeUnmount,
-    onMounted,
-    ref,
-    type PropType,
-    type VNodeChild,
-} from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VIcon, VMenu } from "vuetify/components";
 import { useLocale } from "vuetify";
 

@@ -1,4 +1,5 @@
-import { computed, defineComponent, onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { loadData, type AttemptTransitionsData } from "@/content/guide";
 import {
     applyAttemptEvent,

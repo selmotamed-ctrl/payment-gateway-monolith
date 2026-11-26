@@ -1,6 +1,6 @@
 import { useLocale } from "vuetify";
 import { ThemedView } from "../ThemedView";
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 
 export const SubHeader = dc(
     (props: { title: string; end?: () => JSX.Element }) => {

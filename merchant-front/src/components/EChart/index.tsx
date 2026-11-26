@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import VChart from "vue-echarts";
 import * as echartsCore from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";

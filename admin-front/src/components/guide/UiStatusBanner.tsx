@@ -1,4 +1,5 @@
-import { defineComponent, type PropType } from "vue";
+import { type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
 import type { UiStatus } from "@/content/guide";
 
 export const UiStatusBanner = defineComponent({

@@ -11,9 +11,11 @@ import {
 import { ThemedText } from "../ThemedText";
 import { TableFooter, TableHeader, useTableXlsx } from "./HeaderFooter";
 import { api } from "@/state/api";
-import { useDisplay, useLocale } from "vuetify";
+import { useLocale } from "vuetify";
+import { useDisplay } from "@/utils/vuetify-compat";
 import { VBtn, VProgressCircular } from "vuetify/components";
-import { computed, defineComponent, provide, ref, watch } from "vue";
+import { computed, provide, ref, watch, onMounted, onUnmounted } from "vue";
+import { defineComponent } from "@/utils/dc";
 import type { JsonValue } from "@/utils/common";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";

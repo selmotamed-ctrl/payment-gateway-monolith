@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
 import { VAlert, VCol, VDivider, VRow } from "vuetify/components";
 import PortalLayout from "@/layouts/portal";

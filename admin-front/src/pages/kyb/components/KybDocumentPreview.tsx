@@ -1,5 +1,5 @@
 import { safePreviewMime } from "@/utils/safeBlob";
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { VAlert, VBtn, VProgressCircular } from "vuetify/components";
@@ -76,10 +76,7 @@ const KybDocumentPreview = dc(
         };
 
         return () => {
-            if (!props.document) {
-                return <ThemedText style={{ opacity: 0.6 }}>{t("No document selected")}</ThemedText>;
-            }
-            return (
+            return (!props.document ? <ThemedText style={{ opacity: 0.6 }}>{t("No document selected")}</ThemedText> : (
                 <ThemedView style={{ gap: "10px", width: "100%" }}>
                     <ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
                         <ThemedText type="defaultSemiBold" style={{ fontSize: "14px", flex: 1 }}>
@@ -122,7 +119,7 @@ const KybDocumentPreview = dc(
                         <VAlert type="info" variant="tonal">{t("This file type cannot be rendered inline. Use Open in new tab.")}</VAlert>
                     )}
                 </ThemedView>
-            );
+            ));
         };
     },
     { props: ["document"] },

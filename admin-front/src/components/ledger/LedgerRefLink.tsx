@@ -1,4 +1,5 @@
-import { defineComponent, type VNodeChild } from "vue";
+import { type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VIcon } from "vuetify/components";
 import { useLocale } from "vuetify";
 

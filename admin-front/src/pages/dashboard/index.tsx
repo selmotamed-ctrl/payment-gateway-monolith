@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
@@ -453,10 +453,7 @@ const DashboardPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Dashboard")}
-                    subtitle={t("Live platform health, volume, and operational queues.")}
-                    end={() => (
+                <PageHeader title={t("Dashboard")} subtitle={t("Live platform health, volume, and operational queues.")}>(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             <SegmentedTabs
                                 modelValue={period.value}
@@ -482,8 +479,7 @@ const DashboardPage = dc(() => {
                             )}
                             <MetaPill color="primary" variant="tonal" size="small">{t("Operational")}</MetaPill>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />

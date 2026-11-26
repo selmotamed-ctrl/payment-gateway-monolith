@@ -1,5 +1,7 @@
-import { computed, defineComponent, onMounted, ref } from "vue";
-import { RouterLink, useRoute } from "vue-router";
+import { computed, onMounted, ref } from "vue";
+import { defineComponent } from "@/utils/dc";
+import { useRoute } from "vue-router";
+import { RouterLink } from "vue-router/experimental/vapor";
 import { PageHeader } from "@/components/ui/PageHeader";
 import ScreenContainer from "@/components/ScreenContainer";
 import { useGuideProgress } from "@/components/guide/useGuideProgress";
@@ -69,19 +71,14 @@ export const AdminGuideBookPage = defineComponent({
 
         return () => (
             <ScreenContainer>
-                <PageHeader
-                    title={book.value ? `Book ${book.value.id}: ${book.value.title}` : L("Book not found", "الكتاب غير موجود")}
-                    subtitle={book.value?.audience}
-                    breadcrumbs={[
+                <PageHeader title={book.value ? `Book ${book.value.id}: ${book.value.title}` : L("Book not found", "الكتاب غير موجود")} subtitle={book.value?.audience} breadcrumbs={[
                         { label: L("Guide", "الدليل"), to: "/guide" },
                         { label: book.value ? `Book ${book.value.id}` : String(route.params.bookId) },
-                    ]}
-                    end={() => book.value ? (
+                    ]}>book.value ? (
                         <button type="button" class="guide-secondary-button" onClick={() => void copyBookLink()}>
                             {linkCopied.value ? L("Link copied", "تم نسخ الرابط") : L("Copy link", "نسخ الرابط")}
                         </button>
-                    ) : null}
-                />
+                    ) : null</PageHeader>
                 {loading.value ? (
                     <p class="guide-page-loading">{L("Loading…", "جارٍ التحميل…")}</p>
                 ) : !book.value ? (

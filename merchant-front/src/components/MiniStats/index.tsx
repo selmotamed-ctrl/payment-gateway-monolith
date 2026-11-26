@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
 import type { BadgeTone } from "@/components/ui/StatusBadge";
 

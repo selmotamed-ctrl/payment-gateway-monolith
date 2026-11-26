@@ -1,5 +1,6 @@
-import { dc } from "kt-dc";
-import { useLocale, useTheme } from "vuetify";
+import { dc } from "@/utils/dc";
+import { useLocale } from "vuetify";
+import { useTheme } from "@/utils/vuetify-compat";
 import { VIcon } from "vuetify/components";
 import { PrintableThemedView } from "../PrintableThemedView.tsx";
 

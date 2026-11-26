@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
@@ -148,13 +148,7 @@ const Page = dc(() => {
   return () => (
     <ScreenContainer>
       <ThemedView style={{ gap: "18px" }}>
-        <PageHeader
-          title={t("Needs Migration")}
-          subtitle={t("Migrate your branding header/footer to keep your company name and logo on reports")}
-          badge="NEEDS_MIGRATION"
-          badgeLabel={t("Needs migration")}
-          badgeTone="danger"
-          end={() => (
+        <PageHeader title={t("Needs Migration")} subtitle={t("Migrate your branding header/footer to keep your company name and logo on reports")} badge="NEEDS_MIGRATION" badgeLabel={t("Needs migration")} badgeTone="danger">(
             <div class="d-flex flex-wrap ga-2">
               <VBtn variant="tonal" prependIcon="mdi-palette-outline" onClick={() => void router.push({ name: "MerchantReportsChrome" })}>
                 {t("Report Branding")}
@@ -163,8 +157,7 @@ const Page = dc(() => {
                 {t("Refresh")}
               </VBtn>
             </div>
-          )}
-        />
+          )</PageHeader>
         <ApiTable<Row>
           title={t("Needs migration")}
           url={urlsMap.reportEngineStudioChromeNeedsMigration}

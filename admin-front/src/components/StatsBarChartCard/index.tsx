@@ -1,6 +1,6 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { VCard, VIcon, VProgressCircular } from "vuetify/components";
-import { useDisplay } from "vuetify";
+import { useDisplay } from "@/utils/vuetify-compat";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import colors from "vuetify/util/colors";

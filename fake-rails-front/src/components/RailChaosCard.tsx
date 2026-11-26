@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { VSelect, VSlider, VSwitch, VTextField } from "vuetify/components";
 import { SectionFields } from "@/components/SectionFields";

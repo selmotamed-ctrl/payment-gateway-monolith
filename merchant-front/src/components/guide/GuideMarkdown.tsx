@@ -1,5 +1,5 @@
-import { dc } from "kt-dc";
-import { useTheme } from "vuetify";
+import { dc } from "@/utils/dc";
+import { useTheme } from "@/utils/vuetify-compat";
 import { ThemedView } from "@/components/ThemedView";
 
 type GuideMarkdownProps = {

@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute } from "vue-router";
@@ -446,18 +446,14 @@ const PricingControlsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Pricing & Limits")}
-                    subtitle={t("Commission profiles and velocity controls under four-eyes governance.")}
-                    end={() => (
+                <PageHeader title={t("Pricing & Limits")} subtitle={t("Commission profiles and velocity controls under four-eyes governance.")}>(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
                             <VBtn color="primary" variant="flat" prependIcon="mdi-plus" onClick={() => (tab.value === "COMMISSION" ? openCommission() : openVelocity())}>
                                 {tab.value === "COMMISSION" ? t("New commission profile") : t("New velocity rule")}
                             </VBtn>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 <VAlert type="warning" variant="tonal">
                     {t("These records apply immediately. There is no update or delete endpoint: create a new record with the corrected values instead.")}

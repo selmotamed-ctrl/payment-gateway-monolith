@@ -1,4 +1,4 @@
-import { defineComponent } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useRoute } from "vue-router";
 import { VIcon } from "vuetify/components";
 import { useContextHelp } from "./useContextHelp";

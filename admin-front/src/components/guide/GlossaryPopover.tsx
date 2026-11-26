@@ -1,4 +1,5 @@
-import { defineComponent, nextTick, onBeforeUnmount, onMounted, ref, watch, type PropType } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, watch, type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
 import type { Term } from "@/content/guide";
 
@@ -107,8 +108,7 @@ export const GlossaryPopover = defineComponent({
 
         return () => {
             const term = props.term;
-            if (!term) return null;
-            return (
+            return (!term ? null : (
                 <div class="guide-popover-layer" onClick={() => props.onClose()}>
                     <div
                         ref={panel}
@@ -173,7 +173,7 @@ export const GlossaryPopover = defineComponent({
                         </div>
                     </div>
                 </div>
-            );
+            ));
         };
     },
 });

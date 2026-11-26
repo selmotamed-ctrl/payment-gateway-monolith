@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute } from "vue-router";
@@ -586,10 +586,7 @@ const ObjectStoragePage = dc(() => {
   return (): JSX.Element => (
     <ScreenContainer>
       <ThemedView style={{ gap: "18px" }}>
-        <PageHeader
-          title={t("Object & Asset Storage")}
-          subtitle={t("Shared encrypted vault, quarantine, record locks, retention and legal holds across every core node.")}
-          end={() => (
+        <PageHeader title={t("Object & Asset Storage")} subtitle={t("Shared encrypted vault, quarantine, record locks, retention and legal holds across every core node.")}>(
             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
               <StatusBadge status="info" label={`${summary.value?.totalObjects ?? 0} ${t("Objects")}`} toneOverride="info" showDot={false} />
               <StatusBadge status="pending" label={`${summary.value?.quarantinePendingCount ?? 0} ${t("Quarantine & AV queue")}`} toneOverride={summary.value?.quarantinePendingCount ? "warning" : "neutral"} showDot={false} />
@@ -598,8 +595,7 @@ const ObjectStoragePage = dc(() => {
                 {t("Refresh")}
               </VBtn>
             </ThemedView>
-          )}
-        />
+          )</PageHeader>
         {summaryError.value && <VAlert type="error" variant="tonal">{summaryError.value}</VAlert>}
         <MetricStrip items={metrics.value} loading={summaryLoading.value} />
 

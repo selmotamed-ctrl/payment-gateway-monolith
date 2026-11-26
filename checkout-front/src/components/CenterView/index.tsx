@@ -1,4 +1,5 @@
-import { dc } from "kt-dc";
+import { ref, createSlot } from "vue";
+import { dc } from "@/utils/dc";
 import type { ThemedViewProps } from "../ThemedView";
 import { useDefaultPadding } from "@/state/style";
 
@@ -15,8 +16,7 @@ const CenterView = dc<
         const padding = useDefaultPadding();
         return () => {
             const props = attrs as ThemedViewProps;
-            if (props.href) {
-                return (
+            return (props.href ? (
                     <a
                         {...props}
                         ref={(_r) => {
@@ -48,11 +48,9 @@ const CenterView = dc<
                                   }
                         }
                     >
-                        {slots.default?.()}
+                        {createSlot("default")}
                     </a>
-                );
-            }
-            return (
+                ) : (
                 <div
                     {...props}
                     ref={(_r) => {
@@ -75,9 +73,9 @@ const CenterView = dc<
                     class={`${props.onClick && !p.noHoverable ? "hoverable" : ""} ${p.animated !== false ? "themed-view-animated" : ""}`}
                     onClick={p.disabled ? undefined : props.onClick}
                 >
-                    {slots.default?.()}
+                    {createSlot("default")}
                 </div>
-            );
+            ));
         };
     },
     {

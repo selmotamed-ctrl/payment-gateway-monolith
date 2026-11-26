@@ -1,5 +1,6 @@
-import { computed, defineComponent, onBeforeUnmount, onMounted, ref, watch, type PropType } from "vue";
-import { useTheme } from "vuetify";
+import { computed, onBeforeUnmount, onMounted, ref, watch, type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
+import { useTheme } from "@/utils/vuetify-compat";
 import {
   buildPagedMediaHtmlDocument,
   type ReportExecutionBundle,

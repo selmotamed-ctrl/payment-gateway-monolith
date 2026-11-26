@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useLocale } from "vuetify";
@@ -277,15 +277,9 @@ const WalletsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Wallets")}
-                    subtitle={t("Merchant wallets across the platform: live balances, shards, statement and containment.")}
-                    badge={t("Ledger")}
-                    badgeTone="info"
-                    end={() => (
+                <PageHeader title={t("Wallets")} subtitle={t("Merchant wallets across the platform: live balances, shards, statement and containment.")} badge={t("Ledger")} badgeTone="info">(
                         <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                    )}
-                />
+                    )</PageHeader>
 
                 {notice.value && <ApprovalSubmittedNotice approvalRequestId={notice.value.approvalRequestId} onDismiss={() => (notice.value = null)} />}
 

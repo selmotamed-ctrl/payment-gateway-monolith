@@ -1,6 +1,9 @@
+import ThemedView from "@/components/ThemedView/index";
+import { ref } from "vue";
 import { setLocale } from "@/plugins/localization";
-import { dc } from "kt-dc";
-import { useLocale, useTheme } from "vuetify";
+import { dc } from "@/utils/dc";
+import { useLocale } from "vuetify";
+import { useTheme } from "@/utils/vuetify-compat";
 import { VBtn, VIcon, VList, VListItem, VMenu } from "vuetify/components";
 import ThemeMenu from "@/components/ThemeMenu";
 

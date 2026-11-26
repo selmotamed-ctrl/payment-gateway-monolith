@@ -1,4 +1,5 @@
-import { defineComponent, type PropType, type VNodeChild } from "vue";
+import { type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VSelect, VTextField } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { FormField } from "@/components/ui/FormField";

@@ -1,4 +1,5 @@
-import { computed, defineComponent, ref, watch, type PropType, type VNodeChild } from "vue";
+import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VBtn } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";

@@ -1,5 +1,6 @@
-import { defineComponent, onMounted, ref, computed } from "vue";
-import { RouterLink } from "vue-router";
+import { onMounted, ref, computed } from "vue";
+import { defineComponent } from "@/utils/dc";
+import { RouterLink } from "vue-router/experimental/vapor";
 import { PageHeader } from "@/components/ui/PageHeader";
 import ScreenContainer from "@/components/ScreenContainer";
 import { BookCard } from "@/components/guide/BookCard";
@@ -106,18 +107,14 @@ export const AdminGuidePage = defineComponent({
 
         return () => (
             <ScreenContainer>
-                <PageHeader
-                    title={L("Interactive Guide", "الدليل التفاعلي")}
-                    subtitle={L(
+                <PageHeader title={L("Interactive Guide", "الدليل التفاعلي")} subtitle={L(
                         "Learn the platform from zero, look up a rule, or find what to do when something goes wrong.",
                         "تعلّم المنصة من الصفر، أو ابحث عن قاعدة، أو اعرف ما يجب فعله عند حدوث مشكلة.",
-                    )}
-                    end={() => (
+                    )}>(
                         <button type="button" class="guide-primary-button" onClick={openGuideSearch}>
                             {L("Search the guide", "ابحث في الدليل")}
                         </button>
-                    )}
-                />
+                    )</PageHeader>
                 {loading.value ? (
                     <p class="guide-page-loading">{L("Loading the guide…", "جارٍ تحميل الدليل…")}</p>
                 ) : (

@@ -1,3 +1,4 @@
+import { computed } from "vue";
 import { useDisplay } from "vuetify";
 
 export const useDefaultPadding = () => {

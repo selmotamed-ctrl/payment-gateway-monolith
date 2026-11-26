@@ -1,6 +1,7 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { useLocale, useTheme } from "vuetify";
+import { useLocale } from "vuetify";
+import { useTheme } from "@/utils/vuetify-compat";
 import { VBtn } from "vuetify/components";
 import { useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
@@ -440,12 +441,7 @@ const JoinRequestsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Join Requests")}
-                    subtitle={t("Review onboarding applications, KYB evidence and SLA-bound decisions in one queue.")}
-                    badge={t("KYB review")}
-                    badgeTone="info"
-                    end={() => (
+                <PageHeader title={t("Join Requests")} subtitle={t("Review onboarding applications, KYB evidence and SLA-bound decisions in one queue.")} badge={t("KYB review")} badgeTone="info">(
                         <ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
                             <StatusBadge status="info" label={`${total.value} ${t("requests")}`} toneOverride="info" showDot={false} />
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
@@ -460,8 +456,7 @@ const JoinRequestsPage = dc(() => {
                                 </VBtn>
                             )}
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 {summary.value && (
                     <SummaryExportCard

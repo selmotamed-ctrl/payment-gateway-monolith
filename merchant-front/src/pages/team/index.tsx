@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
 import { VBtn, VSelect, VTextField } from "vuetify/components";
@@ -205,15 +205,11 @@ const TeamPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Team & Roles")}
-                    subtitle={t("Merchant users, authorities, and access posture.")}
-                    end={() => (
+                <PageHeader title={t("Team & Roles")} subtitle={t("Merchant users, authorities, and access posture.")}>(
                         <VBtn variant="tonal" onClick={() => openDialog(null)}>
                             {t("Invite Member")}
                         </VBtn>
-                    )}
-                />
+                    )</PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />

@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
@@ -60,7 +60,7 @@ const SandboxLinkDetailPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={detail.value?.link.title ?? t("Sandbox Link")} subtitle={detail.value?.link.key ?? linkId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Checkout Links"), to: "/sandbox/links" }, { label: detail.value?.link.key ?? linkId() }]} end={() => <div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => { copyToClipboard(checkoutUrl()); showSnackBar({ type: "success", message: t("Copied") }); }}>{t("Copy checkout URL")}</VBtn><VBtn color="primary" prependIcon="mdi-open-in-new" onClick={() => window.open(checkoutUrl(), "_blank", "noopener")}>{t("Open checkout")}</VBtn></div>} />
+            <PageHeader title={detail.value?.link.title ?? t("Sandbox Link")} subtitle={detail.value?.link.key ?? linkId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Checkout Links"), to: "/sandbox/links" }, { label: detail.value?.link.key ?? linkId() }]}><div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => { copyToClipboard(checkoutUrl()); showSnackBar({ type: "success", message: t("Copied") }); }}>{t("Copy checkout URL")}</VBtn><VBtn color="primary" prependIcon="mdi-open-in-new" onClick={() => window.open(checkoutUrl(), "_blank", "noopener")}>{t("Open checkout")}</VBtn></div></PageHeader>
             <SandboxBanner />
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             <StateView loading={loading.value} minHeight="200px">

@@ -1,7 +1,8 @@
+import type { Ref } from "vue";
 import { ref, type VNode } from "vue";
 import { VBtn, VForm } from "vuetify/components";
 import { useLocale } from "vuetify";
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { extractApiError, UnknownError, type ApiError } from "@/utils/errors/extractor";
 import { AlertView } from "./AlertView";
 import { FormModal } from "@/components/ui/FormModal";
@@ -12,7 +13,7 @@ export interface ConfirmOptions {
     message: string;
     submitButtonLabel?: string;
     type: "error" | "warning" | "primary";
-    slot?: (props: { form: globalThis.Ref<JSONObject, JSONObject> }) => JSX.Element;
+    slot?: (props: { form: Ref<JSONObject, JSONObject> }) => JSX.Element;
     onConfirm?: (form: JSONObject) => void | Promise<void>;
 }
 
@@ -23,7 +24,7 @@ export const AwaitedConfirmationDialog = dc<{}, { show(opts: ConfirmOptions): Pr
     let resolver: (value: boolean) => void = () => {};
     const type = ref<ConfirmOptions["type"]>("primary");
     const valid = ref(true);
-    const slot = ref(null as null | ((props: { form: globalThis.Ref<JSONObject, JSONObject> }) => JSX.Element));
+    const slot = ref(null as null | ((props: { form: Ref<JSONObject, JSONObject> }) => JSX.Element));
     const submitButtonLabel = ref(null as null | string);
     const providedOnConfirm = ref(null as null | ((form: JSONObject) => void | Promise<void>));
     const loading = ref(false);

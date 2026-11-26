@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
@@ -600,10 +600,7 @@ const ReportsChromePage = dc(() => {
   return () => (
     <ScreenContainer>
       <ThemedView style={{ gap: "18px" }}>
-        <PageHeader
-          title={t("Report Headers & Footers")}
-          subtitle={t("Upload reusable bilingual chrome specs and assign the global default")}
-          end={() => (
+        <PageHeader title={t("Report Headers & Footers")} subtitle={t("Upload reusable bilingual chrome specs and assign the global default")}>(
             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
               <VBtn variant="tonal" prependIcon="mdi-refresh" loading={busy.value} onClick={refresh}>
                 {t("Refresh")}
@@ -620,8 +617,7 @@ const ReportsChromePage = dc(() => {
                 </VBtn>
               )}
             </ThemedView>
-          )}
-        />
+          )</PageHeader>
 
         {error.value && (
           <VAlert type="error" variant="tonal" closable onClick:close={() => (error.value = null)}>

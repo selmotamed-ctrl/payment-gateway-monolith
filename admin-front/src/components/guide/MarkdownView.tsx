@@ -1,12 +1,6 @@
 import MarkdownIt, { type MarkdownIt as MarkdownItType } from "markdown-it";
-import {
-    computed,
-    defineComponent,
-    onMounted,
-    ref,
-    type PropType,
-    type VNodeChild,
-} from "vue";
+import { computed, onMounted, ref, type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
 import {
     loadArticles,

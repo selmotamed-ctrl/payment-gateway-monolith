@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { VAlert, VBtn, VSelect, VTextField } from "vuetify/components";
@@ -154,7 +154,7 @@ const SandboxTokensPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={t("Sandbox API Keys & Webhooks")} subtitle={t("pg_test_ tokens reach only the sandbox core; pg_live_ tokens are refused.")} badge="SANDBOX" badgeTone="warning" end={() => <div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => { refresh.value?.(); void loadSummary(); }}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-webhook" loading={busy.value === "webhook"} onClick={() => void testWebhook()}>{t("Send test webhook")}</VBtn><VBtn color="primary" prependIcon="mdi-plus" onClick={() => { formError.value = ""; createOpen.value = true; }}>{t("Create pg_test_ token")}</VBtn></div>} />
+            <PageHeader title={t("Sandbox API Keys & Webhooks")} subtitle={t("pg_test_ tokens reach only the sandbox core; pg_live_ tokens are refused.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => { refresh.value?.(); void loadSummary(); }}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-webhook" loading={busy.value === "webhook"} onClick={() => void testWebhook()}>{t("Send test webhook")}</VBtn><VBtn color="primary" prependIcon="mdi-plus" onClick={() => { formError.value = ""; createOpen.value = true; }}>{t("Create pg_test_ token")}</VBtn></div></PageHeader>
             <SandboxBanner subtitle={t("Point your staging website or mobile app at the Sandbox API with a pg_test_ token.")} />
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             {createdToken.value ? <VAlert type="warning" variant="tonal" class="mb-4"> {t("Copy this token now; it is shown once")}: <code>{createdToken.value}</code></VAlert> : null}

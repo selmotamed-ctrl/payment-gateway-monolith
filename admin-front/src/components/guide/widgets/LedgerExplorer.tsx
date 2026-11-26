@@ -1,4 +1,5 @@
-import { computed, defineComponent, onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { loadData, type LedgerData } from "@/content/guide";
 import { simulateLedgerEvent } from "./engine/ledger";
 import { useGuideLocale } from "./useGuideLocale";

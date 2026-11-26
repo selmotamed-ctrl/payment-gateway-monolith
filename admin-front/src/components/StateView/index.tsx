@@ -1,4 +1,5 @@
-import { dc } from "kt-dc";
+import { createSlot } from "vue";
+import { dc } from "@/utils/dc";
 import { VBtn, VIcon, VProgressCircular } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { ThemedText } from "@/components/ThemedText";
@@ -19,8 +20,7 @@ export const StateView = dc(
         const { t } = useLocale();
 
         return () => {
-            if (props.loading) {
-                return (
+            return (props.loading ? (
                     <ThemedView
                         {...{ role: "status", "aria-live": "polite", "aria-busy": "true" }}
                         style={{
@@ -35,11 +35,7 @@ export const StateView = dc(
                         <VProgressCircular indeterminate size={48} color="primary" width={4} aria-label={t("Loading")} />
                         <ThemedText style={{ fontSize: "14px", opacity: 0.7 }}>{t("Loading")}</ThemedText>
                     </ThemedView>
-                );
-            }
-
-            if (props.error) {
-                return (
+                ) : props.error ? (
                     <ThemedView
                         {...{ role: "alert", "aria-live": "assertive", "aria-atomic": "true" }}
                         style={{
@@ -59,11 +55,7 @@ export const StateView = dc(
                             </VBtn>
                         )}
                     </ThemedView>
-                );
-            }
-
-            if (props.empty) {
-                return (
+                ) : props.empty ? (
                     <ThemedView
                         {...{ role: "status", "aria-live": "polite" }}
                         style={{
@@ -87,10 +79,7 @@ export const StateView = dc(
                             </ThemedText>
                         )}
                     </ThemedView>
-                );
-            }
-
-            return <>{slots.default?.()}</>;
+                ) : <>{createSlot("default")}</>);
         };
     },
     {

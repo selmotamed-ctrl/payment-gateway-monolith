@@ -1,4 +1,4 @@
-import { defineComponent } from "vue";
+import { defineComponent } from "@/utils/dc";
 
 /**
  * Thin ring with the numbers in the centre (never colour alone). Flat: no gradient, tokens only.

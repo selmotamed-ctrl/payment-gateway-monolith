@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
@@ -148,18 +148,12 @@ const SandboxOverviewPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader
-                title={t("Sandbox Overview")}
-                subtitle={t("A separate database, a separate core node, and zero real money.")}
-                badge="SANDBOX"
-                badgeTone="warning"
-                end={() => (
+            <PageHeader title={t("Sandbox Overview")} subtitle={t("A separate database, a separate core node, and zero real money.")} badge="SANDBOX" badgeTone="warning">(
                     <div class="d-flex flex-wrap ga-2 align-center">
                         <StatusBadge status="SANDBOX" label={`${overview.value?.counts.payments ?? 0} ${t("payments")}`} toneOverride="info" showDot={false} />
                         <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</VBtn>
                     </div>
-                )}
-            />
+                )</PageHeader>
             <SandboxBanner />
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             <StateView loading={loading.value} minHeight="220px">

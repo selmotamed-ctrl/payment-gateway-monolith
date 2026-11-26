@@ -1,5 +1,7 @@
-import { computed, defineComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { RouterLink, useRoute } from "vue-router";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { defineComponent } from "@/utils/dc";
+import { useRoute } from "vue-router";
+import { RouterLink } from "vue-router/experimental/vapor";
 import { PageHeader } from "@/components/ui/PageHeader";
 import ScreenContainer from "@/components/ScreenContainer";
 import { MarkdownView } from "@/components/guide/MarkdownView";
@@ -158,21 +160,17 @@ export const AdminGuideArticlePage = defineComponent({
 
         return () => (
             <ScreenContainer>
-                <PageHeader
-                    title={article.value?.title ?? L("Article not found", "المقال غير موجود")}
-                    subtitle={
+                <PageHeader title={article.value?.title ?? L("Article not found", "المقال غير موجود")} subtitle={
                         article.value
                             ? `${L("Book", "الكتاب")} ${article.value.book} · ${article.value.minutes} ${L("min read", "دقيقة قراءة")}`
                             : undefined
-                    }
-                    breadcrumbs={[
+                    } breadcrumbs={[
                         { label: L("Guide", "الدليل"), to: "/guide" },
                         ...(book.value
                             ? [{ label: `Book ${book.value.id}: ${book.value.title}`, to: `/guide/book/${book.value.id}` }]
                             : []),
                         { label: article.value?.title ?? articleId.value },
-                    ]}
-                    end={() => (
+                    ]}>(
                         <div class="guide-article-actions">
                             {article.value ? (
                                 <>
@@ -189,8 +187,7 @@ export const AdminGuideArticlePage = defineComponent({
                                 </>
                             ) : null}
                         </div>
-                    )}
-                />
+                    )</PageHeader>
                 {loading.value ? (
                     <p class="guide-page-loading">{L("Loading the article…", "جارٍ تحميل المقال…")}</p>
                 ) : !article.value ? (

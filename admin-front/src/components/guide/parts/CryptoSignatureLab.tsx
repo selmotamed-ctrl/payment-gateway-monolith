@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { VAlert, VBtn, VCard, VCardText, VSelect, VTextField } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";

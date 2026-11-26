@@ -1,6 +1,6 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { VIcon, VProgressCircular } from "vuetify/components";
-import { useDisplay, useTheme } from "vuetify";
+import { useDisplay, useTheme } from "@/utils/vuetify-compat";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import VChart from "vue-echarts";

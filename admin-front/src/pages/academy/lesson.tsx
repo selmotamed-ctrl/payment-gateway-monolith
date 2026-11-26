@@ -1,5 +1,7 @@
-import { computed, defineComponent, onMounted, ref, watch } from "vue";
-import { RouterLink, useRoute, useRouter } from "vue-router";
+import { computed, onMounted, ref, watch } from "vue";
+import { defineComponent } from "@/utils/dc";
+import { useRoute, useRouter } from "vue-router";
+import { RouterLink } from "vue-router/experimental/vapor";
 import { useLocale } from "vuetify";
 import { VBtn, VIcon } from "vuetify/components";
 import { AcademyShell, Skeleton, useAcademyData, userRole } from "@/components/academy/AcademyShell";
@@ -138,24 +140,16 @@ export const AdminAcademyLessonPage = defineComponent({
             );
 
             const header = () => (
-                <PageHeader
-                    title={l?.title ?? t("Lesson")}
-                    subtitle={l ? [m?.title, t("{m} minutes", { m: l.minutes })].filter(Boolean).join(" · ") : ""}
-                    breadcrumbs={[
+                <PageHeader title={l?.title ?? t("Lesson")} subtitle={l ? [m?.title, t("{m} minutes", { m: l.minutes })].filter(Boolean).join(" · ") : ""} breadcrumbs={[
                         m
                             ? { label: m.title, to: router.resolve({ name: "AdminAcademyModule", params: { moduleId: m.id } }).fullPath }
                             : { label: t("My learning"), to: router.resolve({ name: "AdminAcademy" }).fullPath },
                         { label: l?.title ?? t("Lesson") },
-                    ]}
-                    badge={l && finished ? "COMPLETED" : ""}
-                    badgeLabel={t("Completed")}
-                    badgeTone="success"
-                    end={() => (
+                    ]} badge={l && finished ? "COMPLETED" : ""} badgeLabel={t("Completed")} badgeTone="success">(
                         <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyLessonSummary()}>
                             {t("Copy lesson summary")}
                         </VBtn>
-                    )}
-                />
+                    )</PageHeader>
             );
 
             const tile = (id: string, direction: "prev" | "next") => (

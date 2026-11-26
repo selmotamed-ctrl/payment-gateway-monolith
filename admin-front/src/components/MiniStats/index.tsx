@@ -1,6 +1,6 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { VCard, VCardText, VIcon, VProgressCircular } from "vuetify/components";
-import { useDisplay } from "vuetify";
+import { useDisplay } from "@/utils/vuetify-compat";
 import colors from "vuetify/util/colors";
 
 export type StatItem = {

@@ -1,4 +1,5 @@
-import { dc } from "kt-dc";
+import { createSlot } from "vue";
+import { dc } from "@/utils/dc";
 
 /**
  * The page content surface.
@@ -8,7 +9,7 @@ import { dc } from "kt-dc";
  */
 const ScreenContainer = dc(
     (_, __, { slots }) => {
-        return () => <div class="pg-page pg-screen-container">{slots.default?.()}</div>;
+        return () => <div class="pg-page pg-screen-container">{createSlot("default")}</div>;
     },
     { slots: ["default"] },
 );

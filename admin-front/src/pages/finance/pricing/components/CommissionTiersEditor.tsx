@@ -1,4 +1,5 @@
-import { computed, defineComponent, type PropType, type VNodeChild } from "vue";
+import { computed, type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VBtn, VTextField } from "vuetify/components";
 import { MAX_TIERS, emptyTier, type TierError, type TierErrorCode, type TierField, type TierRow } from "../commissionTiers";
@@ -37,7 +38,7 @@ export const CommissionTiersEditor = defineComponent({
         disabled: { type: Boolean, default: false },
     },
     emits: ["update:modelValue"],
-    setup(props, { emit }) {
+    setup(props: { modelValue: TierRow[]; errors: TierError[]; disabled: boolean }, { emit }) {
         const { t } = useLocale();
 
         const errorAt = (index: number, field: TierField): TierError | undefined =>

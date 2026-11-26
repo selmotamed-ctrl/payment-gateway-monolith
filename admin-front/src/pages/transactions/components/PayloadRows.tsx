@@ -1,4 +1,5 @@
-import { defineComponent, type PropType, type VNodeChild } from "vue";
+import { type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { parseTextPayload, type PayloadRow, type PayloadSection } from "../payloadRows";
 
@@ -18,10 +19,7 @@ export const PayloadRows = defineComponent({
     setup(props) {
         const { t } = useLocale();
         return (): VNodeChild => {
-            if (props.rows.length === 0 && !props.text) {
-                return <span style={{ fontSize: "12.5px", color: "var(--pg-ink-muted)" }}>{props.emptyLabel || t("No data")}</span>;
-            }
-            return (
+            return (props.rows.length === 0 && !props.text ? <span style={{ fontSize: "12.5px", color: "var(--pg-ink-muted)" }}>{props.emptyLabel || t("No data")}</span> : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                     {props.rows.length > 0 && (
                         <dl
@@ -110,7 +108,7 @@ export const PayloadRows = defineComponent({
                         </div>
                     )}
                 </div>
-            );
+            ));
         };
     },
 });

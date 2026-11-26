@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
@@ -257,13 +257,7 @@ const Page = dc(() => {
   return () => (
     <ScreenContainer>
       <ThemedView style={{ gap: "18px" }}>
-        <PageHeader
-          title={t("Reports Needing Migration")}
-          subtitle={t("Stored reports that must be regenerated or migrated before they can run again")}
-          badge="NEEDS_MIGRATION"
-          badgeLabel={t("Needs migration")}
-          badgeTone="danger"
-          end={() => (
+        <PageHeader title={t("Reports Needing Migration")} subtitle={t("Stored reports that must be regenerated or migrated before they can run again")} badge="NEEDS_MIGRATION" badgeLabel={t("Needs migration")} badgeTone="danger">(
             <div class="d-flex flex-wrap ga-2">
               <VBtn variant="tonal" prependIcon="mdi-page-layout-header-footer" onClick={() => void router.push({ name: "ReportsChromeNeedsMigration" })}>
                 {t("Headers & Footers migration")}
@@ -275,8 +269,7 @@ const Page = dc(() => {
                 {t("Refresh")}
               </VBtn>
             </div>
-          )}
-        />
+          )</PageHeader>
         <SegmentedTabs
           modelValue={source.value}
           onUpdate:modelValue={changeSource}

@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute } from "vue-router";
@@ -708,11 +708,7 @@ const AmlReportingStudioPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader
-                title={t("Reporting Studio")}
-                subtitle={t("Declarative XML/XLSX/DOCX schemas, mapping, validation and filing gates")}
-                end={() => <VBtn color="primary" onClick={openCreate}>{t("New schema")}</VBtn>}
-            />
+            <PageHeader title={t("Reporting Studio")} subtitle={t("Declarative XML/XLSX/DOCX schemas, mapping, validation and filing gates")}><VBtn color="primary" onClick={openCreate}>{t("New schema")}</VBtn></PageHeader>
             {error.value && <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert>}
             <ThemedView style={{ display: "grid", gap: "12px" }}>
                 {loading.value && <ThemedText>{t("Loading schemas")}</ThemedText>}

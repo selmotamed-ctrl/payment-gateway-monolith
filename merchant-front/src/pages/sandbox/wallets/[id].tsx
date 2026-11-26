@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
@@ -144,21 +144,14 @@ const SandboxWalletDetailPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader
-                title={wallet.value?.wallet.name || t("Sandbox Wallet")}
-                subtitle={wallet.value?.wallet.id ?? walletId()}
-                badge="SANDBOX"
-                badgeTone="warning"
-                breadcrumbs={[{ label: t("Sandbox Wallets"), to: "/sandbox/wallets" }, { label: wallet.value?.wallet.name ?? walletId() }]}
-                end={() => (
+            <PageHeader title={wallet.value?.wallet.name || t("Sandbox Wallet")} subtitle={wallet.value?.wallet.id ?? walletId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Wallets"), to: "/sandbox/wallets" }, { label: wallet.value?.wallet.name ?? walletId() }]}>(
                     <div class="d-flex flex-wrap ga-2">
                         <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => { void load(); ledgerRefresh.value?.(); }}>{t("Refresh")}</VBtn>
                         <VBtn variant="tonal" prependIcon="mdi-cash-plus" onClick={() => openAction("CREDIT")}>{t("Top up")}</VBtn>
                         <VBtn variant="tonal" prependIcon="mdi-cash-fast" onClick={() => openAction("CASHOUT")}>{t("Simulate cash-out")}</VBtn>
                         <VBtn variant="tonal" prependIcon="mdi-pause" onClick={() => openAction(wallet.value?.wallet.status === "FROZEN" ? "UNFREEZE" : "FREEZE")}>{wallet.value?.wallet.status === "FROZEN" ? t("Activate") : t("Freeze")}</VBtn>
                     </div>
-                )}
-            />
+                )</PageHeader>
             <SandboxBanner subtitle={t("Sandbox ledger only. Balance changes post balanced journal entries.")} />
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             <StateView loading={loading.value} minHeight="220px">

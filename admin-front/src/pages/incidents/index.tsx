@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { VAlert, VBtn, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
@@ -608,19 +608,13 @@ const IncidentsPage = dc(() => {
     };
     return () => (
         <ScreenContainer>
-            <PageHeader
-                title={t("Incidents")}
-                subtitle={t("Operational resilience, response timeline and regulatory incident reporting")}
-                badge="AML-CONFIDENTIAL"
-                badgeTone="danger"
-                end={() => (
+            <PageHeader title={t("Incidents")} subtitle={t("Operational resilience, response timeline and regulatory incident reporting")} badge="AML-CONFIDENTIAL" badgeTone="danger">(
                     <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                         <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                         <VBtn variant="tonal" prependIcon="mdi-download" loading={listExportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                         <VBtn color="primary" prependIcon="mdi-plus" onClick={() => (createOpen.value = true)}>{t("Open incident")}</VBtn>
                     </ThemedView>
-                )}
-            />
+                )</PageHeader>
             <SummaryExportCard
                 title={t("Incident health")}
                 metrics={metrics.value}

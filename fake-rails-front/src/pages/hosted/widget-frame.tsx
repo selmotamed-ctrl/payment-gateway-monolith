@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed } from "vue";
 import { VAlert } from "vuetify/components";
 import { TableRowActions } from "@/components/Table/TableRowActions";

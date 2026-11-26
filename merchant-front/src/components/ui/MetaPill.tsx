@@ -1,4 +1,5 @@
-import { defineComponent, type PropType, type VNodeChild } from "vue";
+import { type PropType, type VNodeChild, createSlot } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VIcon } from "vuetify/components";
 import type { BadgeTone } from "./StatusBadge";
 
@@ -53,7 +54,7 @@ export const MetaPill = defineComponent({
                     }}
                 >
                     {props.prependIcon && <VIcon icon={props.prependIcon} size={12} />}
-                    {slots.default?.()}
+                    {createSlot("default")}
                 </span>
             );
         };

@@ -1,4 +1,5 @@
-import { defineComponent, useId, type PropType, type VNodeChild } from "vue";
+import { useId, type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 
 export interface SegmentedTab {

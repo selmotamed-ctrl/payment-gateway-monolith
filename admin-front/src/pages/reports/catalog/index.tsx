@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
@@ -465,10 +465,7 @@ const ReportsCatalogPage = dc(() => {
   return () => (
     <ScreenContainer>
       <ThemedView style={{ gap: "18px" }}>
-        <PageHeader
-          title={t("Report Catalog")}
-          subtitle={t("Run and export published backoffice and merchant reports")}
-          end={() => (
+        <PageHeader title={t("Report Catalog")} subtitle={t("Run and export published backoffice and merchant reports")}>(
             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
               <VBtn variant="tonal" prependIcon="mdi-refresh" loading={chromeLoading.value} onClick={() => void refresh()}>
                 {t("Refresh")}
@@ -484,8 +481,7 @@ const ReportsCatalogPage = dc(() => {
                 </VBtn>
               )}
             </ThemedView>
-          )}
-        />
+          )</PageHeader>
 
         {((health.value?.brokenReportSpecs ?? 0) > 0 ||
           (health.value?.brokenChromeSpecs ?? 0) > 0 ||

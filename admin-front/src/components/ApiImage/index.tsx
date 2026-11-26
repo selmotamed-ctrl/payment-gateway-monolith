@@ -1,7 +1,8 @@
 import { resolvePublicUploadPath, resolveUploadPath } from "@/constants/baseUrl";
 import { api } from "@/state/api";
 import { safeRasterImageMime } from "@/utils/safeBlob";
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
+import { ref, onBeforeMount, onBeforeUnmount } from "vue";
 import type { StyleValue } from "vue";
 
 const ApiImage = dc(

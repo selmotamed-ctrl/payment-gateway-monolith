@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
 import { VAutocomplete, VBtn, VTextField } from "vuetify/components";
@@ -193,10 +193,7 @@ ${t("IBAN (optional)")}: ${iban.value}` : ""}`,
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Cash-Outs")}
-                    subtitle={t("Settlement withdrawals and payout status.")}
-                    end={() => (
+                <PageHeader title={t("Cash-Outs")} subtitle={t("Settlement withdrawals and payout status.")}>(
                         <VBtn
                             variant="tonal"
                             onClick={() => {
@@ -214,8 +211,7 @@ ${t("IBAN (optional)")}: ${iban.value}` : ""}`,
                         >
                             {t("Request Cash-Out")}
                         </VBtn>
-                    )}
-                />
+                    )</PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />

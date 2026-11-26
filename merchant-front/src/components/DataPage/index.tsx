@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { ref, watch } from "vue";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
@@ -62,10 +62,7 @@ export const DataPage = dc(
         return () => (
             <ScreenContainer>
                 <ThemedView style={{ gap: "18px" }}>
-                    <PageHeader
-                        title={props.title}
-                        end={() => <>{props.topSlot?.({ refresh: load, loading: loading.value })}</>}
-                    />
+                    <PageHeader title={props.title}><>{props.topSlot?.({ refresh: load, loading: loading.value })}</></PageHeader>
                     {props.subtitle && (
                         <div style={{ fontSize: "13px", opacity: 0.65, marginTop: "-8px" }}>{props.subtitle}</div>
                     )}

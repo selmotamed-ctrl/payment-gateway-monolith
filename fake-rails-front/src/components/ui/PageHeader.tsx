@@ -1,5 +1,6 @@
-import { defineComponent, type PropType, type VNodeChild } from "vue";
-import { RouterLink } from "vue-router";
+import { type PropType, type VNodeChild, createSlot } from "vue";
+import { defineComponent } from "@/utils/dc";
+import { RouterLink } from "vue-router/experimental/vapor";
 import { VBtn } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { StatusBadge, type BadgeTone } from "./StatusBadge";
@@ -128,8 +129,8 @@ export const PageHeader = defineComponent({
                             {t("SOP & Help")}
                         </VBtn>
                     )}
-                    {props.end?.()}
-                    {slots.actions?.()}
+
+                    {createSlot("actions")}
                 </div>
             </header>
         );

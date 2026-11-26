@@ -1,4 +1,5 @@
-import { defineComponent, type PropType, type VNodeChild } from "vue";
+import { type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
 import { useLocale } from "vuetify";
 import { VAlert, VBtn } from "vuetify/components";
@@ -135,8 +136,7 @@ export const PendingApprovalsList = defineComponent({
         const { t } = useLocale();
         const router = useRouter();
         return (): VNodeChild => {
-            if (props.approvals.length === 0) return null;
-            return (
+            return (props.approvals.length === 0 ? null : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                     {props.approvals.map((approval) => {
                         const action = (approval.payloadDiffJson as { action?: string } | null)?.action;
@@ -185,7 +185,7 @@ export const PendingApprovalsList = defineComponent({
                         );
                     })}
                 </div>
-            );
+            ));
         };
     },
 });
@@ -216,10 +216,7 @@ export const MiniTable = defineComponent({
             fontSize: "12.5px",
         });
         return (): VNodeChild => {
-            if (props.rows.length === 0) {
-                return <div style={{ padding: "14px 4px", fontSize: "12.5px", color: "var(--pg-ink-muted)" }}>{props.emptyLabel}</div>;
-            }
-            return (
+            return (props.rows.length === 0 ? <div style={{ padding: "14px 4px", fontSize: "12.5px", color: "var(--pg-ink-muted)" }}>{props.emptyLabel}</div> : (
                 <div style={{ overflowX: "auto", border: "1px solid var(--pg-border-subtle)", borderRadius: "var(--pg-radius-md)" }}>
                     <table aria-label={props.ariaLabel || undefined} style={{ width: "100%", borderCollapse: "collapse" }}>
                         <thead>
@@ -248,7 +245,7 @@ export const MiniTable = defineComponent({
                         </tbody>
                     </table>
                 </div>
-            );
+            ));
         };
     },
 });

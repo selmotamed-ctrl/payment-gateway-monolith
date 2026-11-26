@@ -1,11 +1,14 @@
-import { dc } from "kt-dc";
+import TextField from "@/components/TextField/index";
+import Button from "@/components/Button/index";
+import { dc } from "@/utils/dc";
 
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import ThemedView from "@/components/ThemedView";
 import type { RulesList } from "@/utils/clientValidationRules";
-import { useDisplay, useLocale } from "vuetify";
+import { useLocale } from "vuetify";
+import { useDisplay } from "@/utils/vuetify-compat";
 import { FormModal } from "@/components/ui/FormModal";
 export type Cords = {
     latitude: string;

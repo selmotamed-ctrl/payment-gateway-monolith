@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { JsonDiffViewer, type JsonPatchOperation } from "@/components/ui/JsonDiffViewer";
 
 export type { JsonPatchOperation } from "@/components/ui/JsonDiffViewer";

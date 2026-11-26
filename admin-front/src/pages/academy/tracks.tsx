@@ -1,4 +1,5 @@
-import { computed, defineComponent, onMounted, ref, type VNodeChild } from "vue";
+import { computed, onMounted, ref, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VBtn } from "vuetify/components";
 import { AcademyShell, Skeleton, useAcademyData, userRole } from "@/components/academy/AcademyShell";
@@ -104,15 +105,11 @@ export const AdminAcademyTracksPage = defineComponent({
             return (
                 <AcademyShell
                     header={() => (
-                        <PageHeader
-                            title={t("Tracks")}
-                            subtitle={t("Everyone starts with Foundation, then takes the track for their role.")}
-                            end={() => (
+                        <PageHeader title={t("Tracks")} subtitle={t("Everyone starts with Foundation, then takes the track for their role.")}>(
                                 <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyTracksSummary()}>
                                     {t("Copy tracks summary")}
                                 </VBtn>
-                            )}
-                        />
+                            )</PageHeader>
                     )}
                 >
                     {body()}

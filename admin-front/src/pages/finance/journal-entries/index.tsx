@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "vuetify";
@@ -252,15 +252,9 @@ const JournalEntriesPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Journal Entries")}
-                    subtitle={t("Append-only double-entry postings of the ledger, with their balance check.")}
-                    badge={t("Ledger control")}
-                    badgeTone="info"
-                    end={() => (
+                <PageHeader title={t("Journal Entries")} subtitle={t("Append-only double-entry postings of the ledger, with their balance check.")} badge={t("Ledger control")} badgeTone="info">(
                         <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                    )}
-                />
+                    )</PageHeader>
 
                 {summary.value && (
                     <SummaryExportCard

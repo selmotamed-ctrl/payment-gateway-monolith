@@ -1,4 +1,5 @@
-import { computed, defineComponent, onMounted, ref, watch, type VNodeChild } from "vue";
+import { computed, onMounted, ref, watch, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "vuetify";
 import { VBtn, VIcon } from "vuetify/components";
@@ -228,19 +229,14 @@ export const AdminAcademyTrackPage = defineComponent({
             return (
                 <AcademyShell
                     header={() => (
-                        <PageHeader
-                            title={tr?.title ?? t("Track")}
-                            subtitle={tr?.description ?? ""}
-                            breadcrumbs={[
+                        <PageHeader title={tr?.title ?? t("Track")} subtitle={tr?.description ?? ""} breadcrumbs={[
                                 { label: t("Tracks"), to: router.resolve({ name: "AdminAcademyTracks" }).fullPath },
                                 { label: tr?.title ?? t("Track") },
-                            ]}
-                            end={() => (
+                            ]}>(
                                 <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyTrackSummary()}>
                                     {t("Copy track summary")}
                                 </VBtn>
-                            )}
-                        />
+                            )</PageHeader>
                     )}
                 >
                     {body()}

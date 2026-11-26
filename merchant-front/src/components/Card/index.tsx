@@ -1,6 +1,8 @@
-import { dc } from "kt-dc";
+import ThemedView from "@/components/ThemedView/index";
+import { dc } from "@/utils/dc";
+import { createSlot } from "vue";
 import type { StyleValue } from "vue";
-import { useDisplay } from "vuetify";
+import { useDisplay } from "@/utils/vuetify-compat";
 
 const Card = dc(
     (
@@ -37,7 +39,7 @@ const Card = dc(
                             props.style,
                         ]}
                     >
-                        {slots.default?.()}
+                        {createSlot("default")}
                     </ThemedView>
                 </>
             );

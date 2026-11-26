@@ -1,4 +1,5 @@
-import { dc } from "kt-dc";
+import ThemedText from "@/components/ThemedText/index";
+import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
 import { VBtn, VFileInput, VTextarea } from "vuetify/components";

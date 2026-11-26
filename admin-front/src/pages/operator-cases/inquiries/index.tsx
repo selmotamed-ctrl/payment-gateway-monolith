@@ -1,6 +1,7 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
-import { useLocale, useTheme } from "vuetify";
+import { useLocale } from "vuetify";
+import { useTheme } from "@/utils/vuetify-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRoute, useRouter } from "vue-router";
 import { VAlert, VBtn, VTextarea } from "vuetify/components";
@@ -539,12 +540,7 @@ const GatewayInquirySchedulesPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Gateway Inquiry Schedule")}
-                    subtitle={t("Monitor and operate gateway status inquiry schedules created by operator cases.")}
-                    badge={summary.value ? `${summary.value.overdue} ${t("Overdue")}` : t("Gateway inquiries")}
-                    badgeTone={summary.value && summary.value.overdue > 0 ? "danger" : "info"}
-                    end={() => (
+                <PageHeader title={t("Gateway Inquiry Schedule")} subtitle={t("Monitor and operate gateway status inquiry schedules created by operator cases.")} badge={summary.value ? `${summary.value.overdue} ${t("Overdue")}` : t("Gateway inquiries")} badgeTone={summary.value && summary.value.overdue > 0 ? "danger" : "info"}>(
                         <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
                             <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "OperatorCases" })}>
                                 {t("Operator Cases")}
@@ -553,8 +549,7 @@ const GatewayInquirySchedulesPage = dc(() => {
                                 {t("Refresh")}
                             </VBtn>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 <VAlert type="info" variant="tonal">
                     {t("Schedules are created when an operator requests a gateway status inquiry. The platform poll worker performs the inquiry and updates the schedule status.")}

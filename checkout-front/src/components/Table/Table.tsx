@@ -1,10 +1,13 @@
+import Button from "@/components/Button/index";
+import TextField from "@/components/TextField/index";
+import { ref } from "vue";
 import "./styling.css";
 import { readCell, type BaseTableProps, type IconProps, type RefreshMethodData, type RefreshMethodWithNextSkip, type TableHeader } from "./types";
 import { criticalRowTone } from "./statusTone";
 import { ThemedView } from "../ThemedView";
 import { useLocale } from "vuetify";
-import Icon from "@/components/Icon/index.vue";
-import { defineComponent } from "vue";
+import Icon from "@/components/Icon/index";
+import { defineComponent } from "@/utils/dc";
 import { VForm, VIcon, VTooltip } from "vuetify/components";
 import { extractApiError } from "@/utils/errors/extractor";
 import { showConfirm } from "@/utils/confirm";

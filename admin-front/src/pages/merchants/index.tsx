@@ -1,6 +1,7 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { useLocale, useTheme } from "vuetify";
+import { useLocale } from "vuetify";
+import { useTheme } from "@/utils/vuetify-compat";
 import { VBtn } from "vuetify/components";
 import { useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
@@ -525,12 +526,7 @@ const MerchantsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Merchants")}
-                    subtitle={t("Search the merchant portfolio, inspect KYB and risk posture, and propose governed changes.")}
-                    badge={summary.value ? `${summary.value.kybPending} ${t("KYB pending")}` : t("KYB review")}
-                    badgeTone={summary.value && summary.value.kybPending > 0 ? "warning" : "info"}
-                    end={() => (
+                <PageHeader title={t("Merchants")} subtitle={t("Search the merchant portfolio, inspect KYB and risk posture, and propose governed changes.")} badge={summary.value ? `${summary.value.kybPending} ${t("KYB pending")}` : t("KYB review")} badgeTone={summary.value && summary.value.kybPending > 0 ? "warning" : "info"}>(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                             <StatusBadge status="info" label={`${total.value} ${t("merchants")}`} toneOverride="info" showDot={false} />
                             <StatusBadge status="suspended" label={`${suspendedCount.value} ${t("suspended")}`} toneOverride={suspendedCount.value ? "danger" : "neutral"} showDot={false} />
@@ -538,8 +534,7 @@ const MerchantsPage = dc(() => {
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 {summary.value && (
                     <SummaryExportCard

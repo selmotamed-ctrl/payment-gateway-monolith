@@ -1,6 +1,7 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { useLocale, useTheme } from "vuetify";
+import { useLocale } from "vuetify";
+import { useTheme } from "@/utils/vuetify-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { VAlert, VAutocomplete, VBtn, VCheckbox, VDivider, VSelect, VTextField } from "vuetify/components";
 import { useRouter } from "vue-router";
@@ -801,12 +802,7 @@ const OperatorCasesPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Operator Cases")}
-                    subtitle={t("Triage unknown outcomes, conflicts and reconciliation breaks with SLA-aware operator workflows.")}
-                    badge={summary.value ? `${summary.value.p1Open} ${t("P1 open")}` : t("P1 queue")}
-                    badgeTone={summary.value && summary.value.p1Open > 0 ? "danger" : "info"}
-                    end={() => (
+                <PageHeader title={t("Operator Cases")} subtitle={t("Triage unknown outcomes, conflicts and reconciliation breaks with SLA-aware operator workflows.")} badge={summary.value ? `${summary.value.p1Open} ${t("P1 open")}` : t("P1 queue")} badgeTone={summary.value && summary.value.p1Open > 0 ? "danger" : "info"}>(
                         <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
                             <StatusBadge status="cases" label={`${total.value} ${t("cases")}`} toneOverride="info" showDot={false} />
                             <StatusBadge status="selected" label={`${selectedCount.value} ${t("selected")}`} toneOverride={selectedCount.value > 0 ? "info" : "neutral"} showDot={false} />
@@ -814,8 +810,7 @@ const OperatorCasesPage = dc(() => {
                             <VBtn variant="tonal" prependIcon="mdi-radar" onClick={() => void router.push({ name: "GatewayInquirySchedules" })}>{t("Inquiry Schedule")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 {summary.value && (
                     <SummaryExportCard

@@ -3,7 +3,7 @@ import { useLocale } from "vuetify";
 import { VSnackbar } from "vuetify/components";
 import Button from "@/components/Button";
 import { ref, type VNode } from "vue";
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 
 export const SnackBar = dc<
     {},

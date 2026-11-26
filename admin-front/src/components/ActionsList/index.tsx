@@ -1,9 +1,11 @@
-import { dc } from "kt-dc";
-import { useLocale, useTheme } from "vuetify";
+import { ref } from "vue";
+import { dc } from "@/utils/dc";
+import { useLocale } from "vuetify";
+import { useTheme } from "@/utils/vuetify-compat";
 import { VDivider, VMenu, VProgressCircular, VTooltip } from "vuetify/components";
 import { ThemedView } from "../ThemedView";
 import { ThemedText } from "../ThemedText";
-import Icon from "@/components/Icon/index.vue";
+import Icon from "@/components/Icon/index";
 
 type Action = {
     action: () => void | Promise<void>;
@@ -30,11 +32,7 @@ export const ActionsList = dc(
                 return a.if();
             });
 
-            if (!actions.length) {
-                return <></>;
-            }
-
-            return (
+            return (!actions.length ? <></> : (
                 <>
                     <VMenu
                         modelValue={open.value && !props.disabled}
@@ -154,7 +152,7 @@ export const ActionsList = dc(
                         }}
                     </VMenu>
                 </>
-            );
+            ));
         };
     },
     {

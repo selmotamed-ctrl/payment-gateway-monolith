@@ -1,4 +1,5 @@
-import { computed, defineComponent, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VIcon } from "vuetify/components";
 import Decimal from "decimal.js";

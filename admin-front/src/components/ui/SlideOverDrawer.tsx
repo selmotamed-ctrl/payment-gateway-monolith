@@ -1,4 +1,5 @@
-import { defineComponent, onBeforeUnmount, ref, useId, watch, type VNodeChild } from "vue";
+import { onBeforeUnmount, ref, useId, watch, type VNodeChild, createSlot } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { VBtn, VNavigationDrawer } from "vuetify/components";
 import { useLocale } from "vuetify";
 
@@ -83,12 +84,12 @@ export const SlideOverDrawer = defineComponent({
                             )}
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: "0 0 auto" }}>
-                            {slots.headerActions?.()}
+                            {createSlot("headerActions")}
                             <VBtn icon="mdi-close" variant="text" size="small" onClick={close} aria-label={t("Close")} />
                         </div>
                     </div>
                     <div style={{ padding: "20px", overflowY: "auto", flex: "1 1 auto", minHeight: 0 }}>
-                        {slots.default?.()}
+                        {createSlot("default")}
                     </div>
                     {slots.footer && (
                         <div

@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { VList, VListItem, VListItemSubtitle, VListItemTitle } from "vuetify/components";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";

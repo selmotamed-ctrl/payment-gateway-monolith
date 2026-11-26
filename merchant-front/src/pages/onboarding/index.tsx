@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { VAlert, VBtn, VFileInput, VSelect, VTextField, VTextarea, VTimeline, VTimelineItem } from "vuetify/components";
@@ -351,13 +351,7 @@ const OnboardingPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Merchant Onboarding")}
-                    subtitle={t("Complete KYB, payout, and storefront details for activation.")}
-                    end={() =>
-                        joinStatus.value ? <StatusBadge status={joinStatus.value} toneOverride="info" /> : <></>
-                    }
-                />
+                <PageHeader title={t("Merchant Onboarding")} subtitle={t("Complete KYB, payout, and storefront details for activation.")}>joinStatus.value ? <StatusBadge status={joinStatus.value} toneOverride="info" /> : <></></PageHeader>
 
                 {requestedInfo.value && (
                     <VAlert type="warning" variant="tonal" density="compact">

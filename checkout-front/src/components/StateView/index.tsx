@@ -1,4 +1,5 @@
-import { dc } from "kt-dc";
+import { createSlot } from "vue";
+import { dc } from "@/utils/dc";
 import { VBtn, VIcon, VProgressCircular } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { ThemedText } from "@/components/ThemedText";
@@ -20,8 +21,7 @@ export const StateView = dc(
         const { t } = useLocale();
 
         return () => {
-            if (props.loading) {
-                return (
+            return (props.loading ? (
                     <ThemedView
                         style={{
                             alignItems: "center",
@@ -37,11 +37,7 @@ export const StateView = dc(
                             {t("Loading")}
                         </ThemedText>
                     </ThemedView>
-                );
-            }
-
-            if (props.error) {
-                return (
+                ) : props.error ? (
                     <ThemedView
                         style={{
                             alignItems: "center",
@@ -66,11 +62,7 @@ export const StateView = dc(
                             </VBtn>
                         )}
                     </ThemedView>
-                );
-            }
-
-            if (props.empty) {
-                return (
+                ) : props.empty ? (
                     <div
                         style={{
                             minHeight: props.minHeight ?? "240px",
@@ -86,10 +78,7 @@ export const StateView = dc(
                             icon="mdi-inbox-outline"
                         />
                     </div>
-                );
-            }
-
-            return <>{slots.default?.()}</>;
+                ) : <>{createSlot("default")}</>);
         };
     },
     {

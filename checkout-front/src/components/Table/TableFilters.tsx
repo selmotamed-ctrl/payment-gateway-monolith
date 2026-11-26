@@ -1,6 +1,7 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, inject, onBeforeUnmount, onMounted, ref, watchEffect, type InjectionKey, type Ref } from "vue";
-import { useDisplay, useLocale } from "vuetify";
+import { useLocale } from "vuetify";
+import { useDisplay } from "@/utils/vuetify-compat";
 import { VAutocomplete, VBtn, VIcon, VTextField } from "vuetify/components";
 import DateInput from "@/components/DateInput";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -309,14 +310,7 @@ const TableFilters = dc(
         };
 
         return () => {
-            if (filters.value.length === 0) {
-                return null;
-            }
-            if (surface && !open.value && active.value.length === 0) {
-                return null;
-            }
-
-            return (
+            return (filters.value.length === 0 ? null : surface && !open.value && active.value.length === 0 ? null : (
                 <div class="pg-table-filters">
                     {!surface && (
                         <div class="pg-table-filters__toolbar">
@@ -409,7 +403,7 @@ const TableFilters = dc(
                         </div>
                     )}
                 </div>
-            );
+            ));
         };
     },
     { props: ["filters", "values", "onChange", "onClear", "total"] },

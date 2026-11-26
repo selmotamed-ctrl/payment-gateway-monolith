@@ -1,4 +1,5 @@
-import { defineComponent, onMounted, ref, watch } from "vue";
+import { onMounted, ref, watch } from "vue";
+import { defineComponent } from "@/utils/dc";
 import {
     TRANSFORM_LIBRARY,
     applyTransforms,

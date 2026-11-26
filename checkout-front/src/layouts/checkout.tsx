@@ -1,4 +1,5 @@
-import { dc } from "kt-dc";
+import { createSlot } from "vue";
+import { dc } from "@/utils/dc";
 
 export type CheckoutLayoutProps = {
     title?: string;
@@ -17,7 +18,7 @@ const CheckoutLayout = dc(
                         {props.title}
                     </h1>
                 )}
-                {slots.default?.()}
+                {createSlot("default")}
             </main>
         );
     },

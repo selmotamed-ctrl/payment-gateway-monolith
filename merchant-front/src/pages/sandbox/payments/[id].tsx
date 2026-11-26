@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
@@ -138,20 +138,13 @@ const SandboxPaymentDetailPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader
-                title={t("Sandbox Payment")}
-                subtitle={detail.value?.attempt.reference ?? attemptId()}
-                badge="SANDBOX"
-                badgeTone="warning"
-                breadcrumbs={[{ label: t("Sandbox Payments"), to: "/sandbox/payments" }, { label: detail.value?.attempt.reference ?? attemptId() }]}
-                end={() => (
+            <PageHeader title={t("Sandbox Payment")} subtitle={detail.value?.attempt.reference ?? attemptId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Payments"), to: "/sandbox/payments" }, { label: detail.value?.attempt.reference ?? attemptId() }]}>(
                     <div class="d-flex flex-wrap ga-2">
                         <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</VBtn>
                         <VBtn variant="tonal" prependIcon="mdi-cash-refund" onClick={() => { refundAmount.value = ""; refundReason.value = ""; refundOpen.value = true; }}>{t("Refund")}</VBtn>
                         <VBtn variant="tonal" color="warning" loading={busy.value === t("Sandbox dispute created")} disabled={detail.value?.attempt.status !== "SUCCEEDED"} onClick={() => void action(t("Sandbox dispute created"), `/payments/${detail.value?.attempt.id}/simulate-dispute`)}>{t("Simulate dispute")}</VBtn>
                     </div>
-                )}
-            />
+                )</PageHeader>
             <SandboxBanner subtitle={t("Refunds and disputes post to the sandbox ledger and governance queues only.")} />
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             <StateView loading={loading.value} minHeight="220px">

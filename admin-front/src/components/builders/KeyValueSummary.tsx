@@ -1,4 +1,5 @@
-import { defineComponent, type PropType, type VNodeChild } from "vue";
+import { type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { summarizeValue, type SummaryRow } from "./model/jsonTree";
@@ -36,10 +37,7 @@ export const KeyValueSummary = defineComponent({
             let items = props.items ?? summaryRowsToItems(summarizeValue(props.value), t);
             const total = items.length;
             if (props.maxRows > 0) items = items.slice(0, props.maxRows);
-            if (items.length === 0) {
-                return props.emptyLabel ? <span style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>{props.emptyLabel}</span> : null;
-            }
-            return (
+            return (items.length === 0 ? props.emptyLabel ? <span style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>{props.emptyLabel}</span> : null : (
                 <div style={{ minInlineSize: 0 }}>
                     <dl
                         aria-label={props.ariaLabel || undefined}
@@ -98,7 +96,7 @@ export const KeyValueSummary = defineComponent({
                         <span style={{ fontSize: "11px", color: "var(--pg-ink-faint)" }}>+{total - props.maxRows} {t("more")}</span>
                     )}
                 </div>
-            );
+            ));
         };
     },
 });

@@ -1,5 +1,5 @@
-import { defineComponent } from "vue";
-import { RouterLink } from "vue-router";
+import { defineComponent } from "@/utils/dc";
+import { RouterLink } from "vue-router/experimental/vapor";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 
 export const SandboxBanner = defineComponent({

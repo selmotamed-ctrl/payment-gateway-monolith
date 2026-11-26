@@ -1,6 +1,8 @@
-import { dc, type DCExpose } from "kt-dc";
-import { render } from "vue";
-import { useTheme } from "vuetify";
+import ThemedView from "@/components/ThemedView/index";
+import { dc, type DCExpose } from "@/utils/dc";
+import { ref, nextTick } from "vue";
+import type { ComponentPublicInstance } from "vue";
+import { useTheme } from "@/utils/vuetify-compat";
 
 export const printProvider = ref(null as null | InstanceType<typeof PrintProvider>);
 export const PrintProvider = dc(
@@ -8,12 +10,12 @@ export const PrintProvider = dc(
         _,
         expose: DCExpose<{
             setPrintTarget: (target: null | JSX.Element) => void;
-            getPrintTargetRef: () => Promise<Element | globalThis.ComponentPublicInstance>;
+            getPrintTargetRef: () => Promise<Element | ComponentPublicInstance>;
         }>,
     ) => {
         const el = ref(null as null | JSX.Element);
         let getPrintTargetPromise = null as null | {
-            resolve: (result: Element | globalThis.ComponentPublicInstance) => void;
+            resolve: (result: Element | ComponentPublicInstance) => void;
             reject: (err: any) => void;
             timer: ReturnType<typeof setTimeout>;
             resolved: boolean;
@@ -25,7 +27,7 @@ export const PrintProvider = dc(
             },
             getPrintTargetRef() {
                 console.log("getting reference of mounted print target on print provider");
-                return new Promise<Element | globalThis.ComponentPublicInstance>((resolve, reject) => {
+                return new Promise<Element | ComponentPublicInstance>((resolve, reject) => {
                     getPrintTargetPromise = {
                         resolve,
                         reject,

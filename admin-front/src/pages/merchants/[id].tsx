@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
@@ -957,10 +957,7 @@ const MerchantDetailPage = dc(() => {
         return (
             <ScreenContainer>
                 <ThemedView style={{ gap: "18px" }}>
-                    <PageHeader
-                        title={entry.displayName || entry.tradeName || t("Merchant")}
-                        subtitle={t("Inspect the merchant profile, payment activity, compliance evidence and governed change history.")}
-                        end={() => (
+                    <PageHeader title={entry.displayName || entry.tradeName || t("Merchant")} subtitle={t("Inspect the merchant profile, payment activity, compliance evidence and governed change history.")} v-slots={{ actions: () => <VBtn variant="tonal">SLOT TEST</VBtn> }}>(
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                 <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "Merchants" })}>{t("Queue")}</VBtn>
                                 {activeTab.value === "all" && (
@@ -988,8 +985,7 @@ const MerchantDetailPage = dc(() => {
                                     <VBtn color="error" variant="text" onClick={() => openAction("CLOSE")}>{t("Close")}</VBtn>
                                 )}
                             </ThemedView>
-                        )}
-                    />
+                        )</PageHeader>
 
                     <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                         <span title={statusHelp.value.meaning}><StatusBadge status={entry.status} label={statusHelp.value.label} toneOverride={asBadgeTone(statusHelp.value.tone)} /></span>
@@ -1582,6 +1578,6 @@ const MerchantDetailPage = dc(() => {
             </ScreenContainer>
         );
     };
-});
+}, { rerender: true });
 
 export default MerchantDetailPage;

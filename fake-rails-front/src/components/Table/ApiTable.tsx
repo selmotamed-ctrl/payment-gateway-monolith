@@ -1,4 +1,5 @@
-import { computed, defineComponent, onMounted, onUnmounted, ref, type PropType, type VNodeChild } from "vue";
+import { computed, onMounted, onUnmounted, ref, type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VAlert } from "vuetify/components";
 import { api } from "@/utils/api";

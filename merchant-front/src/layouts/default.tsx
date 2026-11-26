@@ -1,6 +1,7 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
+import { RouterLink, RouterView } from "vue-router/experimental/vapor";
 import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
 import {
     VAppBar,
@@ -16,7 +17,8 @@ import {
     VNavigationDrawer,
     VProgressLinear,
 } from "vuetify/components";
-import { useDisplay, useLocale } from "vuetify";
+import { useLocale } from "vuetify";
+import { useDisplay } from "@/utils/vuetify-compat";
 import LogoSvg from "@/assets/images/logo.svg";
 import { logout, user } from "@/state/user";
 import { sandboxMode } from "@/state/sandbox";

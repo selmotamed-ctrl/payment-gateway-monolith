@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { VAlert, VBtn } from "vuetify/components";
@@ -285,12 +285,7 @@ const ProfitabilityPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Profitability")}
-                    subtitle={t("Review gross commission, gateway cost, and net contribution across rails and gateways.")}
-                    badge={t("Margin control")}
-                    badgeTone="info"
-                    end={() => (
+                <PageHeader title={t("Profitability")} subtitle={t("Review gross commission, gateway cost, and net contribution across rails and gateways.")} badge={t("Margin control")} badgeTone="info">(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             <SegmentedTabs
                                 modelValue={period.value}
@@ -310,8 +305,7 @@ const ProfitabilityPage = dc(() => {
                             <VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!data.value} onClick={() => void copyProfitabilitySummary()}>{t("Copy summary")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export snapshot")}</VBtn>
                         </ThemedView>
-                    )}
-                />
+                    )</PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />

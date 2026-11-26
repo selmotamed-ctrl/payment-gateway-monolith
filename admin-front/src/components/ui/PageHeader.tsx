@@ -1,9 +1,11 @@
-import { defineComponent, type PropType, type VNodeChild } from "vue";
-import { RouterLink } from "vue-router";
+import { type PropType, type VNodeChild, createSlot } from "vue";
+import { defineComponent } from "@/utils/dc";
+import { RouterLink } from "vue-router/experimental/vapor";
 import { VBtn } from "vuetify/components";
-import { useLocale } from "vuetify";
+import { adaptedLocale } from "@/plugins/localization";
 import { StatusBadge, type BadgeTone } from "./StatusBadge";
 import { ContextHelpButton } from "@/components/guide/ContextHelpButton";
+
 
 export interface BreadcrumbItem {
     label: string;
@@ -21,10 +23,9 @@ export const PageHeader = defineComponent({
         breadcrumbs: { type: Array as PropType<BreadcrumbItem[]>, default: () => [] },
         helpChapterId: { type: String, default: "" },
         onOpenHelp: { type: Function as PropType<(chapterId: string) => void>, default: undefined },
-        end: { type: Function as PropType<() => VNodeChild>, default: undefined },
     },
     setup(props, { slots }) {
-        const { t } = useLocale();
+        const t = adaptedLocale.t;
         return (): VNodeChild => (
             <header
                 style={{
@@ -129,9 +130,8 @@ export const PageHeader = defineComponent({
                             {t("SOP & Help")}
                         </VBtn>
                     )}
-                    <ContextHelpButton />
-                    {props.end?.()}
-                    {slots.actions?.()}
+                    {createSlot("default")}
+
                 </div>
             </header>
         );

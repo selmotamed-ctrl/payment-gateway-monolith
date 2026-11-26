@@ -1,4 +1,5 @@
-import { defineComponent, computed, type PropType } from "vue";
+import { computed, type PropType } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import type { ReportDiagnostic } from "@/lib/reportEngineSdk";
 import { MetaPill, MonoRef, StatusBadge, SurfaceCard } from "@/components/ui";
@@ -70,9 +71,7 @@ export const ReportDiagnosticsPanel = defineComponent({
     );
 
     return () => {
-      if (props.diagnostics.length === 0) return null;
-      if (props.embedded) return rows();
-      return (
+      return (props.diagnostics.length === 0 ? null : props.embedded ? rows() : (
         <SurfaceCard
           title={heading.value}
           noPadding
@@ -80,7 +79,7 @@ export const ReportDiagnosticsPanel = defineComponent({
         >
           {rows()}
         </SurfaceCard>
-      );
+      ));
     };
   },
 });

@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useLocale } from "vuetify";
@@ -523,8 +523,7 @@ const MerchantTransactionDialog = dc(
 
         return () => {
             const id = rootId();
-            if (!id) return <></>;
-            return (
+            return (!id ? <></> : (
                 <>
                     <SlideOverDrawer
                         modelValue={props.open}
@@ -596,7 +595,7 @@ const MerchantTransactionDialog = dc(
                         />
                     </FormModal>
                 </>
-            );
+            ));
         };
     },
     {

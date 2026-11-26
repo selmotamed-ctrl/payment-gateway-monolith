@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
@@ -887,13 +887,7 @@ const ReportsStudioPage = dc(() => {
   return () => (
     <ScreenContainer>
       <ThemedView style={{ gap: "18px" }}>
-        <PageHeader
-          title={t("Report Studio")}
-          subtitle={t("Download the AI transcript, verify a spec, infer authorities and publish")}
-          badge={isVerified.value ? "VERIFIED" : "DRAFT"}
-          badgeLabel={isVerified.value ? t("Verified") : t("Draft")}
-          badgeTone={isVerified.value ? "success" : "neutral"}
-          end={() => (
+        <PageHeader title={t("Report Studio")} subtitle={t("Download the AI transcript, verify a spec, infer authorities and publish")} badge={isVerified.value ? "VERIFIED" : "DRAFT"} badgeLabel={isVerified.value ? t("Verified") : t("Draft")} badgeTone={isVerified.value ? "success" : "neutral"}>(
             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
               <VBtn variant="tonal" prependIcon="mdi-file-chart-outline" onClick={() => void router.push({ name: "ReportsCatalog" })}>
                 {t("Open Catalog")}
@@ -909,8 +903,7 @@ const ReportsStudioPage = dc(() => {
                 </VBtn>
               )}
             </ThemedView>
-          )}
-        />
+          )</PageHeader>
 
         {route.query.from === "migration" && (
           <VAlert type="warning" variant="tonal">

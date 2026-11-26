@@ -1,7 +1,7 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { PrintableField, type FieldProps } from "../PrintableField";
 import { VDivider } from "vuetify/components";
-import { useTheme } from "vuetify";
+import { useTheme } from "@/utils/vuetify-compat";
 import { PrintableThemedView } from "../PrintableThemedView.tsx";
 
 const PrintableFieldsSections = dc(

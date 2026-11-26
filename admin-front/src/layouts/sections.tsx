@@ -1,3 +1,4 @@
+import { computed } from "vue";
 import { hasOneOfAuthorities } from "@/state/user";
 import { resolveRouteRequirement } from "@/utils/routeAuthorities";
 

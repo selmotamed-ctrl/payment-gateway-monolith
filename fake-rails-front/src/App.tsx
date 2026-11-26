@@ -1,5 +1,5 @@
-import { dc } from "kt-dc";
-import { RouterView } from "vue-router";
+import { dc } from "@/utils/dc";
+import { RouterView } from "vue-router/experimental/vapor";
 import { VApp } from "vuetify/components";
 
 const App = dc(() => {

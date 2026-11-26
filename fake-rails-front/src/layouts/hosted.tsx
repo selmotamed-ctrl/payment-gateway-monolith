@@ -1,4 +1,5 @@
-import { dc } from "kt-dc";
+import { createSlot } from "vue";
+import { dc } from "@/utils/dc";
 
 export const HostedLayout = dc(
   (props: { title?: string }, _expose, { slots }) => {
@@ -6,7 +7,7 @@ export const HostedLayout = dc(
       <div class="pg-hosted">
         <div class="pg-hosted__card">
           {props.title ? <h2 style={{ marginTop: 0 }}>{props.title}</h2> : null}
-          {slots.default?.()}
+          {createSlot("default")}
         </div>
       </div>
     );

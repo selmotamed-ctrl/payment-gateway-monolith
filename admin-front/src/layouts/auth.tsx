@@ -1,4 +1,5 @@
-import { defineComponent } from "vue";
+import { createSlot } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import LogoSvg from "@/assets/images/logo.svg";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -45,7 +46,7 @@ export const AuthLayout = defineComponent({
                     <div style={{ position: "absolute", top: "16px", insetInlineEnd: "16px", zIndex: 2 }}>
                         <ThemeMenu />
                     </div>
-                    <div class="pg-auth-panel">{slots.default?.()}</div>
+                    <div class="pg-auth-panel">{createSlot("default")}</div>
                 </main>
             </div>
         );

@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { VAlert, VBtn, VSelect, VTextField } from "vuetify/components";
@@ -395,7 +395,7 @@ const AdminFakeRailsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={t("Fake Rails Accounts & Clearing")} subtitle={t("Global test customers, balances, states, chaos and synthetic settlements.")} badge="SANDBOX" badgeTone="warning" end={() => <div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => load()}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!accountsSummary.value} onClick={() => void copyFakeRailsSummary()}>{t("Copy summary")}</VBtn><VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportAccounts()}>{t("Export summary")}</VBtn></div>} />
+            <PageHeader title={t("Fake Rails Accounts & Clearing")} subtitle={t("Global test customers, balances, states, chaos and synthetic settlements.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => load()}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!accountsSummary.value} onClick={() => void copyFakeRailsSummary()}>{t("Copy summary")}</VBtn><VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportAccounts()}>{t("Export summary")}</VBtn></div></PageHeader>
             <SandboxBanner />
             <div class="mb-4"><SegmentedTabs modelValue={tab.value} tabs={[{ label: t("Accounts"), value: "ACCOUNTS" }, { label: t("Clearing"), value: "CLEARING" }, { label: t("Chaos"), value: "CHAOS" }, { label: t("Transactions"), value: "TRANSACTIONS" }, { label: t("Webhooks"), value: "WEBHOOKS" }]} onUpdate:modelValue={(value: string) => (tab.value = value as Tab)} /></div>
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}

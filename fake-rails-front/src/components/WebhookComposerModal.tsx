@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { VAlert, VBtn, VSelect, VSwitch, VTextField } from "vuetify/components";
 import { FormModal } from "@/components/ui/FormModal";

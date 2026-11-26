@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { VBtn, VCard, VCardText, VChip, VMenu } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { ThemedView } from "@/components/ThemedView";

@@ -1,7 +1,7 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { Field, type FieldProps } from "../Field";
 import { VCol, VContainer, VDivider, VRow } from "vuetify/components";
-import { useDisplay, useTheme } from "vuetify";
+import { useDisplay, useTheme } from "@/utils/vuetify-compat";
 import { defaultBoxShadow } from "@/constants/styling";
 import { ThemedView } from "../ThemedView";
 

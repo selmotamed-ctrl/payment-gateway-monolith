@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { VAlert, VBtn, VChip, VDivider, VSelect, VTextField } from "vuetify/components";
 import { api } from "@/state/api";

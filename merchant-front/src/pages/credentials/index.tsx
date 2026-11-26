@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
 import { VBtn, VSelect, VTextField } from "vuetify/components";
@@ -169,15 +169,11 @@ const CredentialsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("Merchant Credentials")}
-                    subtitle={t("Gateway credential sets and rotation posture.")}
-                    end={() => (
+                <PageHeader title={t("Merchant Credentials")} subtitle={t("Gateway credential sets and rotation posture.")}>(
                         <VBtn variant="tonal" onClick={() => openDialog(null)}>
                             {t("Create")}
                         </VBtn>
-                    )}
-                />
+                    )</PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />

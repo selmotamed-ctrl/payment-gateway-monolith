@@ -1,5 +1,12 @@
+import ThemedText from "@/components/ThemedText/index";
+import Button from "@/components/Button/index";
+import TextField from "@/components/TextField/index";
+import Autocomplete from "@/components/Autocomplete/index";
+import ApiAutocomplete from "@/components/ApiAutocomplete/index";
+import DateInput from "@/components/DateInput/index";
+import { computed, ref } from "vue";
 import { isEmpty, type RulesList } from "@/utils/clientValidationRules";
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VChip, VForm } from "vuetify/components";
 
@@ -153,10 +160,7 @@ const FilterContainer = dc(
         const { t } = useLocale();
         const valid = ref(false);
         return () => {
-            if (!props.filtersDescription.length) {
-                return <></>;
-            }
-            return (
+            return (!props.filtersDescription.length ? <></> : (
                 <div class="pg-filters-container">
                     <ActiveFilters<any>
                         clear={props.onClear}
@@ -294,7 +298,7 @@ const FilterContainer = dc(
                         ></Button>
                     </div>
                 </div>
-            );
+            ));
         };
     },
     {

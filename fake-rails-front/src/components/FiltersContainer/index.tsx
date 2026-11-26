@@ -1,4 +1,5 @@
-import { computed, defineComponent, type PropType, type VNodeChild } from "vue";
+import { computed, type PropType, type VNodeChild } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useLocale } from "vuetify";
 import { VAutocomplete, VBtn, VIcon, VTextField } from "vuetify/components";
 
@@ -42,8 +43,7 @@ export const FiltersContainer = defineComponent({
     };
 
     return (): VNodeChild => {
-      if (!props.filtersDescription.length) return null;
-      return (
+      return (!props.filtersDescription.length ? null : (
         <div class="pg-filters-container">
           {props.showActiveFilters && active.value.length > 0 ? (
             <div class="pg-filters-container__active">
@@ -139,7 +139,7 @@ export const FiltersContainer = defineComponent({
             </VBtn>
           </div>
         </div>
-      );
+      ));
     };
   },
 });

@@ -1,5 +1,6 @@
 import { dc } from "@/utils/dc";
-import { defineComponent, type HTMLAttributes, type ReservedProps } from "vue";
+import { type HTMLAttributes, type ReservedProps, createSlot, ref } from "vue";
+import { defineComponent } from "@/utils/dc";
 export type ThemedViewProps = HTMLAttributes &
     ReservedProps & {
         disabled?: boolean;
@@ -20,8 +21,7 @@ export const ThemedView = dc<
 
         return () => {
             const props = attrs as ThemedViewProps;
-            if (props.href) {
-                return (
+            return (props.href ? (
                     <a
                         {...props}
                         ref={(_r) => {
@@ -48,11 +48,9 @@ export const ThemedView = dc<
                                   }
                         }
                     >
-                        {slots.default?.()}
+                        {createSlot("default")}
                     </a>
-                );
-            }
-            return (
+                ) : (
                 <div
                     {...props}
                     ref={(_r) => {
@@ -70,9 +68,9 @@ export const ThemedView = dc<
                     class={`${props.onClick && !p.noHoverable ? "hoverable" : ""} ${p.animated !== false ? "themed-view-animated" : ""}`}
                     onClick={p.disabled ? undefined : props.onClick}
                 >
-                    {slots.default?.()}
+                    {createSlot("default")}
                 </div>
-            );
+            ));
         };
     },
     {

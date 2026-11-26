@@ -1,4 +1,5 @@
-import { defineComponent, onBeforeUnmount, ref, watch } from "vue";
+import { onBeforeUnmount, ref, watch } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { LEDGER_START, formatScaled, nextAmount } from "../../../content/landing/landingModel";
 import { useInView, usePageVisible, useReducedMotion } from "./motion";
 

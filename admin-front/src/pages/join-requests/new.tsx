@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
@@ -257,17 +257,11 @@ const JoinRequestNewPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader
-                    title={t("New admin-assisted join request")}
-                    subtitle={t("Prepare a complete onboarding package on behalf of a merchant without bypassing maker-checker controls.")}
-                    badge={t("Admin assisted")}
-                    badgeTone="info"
-                    end={() => (
+                <PageHeader title={t("New admin-assisted join request")} subtitle={t("Prepare a complete onboarding package on behalf of a merchant without bypassing maker-checker controls.")} badge={t("Admin assisted")} badgeTone="info">(
                         <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "JoinRequests" })}>
                             {t("Back to queue")}
                         </VBtn>
-                    )}
-                />
+                    )</PageHeader>
 
                 <VAlert type="info" variant="tonal">
                     {t(

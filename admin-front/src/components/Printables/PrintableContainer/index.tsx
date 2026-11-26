@@ -1,5 +1,6 @@
-import { dc } from "kt-dc";
-import { useTheme } from "vuetify";
+import { createSlot } from "vue";
+import { dc } from "@/utils/dc";
+import { useTheme } from "@/utils/vuetify-compat";
 import { PrintableThemedView } from "../PrintableThemedView.tsx";
 
 export type PrinterContainerProps = {
@@ -55,7 +56,7 @@ export const PrintableContainer = dc(
                                 width: "100%",
                             }}
                         >
-                            {slots.default?.()}
+                            {createSlot("default")}
                         </PrintableThemedView>
                     </PrintableThemedView>
                 </>

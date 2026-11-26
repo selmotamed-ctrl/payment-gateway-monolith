@@ -1,4 +1,5 @@
-import { computed, defineComponent, onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
+import { defineComponent } from "@/utils/dc";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "vuetify";
 import { AcademyShell, Skeleton } from "@/components/academy/AcademyShell";

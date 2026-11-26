@@ -1,4 +1,4 @@
-import { dc } from "kt-dc";
+import { dc } from "@/utils/dc";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { VAlert, VBtn } from "vuetify/components";

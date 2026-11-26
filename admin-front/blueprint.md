@@ -6,7 +6,7 @@ Generated from: `admin-ui.system`, `admin-ui.routes`, `admin-ui.tables`, `admin-
 
 ## Admin UI System
 
-> Status: `partial` · Last verified: 2026-11-12
+> Status: `partial` · Last verified: 2026-11-26
 
 ## 1. Purpose and scope
 
@@ -322,6 +322,12 @@ quarantine/AV queue; and the access audit trail. Authority-gated actions:
 `system:storage:read` (view), `system:storage:admin`
 (maintenance/rewrap/GC/scrub/AV scan), `system:storage:legal-hold`
 (place/lift hold with a written reason).
+
+## 18. Vue 3.6 / Vapor experimental migration (2026-11-26)
+
+A worktree branch (`vapor-migration`) upgrades the four Vue portals to Vue `3.6.0-rc.16`, `vue-jsx` `3.3.0-rc.7` with `vapor: true`, Vue Router `5.5.2` (Vapor `RouterView`/`RouterLink`), Vuetify `3.13.8`, rolldown-vite `7.3.1` and `vue-tsc` `3.3.14`. All application components are wrapped with the local `dc`/`defineComponent` Vapor helper, all `.vue` SFCs are converted to TSX, auto-import/component plugins are removed, and the Vuetify composables `useTheme`/`useDisplay` are shimmed because their `getCurrentInstance` checks do not see Vapor setup instances.
+
+The migration is deliberately **not merged or released**. Vuetify has no Vapor renderer; Vuetify components remain Virtual DOM through `vaporInteropPlugin`. The branch proves that Vapor app components, Vapor Router 5, Vapor slots (`createSlot`), Vuetify forms/dialogs/tooltips and the fake-rails portal work, but also exposes an interop limitation: a Vuetify component (for example `VBtn`) placed directly inside a nested Vapor slot can fail to mount, which leaves some admin/merchant page-header action groups empty. Until Vue 3.6/`vue-jsx` are stable and the Vuetify slot interop is resolved (or Vuetify provides Vapor components), the four portals must stay on the existing Vue 3.5/Vuetify 3.10 Virtual DOM implementation. The `fake-rails-front` Vapor pilot remains the reference implementation.
 
 ## Admin Route and Page Catalog
 

@@ -1,5 +1,7 @@
-import { computed, defineComponent, onMounted, ref } from "vue";
-import { RouterLink, useRoute } from "vue-router";
+import { computed, onMounted, ref } from "vue";
+import { defineComponent } from "@/utils/dc";
+import { useRoute } from "vue-router";
+import { RouterLink } from "vue-router/experimental/vapor";
 import { PageHeader } from "@/components/ui/PageHeader";
 import ScreenContainer from "@/components/ScreenContainer";
 import { MarkdownView } from "@/components/guide/MarkdownView";
