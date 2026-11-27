@@ -24,13 +24,14 @@ Read the canonical design before changing behavior:
 | `admin-back/` | LAN-only admin edge BFF. mTLS client to core; least-in-flight `CORE_BACK_URLS` pool. |
 | `merchant-back/` | Merchant portal and external `pg_live_` API edge BFF. mTLS client to core. |
 | `checkout-back/` | Public checkout, return and raw webhook edge BFF. mTLS client to core. |
-| `admin-front/` | Vue 3 + Vuetify 3 + TSX admin portal. |
-| `merchant-front/` | Vue 3 + Vuetify 3 + TSX merchant portal. |
-| `checkout-front/` | Vue 3 + Vuetify 3 + TSX hosted payer checkout. |
-| `fake-rails-back/`, `fake-rails-front/` | Optional Fake Payment Rails emulator and tester portal. |
+| `admin-front/` | Vue 3.6 Vapor + `@pg/ui` + TSX admin portal. |
+| `merchant-front/` | Vue 3.6 Vapor + `@pg/ui` + TSX merchant portal. |
+| `checkout-front/` | Vue 3.6 Vapor + `@pg/ui` + TSX hosted payer checkout. |
+| `fake-rails-back/`, `fake-rails-front/` | Optional Fake Payment Rails emulator and tester portal (Vue 3.6 Vapor + `@pg/ui`). |
 | `deploy/` | Multi-host deploy engine, PKI, firewall, storage provisioners, templates and `pg-backup-daemon`. |
 | `tests/` | Playwright and Vitest suites, including mocked UI, exhaustive surface and live-stack journeys. |
 | `companion-app/` | Offline Android Guide + Academy companion (Capacitor/Vue), generated content bundle and signed APK build. |
+| `packages/ui/` | Shared 2026 Fintech Vapor design system (`@pg/ui`): tokens, primitives, table family, tests and the UI governance audit. |
 | `project-design/` | Canonical design, generated status, tracker and appendices. |
 | `scripts/` | Local deployment, exhaustive-suite and storage-benchmark runners. |
 
@@ -290,3 +291,16 @@ Never hand-edit generated files: `project-design/PROJECT_DESIGN.md`, `project-de
 - [`deploy/DEPLOYMENT_GUIDE.md`](deploy/DEPLOYMENT_GUIDE.md) — multi-host deployment, PKI, firewall, backups and recovery.
 - [`project-design/parts/00-platform/01-service-topology.md`](project-design/parts/00-platform/01-service-topology.md) — canonical topology and trust boundaries.
 - [`project-design/parts/00-platform/02-security-and-mtls.md`](project-design/parts/00-platform/02-security-and-mtls.md) — security controls and known limitations.
+
+## Shared UI (`@pg/ui`)
+
+The four web portals share one 2026 Fintech Vapor design system in [`packages/ui`](packages/ui/CATALOG.md). It owns the tokens (`packages/ui/src/tokens/**`), the provider, all form controls, tables, alerts, toasts, dialogs/drawers, the metric strip and the icon registry. Each portal consumes it through the `@pg/ui` Vite/TS alias and imports `@pg/ui/tokens/index.css` once in `main.ts`; there are no per-portal shims or copied token stylesheets.
+
+```bash
+bun run ui:audit        # UI-01..UI-11 governance gate across the four portals
+bun run ui:test         # @pg/ui unit tests
+bun run ui:typecheck    # Vapor component typecheck
+bun run ui:icons:check  # generated icon registry is current
+```
+
+The human/agent policy is in [`AGENTS.md`](AGENTS.md#ui--design-system-governance-strict--zero-exceptions).

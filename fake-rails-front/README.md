@@ -1,7 +1,7 @@
 # fake-rails-front
 
 Tester portal and hosted-checkout simulator for the optional Fake Payment Rails
-tier. It is a Vue 3 + Vuetify 3 + TSX SPA built with Vite.
+tier. It is a Vue 3.6 Vapor + `@pg/ui` + TSX SPA built with Vite.
 
 This is a developer/test surface, not a payer product. It can approve a payment
 without money moving, forge webhook signatures, drop callbacks, show raw wire
@@ -278,3 +278,9 @@ Related implementation:
 ## Security notes (2026-11-05)
 
 The postMessage target is `VITE_CHECKOUT_ORIGIN` (otherwise the embedding parent's origin, never `*`) and `redirect_url` must be http(s) without credentials. The SSE token is still in the query string and `/hosted/*` is still public with no token on the action POST (open gap).
+
+## UI system (`@pg/ui`)
+
+All primitives, tokens, tables, alerts, toasts and dialogs come from the shared package [`packages/ui`](../packages/ui/CATALOG.md). The portal imports `@pg/ui/tokens/index.css` once in `main.ts`, mounts `PgProvider` with `src/uiConfig.tsx`, and never copies a component or token stylesheet locally. The Vite/TS alias points at `packages/ui/src`, so the portal compiles the same Vapor source.
+
+Before finishing a UI change run `bun run ui:audit`, `bun run ui:test` and `bun run ui:typecheck` from the repository root. The gate rejects raw `<select>`/date/checkbox/text/textarea controls, direct `vael-ui`/`VuetifyShim` imports, page hex colours, container padding overrides, hand-styled alerts, duplicated primitive directories and legacy stylesheets.

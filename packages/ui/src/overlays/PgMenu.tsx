@@ -70,7 +70,7 @@ export const PgMenu = dc(
                             {slots.default?.()}
                         </div>
                     )}
-                
+
 </span>
         );
     },

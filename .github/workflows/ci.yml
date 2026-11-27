@@ -36,6 +36,24 @@ jobs:
         run: |
           if git rev-parse --verify -q HEAD^1 >/dev/null; then git diff --check HEAD^1 HEAD; fi
 
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install @pg/ui
+        working-directory: packages/ui
+        run: bun install --frozen-lockfile
+      - name: UI governance audit (UI-01..UI-11)
+        run: bun run ui:audit
+      - name: Icon registry is current
+        run: bun run ui:icons:check
+      - name: Typecheck @pg/ui
+        run: bun run ui:typecheck
+      - name: Test @pg/ui
+        run: bun run ui:test
+
   core-back:
     runs-on: ubuntu-latest
     timeout-minutes: 30

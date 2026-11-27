@@ -12,7 +12,7 @@ compiled by every portal with `vueJsx({ vapor: true })`. No portal has its own c
 
 ## Conventions
 
-- Vue 3.6 Vapor only: `dc`/`defineComponent` from `@pg/ui`, reactive getters inside the returned render closure.
+- Vue 3.6 Vapor only: `dc`/`defineComponent` from `@pg/ui`, reactive getters inside the returned render closure. Use `createIf` for a reactive loading/error/content branch instead of a top-level early return.
 - All props are optional unless marked required; `modelValue` + `update:modelValue` is the standard model contract.
 - Vuetify-compatible spellings are accepted where pages already use them (`items`, `itemTitle`, `itemValue`,
   `variant="flat"`, `color="primary"`, `prependIcon`, `to`, `density="compact"`, `hideDetails`, `rules`).
@@ -98,7 +98,6 @@ layout classes that existed before the migration.
 | `PgDetailsDialog` / `DetailsFieldsDialog` | Read-only detail sections with status/reference/money formatting. |
 | `PgCommandPalette` | Bare 56 px search header, ESC badge and padded results list. |
 | `PgMenu`, `PgTooltip` | Teleport-free fixed positioning (Vapor-safe) with viewport flip, Escape and outside close. |
-| `PgPopover` | Reserved for feature-level floating panels. |
 
 ## Data
 
@@ -118,7 +117,6 @@ layout classes that existed before the migration.
 | Export | Notes |
 | :--- | :--- |
 | `PgThemeMenu`, `PgThemeLanguageControls` | System/Light/Dark menu and language switcher. |
-| `PgSandboxBanner` | Warning banner; composes `PgAlert`. |
 
 ## Governance
 

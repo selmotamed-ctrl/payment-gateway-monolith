@@ -17,8 +17,8 @@ Status: `partial`. The route catalog, UI system, tables, contextual help, backup
 
 | Area | Implementation |
 | :--- | :--- |
-| Framework | Vue 3.5, Vuetify 3.10, TypeScript/TSX |
-| Build | Vite (`rolldown-vite`) with `unplugin-vue-router`, auto-imports and Vuetify auto-import |
+| Framework | Vue 3.6 Vapor, `@pg/ui`, TypeScript/TSX |
+| Build | Vite (`rolldown-vite`) with `vue-jsx({ vapor: true })`, Vue Router 5.5 and the `@pg/ui` alias |
 | Routing/state | `vue-router` 4, local reactive state modules under `src/state` |
 | Data/i18n | Axios, `vue-i18n` 11, self-hosted Plus Jakarta Sans, Cairo and JetBrains Mono |
 | Tables/exports | Shared table subsystem plus ExcelJS/XLSX under `src/utils/xlsx` |
@@ -197,9 +197,9 @@ Public routes are `/login` (`Login`, visitor-only) and `/:pathMatch(.*)*` (`NotF
 
 ### Tokens and shell
 
-- `src/styles/fintech-minimal.css` defines the `--pg-*` tokens: neutral canvas/surface colors, semantic status backgrounds/borders/dots, radii, low-spread shadows and explicit page/card/table/filter/chip/footer padding.
+- `packages/ui/src/tokens/components.css` defines the `--pg-*` tokens: neutral canvas/surface colors, semantic status backgrounds/borders/dots, radii, low-spread shadows and explicit page/card/table/filter/chip/footer padding.
 - Fonts are self-hosted: Plus Jakarta Sans for Latin/LTR, Cairo for Arabic/RTL, JetBrains Mono for references, hashes and technical strings.
-- Vuetify defaults: ripple off, flat rounded cards, 36 px no-transform buttons, outlined compact fields with automatic detail hiding, restrained dialog scrim and RTL-aware locale.
+- `@pg/ui` tokens: ripple off, flat rounded cards, 36 px no-transform buttons, outlined compact fields with automatic detail hiding, restrained dialog scrim and RTL-aware locale.
 - The authenticated shell is a 56 px app bar plus a 248 px drawer (temporary below the compact breakpoint). It includes breadcrumbs, global/guide search, contextual help, theme/locale controls, a live ledger invariant pill for finance readers and an operator card with maker/checker dots. The auth layout is a split-screen institutional panel.
 - Do not reintroduce a global `#app` transform/scale. The removed scaling behavior is checked by shell tests.
 
@@ -207,7 +207,7 @@ Public routes are `/login` (`Login`, visitor-only) and `/:pathMatch(.*)*` (`NotF
 
 The required barrel exports are `PageHeader`, `StatusBadge`, `MoneyDisplay`, `MonoRef`, `MetricStrip`, `SurfaceCard`, `FormModal`, `FormField`, `SlideOverDrawer`, `DescriptionList`, `SegmentedTabs`, `EmptyState` and `JsonDiffViewer`. Extras are `SurfaceCardText`, `MetaPill`, `FormChecklist` and `SummaryExportCard`. The unified table subsystem is the fourteenth deliverable but is not one of the 13 named primitive exports.
 
-The compliance test (`src/components/ui/__tests__/ui-abstraction-compliance.test.ts`) enforces the primitive exports, `PageHeader` usage on standard pages, no raw `VDialog`/`VChip`/`VCard` in route pages, no rainbow row tints, no gradients in the table/card/header system, `TableRowActions` discipline and the v2 table/container classes. Use primitives and `--pg-*` tokens rather than page-local colors.
+The compliance test (`bun run ui:audit`) enforces the primitive exports, `PageHeader` usage on standard pages, no raw `VDialog`/`VChip`/`VCard` in route pages, no rainbow row tints, no gradients in the table/card/header system, `TableRowActions` discipline and the v2 table/container classes. Use primitives and `--pg-*` tokens rather than page-local colors.
 
 ### Tables
 
@@ -227,8 +227,8 @@ The compliance test (`src/components/ui/__tests__/ui-abstraction-compliance.test
 ## 8. i18n, RTL and authority conventions
 
 - Locales are Arabic (`ar`) and English (`en`). Arabic is the default: the stored `locale-name` is treated as English only when it is exactly `en`; otherwise the app starts in Arabic.
-- The selected locale is stored in `localStorage`, applied to `<html lang>`/`dir` (`rtl` for Arabic, `ltr` for English) and passed to Vuetify's locale adapter.
-- User-facing text comes from `src/constants/i18nCatalogue.ts` as `[English, Arabic]` pairs, plus Vuetify locale messages. Keep both catalogues in sync.
+- The selected locale is stored in `localStorage`, applied to `<html lang>`/`dir` (`rtl` for Arabic, `ltr` for English) and passed to vue-i18n.
+- User-facing text comes from `src/constants/i18nCatalogue.ts` as `[English, Arabic]` pairs, plus the shared catalogue. Keep both catalogues in sync.
 - Guide and academy content carries per-item English/Arabic fields. Coverage is content-dependent; the Academy UI chrome is bilingual but lesson, lab and exam content is English only. Contextual-help mapping titles are English-only.
 - Route authorities use OR semantics: any listed authority passes. Role lists are additional, currently only on AML routes. Missing/empty authority arrays mean "no UI gate".
 - Backend authorization remains authoritative. A page can render and then fail its API calls when authority is missing.
@@ -286,3 +286,9 @@ Relevant browser suites (from `tests/`): admin shell, table/padding geometry, ac
 ## Environment file (2026-11-05)
 
 The real `.env` is no longer tracked. On a fresh clone run `cp .env.example .env`. See `project-design/parts/` for the frontend security notes and `project-design/TRACKER.md` for open gaps.
+
+## UI system (`@pg/ui`)
+
+All primitives, tokens, tables, alerts, toasts and dialogs come from the shared package [`packages/ui`](../packages/ui/CATALOG.md). The portal imports `@pg/ui/tokens/index.css` once in `main.ts`, mounts `PgProvider` with `src/uiConfig.tsx`, and never copies a component or token stylesheet locally. The Vite/TS alias points at `packages/ui/src`, so the portal compiles the same Vapor source.
+
+Before finishing a UI change run `bun run ui:audit`, `bun run ui:test` and `bun run ui:typecheck` from the repository root. The gate rejects raw `<select>`/date/checkbox/text/textarea controls, direct `vael-ui`/`VuetifyShim` imports, page hex colours, container padding overrides, hand-styled alerts, duplicated primitive directories and legacy stylesheets.

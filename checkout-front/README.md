@@ -18,8 +18,8 @@ Status: `partial`. The payer flow, five action renderers, SSE status consumption
 
 | Area | Implementation |
 | :--- | :--- |
-| Framework | Vue 3.5, Vuetify 3.10, TypeScript/TSX |
-| Build | Vite (`rolldown-vite`) with `unplugin-vue-router`, auto-imports and Vuetify auto-import |
+| Framework | Vue 3.6 Vapor, `@pg/ui`, TypeScript/TSX |
+| Build | Vite (`rolldown-vite`) with `vue-jsx({ vapor: true })`, Vue Router 5.5 and the `@pg/ui` alias |
 | Routing/state | `vue-router` 4, local reactive state under `src/state` |
 | Data/i18n | Axios, `vue-i18n` 11, self-hosted Plus Jakarta Sans, Cairo and JetBrains Mono |
 | Validation | Zod plus checkout field normalizers under `src/utils/zReady.ts` |
@@ -214,7 +214,7 @@ The setting is a support-channel switch, not a global help kill switch. There is
 
 ## 8. UI system and conventions
 
-- Checkout uses the shared `--pg-*` token sheet and self-hosted Plus Jakarta Sans/Cairo/JetBrains Mono fonts. Vuetify defaults are flat cards, 36 px no-transform buttons, outlined compact fields, ripple off and RTL-aware locale.
+- Checkout uses the shared `--pg-*` token sheet and self-hosted Plus Jakarta Sans/Cairo/JetBrains Mono fonts. `@pg/ui` tokens are flat cards, 36 px no-transform buttons, outlined compact fields, ripple off and RTL-aware locale.
 - The payer layout is intentionally not the admin/merchant shell. `layouts/checkout.tsx` renders one `<main class="pg-checkout">`; the page adds a max-width 560 px column centered on desktop and top-aligned on small screens.
 - The page composes a focused subset of primitives: `SurfaceCard`, `DescriptionList`, `MoneyDisplay`, `MonoRef`, `StatusBadge`, `EmptyState`, `SlideOverDrawer`, `MetaPill` and `FormField`.
 - There is no table/export workflow on the payer surface. Shared table/XLSX packages exist in the workspace, but checkout does not expose spreadsheet export.
@@ -224,9 +224,9 @@ The setting is a support-channel switch, not a global help kill switch. There is
 ## 9. i18n and RTL
 
 - Locales are Arabic (`ar`) and English (`en`). Arabic is the default: `locale-name` is treated as English only when stored as exactly `en`; otherwise the app starts in Arabic.
-- The locale is stored in `localStorage`, applied to `<html lang>`/`dir` (`rtl` for Arabic, `ltr` for English) and passed to Vuetify's locale adapter.
+- The locale is stored in `localStorage`, applied to `<html lang>`/`dir` (`rtl` for Arabic, `ltr` for English) and passed to vue-i18n.
 - The payer header language toggle stores the next locale and reloads the page.
-- User-facing text comes from `src/constants/i18nCatalogue.ts` as `[English, Arabic]` pairs plus Vuetify messages. Keep both in sync.
+- User-facing text comes from `src/constants/i18nCatalogue.ts` as `[English, Arabic]` pairs plus the shared catalogue. Keep both in sync.
 - Rail names, field labels/placeholders, help steps, prerequisites, troubleshooting, working hours and FAQ use selected-language-first fallback to the other language. FAQ items render only when the selected-language pair is complete.
 - The drawer's section titles and state guidance are bilingual inline.
 
@@ -284,3 +284,9 @@ Browser/unit coverage comes from the `tests/` workspace:
 ## Environment file (2026-11-05)
 
 The real `.env` is no longer tracked. On a fresh clone run `cp .env.example .env`. See `project-design/parts/` for the frontend security notes and `project-design/TRACKER.md` for open gaps.
+
+## UI system (`@pg/ui`)
+
+All primitives, tokens, tables, alerts, toasts and dialogs come from the shared package [`packages/ui`](../packages/ui/CATALOG.md). The portal imports `@pg/ui/tokens/index.css` once in `main.ts`, mounts `PgProvider` with `src/uiConfig.tsx`, and never copies a component or token stylesheet locally. The Vite/TS alias points at `packages/ui/src`, so the portal compiles the same Vapor source.
+
+Before finishing a UI change run `bun run ui:audit`, `bun run ui:test` and `bun run ui:typecheck` from the repository root. The gate rejects raw `<select>`/date/checkbox/text/textarea controls, direct `vael-ui`/`VuetifyShim` imports, page hex colours, container padding overrides, hand-styled alerts, duplicated primitive directories and legacy stylesheets.

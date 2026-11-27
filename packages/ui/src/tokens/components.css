@@ -2636,3 +2636,20 @@ html, body, #app { margin: 0; padding: 0; height: 100%; }
     background: transparent;
     overflow: visible;
 }
+
+/* Checkbox + label sit on one row (vael-ui defaults to a column). */
+.pg-checkbox-field .ui-checkbox,
+.pg-checklist .ui-checkbox {
+    display: inline-flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    width: 100%;
+    gap: 8px;
+}
+.pg-checkbox-field .ui-checkbox-label,
+.pg-checklist .ui-checkbox-label {
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--pg-ink-primary);
+}

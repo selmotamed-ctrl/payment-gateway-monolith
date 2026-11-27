@@ -91,7 +91,7 @@ export const PgDrawer = dc(
                             {slots.footer && <div class="pg-drawer__footer">{slots.footer()}</div>}
                         </aside>
                     </div>
-                
+
 );
         };
     },

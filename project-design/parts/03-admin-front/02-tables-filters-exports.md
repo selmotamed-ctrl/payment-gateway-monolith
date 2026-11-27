@@ -33,9 +33,9 @@ gaps:
 
 ## 1. Purpose and scope
 
-This part owns the shared table subsystem in `admin-front`: `ApiTable`, `DataTable`, `TableFilters`, `TableRowActions`, `tableRegistry`, the table header/footer chrome, XLSX export, summary export cards, and the runtime checklist flags that gate export/action checklists.
+The table primitives (`Table`, `TableFilters`, `TableRowActions`, `HeaderFooter`, `ApiTable`, filter types, status tone and the table CSS) live in `packages/ui/src/data/table/**` and are shared by every portal. This part owns the admin table layer built on them: `DataTable`, `tableRegistry`, `referenceOptions`, the admin XLSX/export and summary-export cards, and the runtime checklist flags that gate export/action checklists.
 
-It does not own the business meaning of each column or the backend list endpoints. Those belong to the page and API parts. It also does not claim that the table subsystem is identical in every portal: merchant and Fake Rails have copies of the same components, while checkout uses only a minimal subset.
+It does not own the business meaning of each column or the backend list endpoints. Those belong to the page and API parts. It also does not claim that every portal uses the same table features: merchant and Fake Rails reuse the shared primitives on their own registry-like pages, while checkout uses only a minimal subset.
 
 ## 2. Design intent (extracted and synthesized from ./design)
 
@@ -58,26 +58,26 @@ The v2 design intends tables to look operational rather than decorative:
 
 | Component | File | Responsibility |
 | :--- | :--- | :--- |
-| `ApiTable` | `admin-front/src/tables/ApiTable.tsx` | Page-driven server fetch. The parent supplies `onRefresh`, data/total extractors, headers and optional filters. Supports local search suppression, refresh hooks, and XLSX export of the rendered page. |
+| `ApiTable` / `PgApiTable` | `packages/ui/src/data/table/PgApiTable.tsx` | Page-driven server fetch. The parent supplies `onRefresh`, data/total extractors, headers and optional filters. Supports local search suppression, refresh hooks, and XLSX export of the rendered page. |
 | `DataTable` | `admin-front/src/tables/DataTable.tsx` | Either local data mode or "server" mode driven by a `server` prop or `tableRegistry[route.name]`. Server mode fetches one page of up to 200 rows and paginates locally. Persists server search/filter/sort state in `sessionStorage`. |
-| `Table` | `admin-front/src/tables/Table.tsx` | Renders the Vuetify table, compact row styling, selection, column filters, row tone, and cell rendering. |
-| `TableFilters` | `admin-front/src/tables/TableFilters.tsx` | Renders filter controls by type, active chips, summary text, a mobile/desktop surface, and an injection key so the toolbar can toggle filters. |
-| `TableRowActions` | `admin-front/src/tables/TableRowActions.tsx` | One optional primary action plus a right-aligned overflow menu. Supports danger/disabled/hidden items and dividers. It also binds the row context menu (`contextmenu` + `Shift+F10`), shares the menu panel with the overflow trigger, and owns the one-open-menu coordinator. |
-| `HeaderFooter` | `admin-front/src/tables/HeaderFooter.tsx` | Desktop/mobile toolbar and pagination, search, refresh, filter trigger, record count, XLSX button, and `useTableXlsx`. |
+| `Table` / `PgTable` | `packages/ui/src/data/table/Table.tsx` | Renders the table, compact row styling, selection, column filters, row tone, and cell rendering. |
+| `TableFilters` | `packages/ui/src/data/table/TableFilters.tsx` | Renders filter controls by type, active chips, summary text, a mobile/desktop surface, and an injection key so the toolbar can toggle filters. |
+| `TableRowActions` | `packages/ui/src/data/table/TableRowActions.tsx` | One optional primary action plus a right-aligned overflow menu. Supports danger/disabled/hidden items and dividers. It also binds the row context menu (`contextmenu` + `Shift+F10`), shares the menu panel with the overflow trigger, and owns the one-open-menu coordinator. |
+| `HeaderFooter` | `packages/ui/src/data/table/HeaderFooter.tsx` | Desktop/mobile toolbar and pagination, search, refresh, filter trigger, record count, XLSX button, and `useTableXlsx`. |
 | `tableRegistry` | `admin-front/src/tables/tableRegistry.ts` | Maps a route name to a URL, list key, filters, default sort, optional storage key, params, and row mapper. |
-| `filters` | `admin-front/src/tables/filters.ts` | Filter union type, active-state detection, query mapping, and server config type. |
+| `filters` | `packages/ui/src/data/table/filters.ts` | Filter union type, active-state detection, query mapping, and server config type. |
 | `referenceOptions` | `admin-front/src/tables/referenceOptions.ts` | Cached `/options/:kind` loaders for merchant/rail/gateway/user/wallet filters. |
-| `statusTone` | `admin-front/src/tables/statusTone.ts` | Status-to-tone mapping used by filters and status pills. |
+| `statusTone` | `packages/ui/src/data/table/statusTone.ts` | Status-to-tone mapping used by filters and status pills. |
 
 ### 3.1.1 Row context menu and sticky action column (2026-11-07)
 
 - **Sticky action column.** `.table-wrapper .pg-col-actions` is `position: sticky; inset-inline-end: 0` with an opaque surface background, a header above the body cells, and the hover surface on `tr:hover`. Removing `.modern-table { overflow: hidden }` was required so the sticky cell resolves against `.table-wrapper` (the actual horizontal scroll container).
 - **One integration point.** `TableRowActions` finds its row (`root.closest("tr")`) on mount, marks it with `data-pg-row-actions-bound="true"`, and binds `contextmenu` and `keydown`. No page changes are needed; `MiniTable` rows that use the same component are covered too. The first action cell in a row owns the binding.
 - **Context menu semantics.** Right-click opens the shared menu at the pointer through a hidden fixed activator; Vuetify flips it near the viewport edge and handles RTL. The activator's element ref MUST be composed with the one Vuetify passes in `activatorProps.ref` (`composeActivatorRef`): a second `ref` on the same element, before or after the spread, replaces Vuetify's and the menu then has no anchor and opens at the top-left of the page (found and fixed 2026-11-08; the same applies to the overflow button, whose focus return depends on its own ref). The e2e specs assert the menu position against the pointer. The menu always contains the primary action first (disabled/loading respected), a divider, then the visible overflow items. `hidden`/`disabled`/`dividerBefore` behave exactly as in the overflow menu.
-- **Native exclusions.** `a`, inputs, text areas, selects, contenteditable fields, Vuetify field/checkbox/switch/radio/slider controls and `[data-no-row-context-menu]` keep the browser menu. Right-clicking a button (including the action buttons) opens the row menu.
+- **Native exclusions.** `a`, inputs, text areas, selects, contenteditable fields, `@pg/ui` field/checkbox/switch/choice controls and `[data-no-row-context-menu]` keep the browser menu. Right-clicking a button (including the action buttons) opens the row menu.
 - **Keyboard and focus.** `Shift+F10`/the ContextMenu key on any focused, non-editable element in the row opens the menu anchored at the action cell. Opening moves focus to the first enabled item; `Escape` is handled by a capture-phase window listener (so it also works when another overlay owns the global-top flag and when focus stayed on the row) and `restoreFocus()` returns focus to the overflow/primary button. The visible action button remains the accessible baseline.
 - **One menu at a time.** A module-level closer is registered when either the overflow or the context menu opens; opening another row's menu closes the previous one. The button and context menus share the same panel renderer (max-height `min(70vh, 420px)`, internal scrolling).
-- **Scope.** Admin shared tables (`ApiTable`/`DataTable`/`DataPage`) and `TableRowActions` used inside `MiniTable` rows. Custom inline action cells that do not use `TableRowActions` are not covered. The merchant portal uses the identical component and CSS copy.
+- **Scope.** Admin shared tables (`ApiTable`/`DataTable`/`DataPage`) and `TableRowActions` used inside `MiniTable` rows. Custom inline action cells that do not use `TableRowActions` are not covered. The merchant portal uses the same `packages/ui` component, so both get the behaviour from one implementation.
 
 ### 3.2 Filter types
 
@@ -210,7 +210,8 @@ When checklists are hidden, page-side completeness computations generally become
 
 | Surface | Location |
 | :--- | :--- |
-| Table components | `admin-front/src/tables/**` |
+| Shared table primitives | `packages/ui/src/data/table/**` |
+| App table registry and DataTable | `admin-front/src/tables/**` |
 | Table registry | `admin-front/src/tables/tableRegistry.ts` |
 | Filter types and query mapping | `admin-front/src/tables/filters.ts` |
 | XLSX engine | `admin-front/src/utils/xlsx/**` |

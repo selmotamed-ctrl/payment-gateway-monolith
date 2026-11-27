@@ -18,8 +18,8 @@ Status: `partial`. The 16 portal routes and the guide surfaces are implemented, 
 
 | Area | Implementation |
 | :--- | :--- |
-| Framework | Vue 3.5, Vuetify 3.10, TypeScript/TSX |
-| Build | Vite (`rolldown-vite`) with `unplugin-vue-router`, auto-imports and Vuetify auto-import |
+| Framework | Vue 3.6 Vapor, `@pg/ui`, TypeScript/TSX |
+| Build | Vite (`rolldown-vite`) with `vue-jsx({ vapor: true })`, Vue Router 5.5 and the `@pg/ui` alias |
 | Routing/state | `vue-router` 4, local reactive state modules under `src/state` |
 | Data/i18n | Axios, `vue-i18n` 11, self-hosted Plus Jakarta Sans, Cairo and JetBrains Mono |
 | Tables/exports | Shared table subsystem and ExcelJS/XLSX under `src/utils/xlsx` |
@@ -193,7 +193,7 @@ The page loads the current join request and open revalidations, saves the profil
 
 ## 8. UI system, tables and exports
 
-- The merchant portal mirrors the admin design system: the same `--pg-*` token sheet, self-hosted Plus Jakarta Sans/Cairo/JetBrains Mono fonts, Vuetify defaults, flat surfaces, semantic status colors, 36 px buttons and outlined compact fields.
+- The merchant portal mirrors the admin design system: the same `--pg-*` token sheet, self-hosted Plus Jakarta Sans/Cairo/JetBrains Mono fonts, `@pg/ui` tokens, flat surfaces, semantic status colors, 36 px buttons and outlined compact fields.
 - The authenticated shell is a 56 px app bar plus a 248 px drawer (temporary on compact screens) with Overview, Money, Commerce and Developer sections, breadcrumbs, guide search, help, theme/language controls and an operator card showing merchant role plus maker/checker dots.
 - The shared primitives are `PageHeader`, `StatusBadge`, `MoneyDisplay`, `MonoRef`, `MetricStrip`, `SurfaceCard`, `FormModal`, `FormField`, `SlideOverDrawer`, `DescriptionList`, `SegmentedTabs`, `EmptyState`, `JsonDiffViewer`, plus `SurfaceCardText`, `MetaPill`, `FormChecklist` and `SummaryExportCard`.
 - Tables use the copied shared table subsystem: compact neutral rows, semantic badges, collapsible filters, one primary row action plus `TableRowActions` overflow, and shared XLSX export. Table-header exports follow the admin convention of exporting the rendered page only. The action column is sticky to the inline end and a row right-click / `Shift+F10` opens the same actions (primary action first), while the visible overflow button remains the touch path.
@@ -202,8 +202,8 @@ The page loads the current join request and open revalidations, saves the profil
 ## 9. i18n, RTL and authority conventions
 
 - Locales are Arabic (`ar`) and English (`en`). Arabic is the default: `locale-name` is treated as English only when stored as exactly `en`; otherwise the app starts in Arabic.
-- The locale is stored in `localStorage`, applied to `<html lang>`/`dir` (`rtl` for Arabic, `ltr` for English) and passed to Vuetify's locale adapter.
-- User-facing text comes from `src/constants/i18nCatalogue.ts` as `[English, Arabic]` pairs plus Vuetify messages. Keep both catalogues in sync.
+- The locale is stored in `localStorage`, applied to `<html lang>`/`dir` (`rtl` for Arabic, `ltr` for English) and passed to vue-i18n.
+- User-facing text comes from `src/constants/i18nCatalogue.ts` as `[English, Arabic]` pairs plus the shared catalogue. Keep both catalogues in sync.
 - Guide content has per-chapter English/Arabic titles and bodies; coverage is chapter-dependent, with fallback to the other language where the UI supports it.
 - Route authorities use OR semantics. A missing/empty entry means no UI gate. Backend authorization and merchant scoping remain authoritative.
 - The UI shows maker/checker posture but is not a complete pending-change diff workflow for every sensitive object.
@@ -257,3 +257,9 @@ Relevant browser suites (from `tests/`): merchant shell, auth, accessibility and
 ## Environment file (2026-11-05)
 
 The real `.env` is no longer tracked. On a fresh clone run `cp .env.example .env`. Optional: `VITE_CHECKOUT_BASE_URL` (checkout link base; falls back to `location.origin`) and `VITE_IDENTITY_HOSTS` (https hosts allowed for Google sign-in redirects; default `accounts.google.com`). See `project-design/parts/` for the frontend security notes and `project-design/TRACKER.md` for open gaps.
+
+## UI system (`@pg/ui`)
+
+All primitives, tokens, tables, alerts, toasts and dialogs come from the shared package [`packages/ui`](../packages/ui/CATALOG.md). The portal imports `@pg/ui/tokens/index.css` once in `main.ts`, mounts `PgProvider` with `src/uiConfig.tsx`, and never copies a component or token stylesheet locally. The Vite/TS alias points at `packages/ui/src`, so the portal compiles the same Vapor source.
+
+Before finishing a UI change run `bun run ui:audit`, `bun run ui:test` and `bun run ui:typecheck` from the repository root. The gate rejects raw `<select>`/date/checkbox/text/textarea controls, direct `vael-ui`/`VuetifyShim` imports, page hex colours, container padding overrides, hand-styled alerts, duplicated primitive directories and legacy stylesheets.

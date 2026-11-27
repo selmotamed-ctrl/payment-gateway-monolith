@@ -496,7 +496,7 @@ export const PgAutocomplete = dc(
       id: { type: String, default: "" },
     },
     emits: ["update:modelValue", "search", "change", "clear"],
-   
+
     inheritAttrs: true,
   },
 );

@@ -84,11 +84,16 @@ gaps:
   - GAP-086: @pg/ui is consumed through Vite/TS aliases and each portal keeps its own Bun lockfile, not a hoisted root workspace; this was chosen to avoid disturbing the four independent frontend installs.
 ---
 
+> **Historical note.** Sections 1-18 below describe the pre-2026-11-27 vael-ui compatibility shim and the
+> components that used it. They are retained for history. Section 19 is the current architecture: every
+> primitive and token lives in `packages/ui` (`@pg/ui`), and the shim, local primitive directories and drifted
+> stylesheets are deleted.
+
 # Admin UI System
 
 ## 1. Purpose and scope
 
-> **Current implementation (2026-11-26):** the four portals run the vael-ui Vapor UI layer described in §18. References to Vuetify files, theme configuration and defaults below describe the pre-migration baseline and are retained as historical context; the compatibility layer `components/vael/VuetifyShim.tsx` keeps the existing JSX names while rendering vael-ui components, and the Vuetify dependency is removed.
+> **Historical baseline (superseded 2026-11-27):** sections 1-18 record the Vuetify-era and vael-ui-shim iterations. The current implementation is §19: one `@pg/ui` package, no compatibility shim. References to Vuetify files, per-portal theme configuration, `components/vael/VuetifyShim.tsx`, `fintech-minimal.css`, `vael-shim.css` and `vael-theme.css` describe that history; those files no longer exist.
 
 This part owns the design system and shell used by `admin-front`: visual tokens, self-hosted fonts, vael-ui provider and `--pg-*` theme bridge, the 13 required UI primitives and their extras, the 248 px navigation drawer and 56 px app bar, the split-screen authentication layout, and the cross-workspace rollout rules.
 
@@ -521,10 +526,12 @@ snackbar. That is now replaced by one source of truth.
   `PgAutocomplete`, `PgDateInput`, `PgMenu`, `PgTooltip`, `PgDialog`, `PgDrawer` and `PgCommandPalette` use
   `position: fixed` panels with viewport flip/clamping. They are not clipped by `overflow: hidden` because no
   ancestor establishes a containing block; revisit when the runtime supports Teleport here (GAP-084).
-- **Deviation — dc re-render:** the package `dc` only wraps a render in a `DynamicFragment` when the component
-  opts into `rerender: true` (top-level reactive branches). This avoids the rc's `currentInstance` null crash on
-  DOM prop patches in ordinary components; package components that branch on `modelValue` (dialogs, drawers,
-  state view, money/mono refs) opt in.
+- **Deviation — Vapor dynamic branches:** the rc's manual `DynamicFragment` + `renderEffect` path leaves
+  `currentInstance` null while patching DOM props, so a re-render crashes on `hasFallthrough`. The package and
+  the four app `dc` helpers therefore stay on the normal Vapor path, and branch components (`PgDialog`,
+  `PgDrawer`, `PgCommandPalette`, `PgStateView`, the merchant/KYB/join detail pages) use the runtime's
+  `createIf` for reactive loading/error/content switches. `PgMoneyText`, `PgMonoRef`, `PgDescriptionList`,
+  `PgFieldsSection` and `PgIcon` render one always-present surface instead of a top-level early return.
 - **Deviation — workspace:** `@pg/ui` is consumed by Vite/TS aliases rather than a hoisted Bun workspace so the
   four independent portal lockfiles and installs are untouched (GAP-086). The single-source guarantee is the
   alias, the package barrel and the governance gate, not a root install.

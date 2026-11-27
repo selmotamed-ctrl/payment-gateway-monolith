@@ -324,7 +324,7 @@ export const Table = defineComponent(
                                                                     >
                                                                         <PgView>
                                                                             <PgTextField
-                                                                                
+
                                                                                 density={"compact"}
                                                                                 loading={loadingCells.value[cellKey]}
                                                                                 modelValue={state.value[cellKey]}

@@ -61,7 +61,7 @@ export const PgTooltip = dc(
                             {props.text || props.content}
                         </span>
                     )}
-                
+
 </span>
         );
     },

@@ -80,7 +80,7 @@ export const PgCommandPalette = dc(
                             {slots.footer && <div class="pg-command-palette__footer">{slots.footer()}</div>}
                         </div>
                     </div>
-                
+
 );
         };
     },
