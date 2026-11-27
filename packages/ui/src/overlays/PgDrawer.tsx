@@ -1,4 +1,7 @@
 import { createIf } from "@vue/runtime-vapor";
+
+/** The Vapor JSX return type is a Block at runtime; the public type is narrower. */
+const branch = createIf as any;
 import { computed, ref, useId, watch } from "vue";
 import { dc } from "../lib/dc";
 import { lockBodyScroll, useEscape, useFocusTrap } from "../lib/dom";
@@ -48,9 +51,10 @@ export const PgDrawer = dc(
         useFocusTrap(root, active);
         useEscape(() => emit?.("update:modelValue", false), active);
 
-        return () => {
-            if (!active.value) return null;
-            return (
+        return () =>
+            branch(
+                () => active.value,
+                () => (
 
                     <div
                         class="pg-drawer-backdrop"
@@ -91,9 +95,8 @@ export const PgDrawer = dc(
                             {slots.footer && <div class="pg-drawer__footer">{slots.footer()}</div>}
                         </aside>
                     </div>
-
-);
-        };
+                ),
+            );
     },
     {
         props: {

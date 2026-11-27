@@ -1,4 +1,7 @@
 import { createIf } from "@vue/runtime-vapor";
+
+/** The Vapor JSX return type is a Block at runtime; the public type is narrower. */
+const branch = createIf as any;
 import { computed, nextTick, ref, watch } from "vue";
 import { dc } from "../lib/dc";
 import { useLocale } from "../lib/locale";
@@ -36,9 +39,10 @@ export const PgCommandPalette = dc(
         const close = () => emit?.("update:modelValue", false);
         useEscape(close, active);
 
-        return () => {
-            if (!active.value) return null;
-            return (
+        return () =>
+            branch(
+                () => active.value,
+                () => (
 
                     <div
                         class="pg-dialog-backdrop pg-command-backdrop"
@@ -80,9 +84,8 @@ export const PgCommandPalette = dc(
                             {slots.footer && <div class="pg-command-palette__footer">{slots.footer()}</div>}
                         </div>
                     </div>
-
-);
-        };
+                ),
+            );
     },
     {
         props: {
