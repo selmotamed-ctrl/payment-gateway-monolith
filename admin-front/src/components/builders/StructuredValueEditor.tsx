@@ -1,6 +1,6 @@
 import { ref, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VBtn, VSelect, VSwitch, VTextField } from "@/components/vael/VuetifyShim";
+import {PgButton, PgAutocomplete, PgSwitch, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { ChipListInput } from "./ChipListInput";
 import { RepeatableRows } from "./RepeatableRows";
@@ -53,7 +53,7 @@ export const StructuredValueEditor = defineComponent({
             const kind = treeKindOf(value);
             if (kind === "boolean") {
                 return (
-                    <VSwitch
+                    <PgSwitch
                         modelValue={value === true}
                         onUpdate:modelValue={(next: boolean | null) => onChange(next === true)}
                         color="primary"
@@ -65,7 +65,7 @@ export const StructuredValueEditor = defineComponent({
             }
             if (kind === "number") {
                 return (
-                    <VTextField
+                    <PgTextField
                         type="number"
                         modelValue={String(value)}
                         onUpdate:modelValue={(next: string) => {
@@ -79,7 +79,7 @@ export const StructuredValueEditor = defineComponent({
                 );
             }
             return (
-                <VTextField
+                <PgTextField
                     modelValue={typeof value === "string" ? value : ""}
                     onUpdate:modelValue={(next: string) => onChange(next)}
                     density="compact"
@@ -157,21 +157,21 @@ export const StructuredValueEditor = defineComponent({
                                         {humanizeKey(key)}
                                     </span>
                                     {nested && !props.lockStructure && (
-                                        <VBtn icon="mdi-delete-outline" variant="text" size="small" color="error" aria-label={`${t("Remove")} ${humanizeKey(key)}`} onClick={() => emit("update:modelValue", withoutKey(model as JsonObject, key))} />
+                                        <PgButton icon="mdi-delete-outline" variant="text" size="small" color="error" aria-label={`${t("Remove")} ${humanizeKey(key)}`} onClick={() => emit("update:modelValue", withoutKey(model as JsonObject, key))} />
                                     )}
                                 </div>
                                 <div style={{ minInlineSize: 0 }}>
                                     {valueEditor(value, (next) => emit("update:modelValue", withKey(model as JsonObject, key, next)), humanizeKey(key), props.depth)}
                                 </div>
                                 {!nested && !props.lockStructure && (
-                                    <VBtn icon="mdi-delete-outline" variant="text" size="small" color="error" aria-label={`${t("Remove")} ${humanizeKey(key)}`} onClick={() => emit("update:modelValue", withoutKey(model as JsonObject, key))} />
+                                    <PgButton icon="mdi-delete-outline" variant="text" size="small" color="error" aria-label={`${t("Remove")} ${humanizeKey(key)}`} onClick={() => emit("update:modelValue", withoutKey(model as JsonObject, key))} />
                                 )}
                             </div>
                         );
                     })}
                     {!props.lockStructure && props.depth < MAX_DEPTH && (
                         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-start" }}>
-                            <VTextField
+                            <PgTextField
                                 modelValue={newKey.value}
                                 onUpdate:modelValue={(value: string) => {
                                     newKey.value = value;
@@ -190,7 +190,7 @@ export const StructuredValueEditor = defineComponent({
                                     }
                                 }}
                             />
-                            <VSelect
+                            <PgAutocomplete
                                 modelValue={newKind.value}
                                 onUpdate:modelValue={(value: TreeKind) => (newKind.value = value)}
                                 items={TREE_KIND_LABELS.map((entry) => ({ title: t(entry.label), value: entry.value }))}
@@ -199,7 +199,7 @@ export const StructuredValueEditor = defineComponent({
                                 hideDetails
                                 style={{ flex: "0 0 130px" }}
                             />
-                            <VBtn variant="tonal" size="small" prependIcon="mdi-plus" onClick={addField}>{t("Add field")}</VBtn>
+                            <PgButton variant="tonal" size="small" prependIcon="mdi-plus" onClick={addField}>{t("Add field")}</PgButton>
                         </div>
                     )}
                 </div>

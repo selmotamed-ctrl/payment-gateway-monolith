@@ -2,13 +2,13 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VTextField } from "@/components/vael/VuetifyShim";
+import {PgButton, PgTextField} from "@pg/ui";
 import { AcademyShell } from "@/components/academy/AcademyShell";
 import { TeamTable } from "@/components/academy/TeamTable";
 import { fmtDateTime } from "@/components/academy/format";
 import { Callout } from "@/components/academy/ui/Callout";
 import { IconTile } from "@/components/academy/ui/IconTile";
-import { PageHeader } from "@/components/ui/PageHeader";
+import {PageHeader} from "@pg/ui";
 import { loadTracks } from "@/content/academy";
 import type { TeamResponse } from "@/content/academy/apiTypes";
 import { api } from "@/state/api";
@@ -17,8 +17,8 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { maskEmail } from "@/utils/privacy";
 import { xlsxUIPipeline } from "@/utils/xlsx";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {FormModal} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 
 const EXPORT_CHECKS = [
@@ -163,18 +163,18 @@ const TeamPage = dc(() => {
     const header = () => (
         <PageHeader title={t("Team progress")} subtitle={data.value ? `${t("Updated")} ${fmtDateTime(data.value.generatedAt)} · ${t("Content version")} ${data.value.contentVersion}` : ""} breadcrumbs={[{ label: t("My learning"), to: router.resolve({ name: "AdminAcademy" }).fullPath }, { label: t("Team progress") }]}>(
                 <>
-                    <VBtn variant="outlined" size="small" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
+                    <PgButton variant="outlined" size="small" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
                         {t("Refresh")}
-                    </VBtn>
-                    <VBtn variant="outlined" size="small" prependIcon="mdi-content-copy" disabled={!data.value} onClick={() => void copyTeamSummary()}>
+                    </PgButton>
+                    <PgButton variant="outlined" size="small" prependIcon="mdi-content-copy" disabled={!data.value} onClick={() => void copyTeamSummary()}>
                         {t("Copy team summary")}
-                    </VBtn>
-                    <VBtn variant="outlined" size="small" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>
+                    </PgButton>
+                    <PgButton variant="outlined" size="small" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>
                         {t("Export team progress")}
-                    </VBtn>
-                    <VBtn variant="outlined" size="small" color="error" prependIcon="mdi-certificate-outline" onClick={() => { revokeId.value = ""; revokeReason.value = ""; revokeOpen.value = true; }}>
+                    </PgButton>
+                    <PgButton variant="outlined" size="small" color="error" prependIcon="mdi-certificate-outline" onClick={() => { revokeId.value = ""; revokeReason.value = ""; revokeOpen.value = true; }}>
                         {t("Revoke certificate")}
-                    </VBtn>
+                    </PgButton>
                 </>
             )</PageHeader>
     );
@@ -193,7 +193,7 @@ const TeamPage = dc(() => {
             {loading.value && !data.value ? (
                 skeleton()
             ) : forbidden.value ? (
-                <section class="ac-card ac-team-forbidden" role="alert">
+                <section class="ac-card ac-team-forbidden" aria-live="assertive">
                     <IconTile icon="mdi-lock-outline" large />
                     <h2 class="ac-h2">{t("You are not allowed to see this page")}</h2>
                     <p class="ac-text">{t("Team progress is available to security administrators only.")}</p>
@@ -204,9 +204,9 @@ const TeamPage = dc(() => {
                         <span>
                             {t("We could not load team progress.")} {error.value}
                         </span>
-                        <VBtn variant="outlined" size="small" onClick={() => void load()}>
+                        <PgButton variant="outlined" size="small" onClick={() => void load()}>
                             {t("Retry")}
-                        </VBtn>
+                        </PgButton>
                     </div>
                 </Callout>
             ) : (
@@ -241,7 +241,7 @@ const TeamPage = dc(() => {
                 onSubmit={() => void revokeCertificate()}
             >
                 <div class="ac-stack">
-                    <VTextField
+                    <PgTextField
                         modelValue={revokeId.value}
                         onUpdate:modelValue={(value: string) => (revokeId.value = value)}
                         label={t("Certificate ID")}
@@ -249,7 +249,7 @@ const TeamPage = dc(() => {
                         density="compact"
                         variant="outlined"
                     />
-                    <VTextField
+                    <PgTextField
                         modelValue={revokeReason.value}
                         onUpdate:modelValue={(value: string) => (revokeReason.value = value)}
                         label={t("Reason")}

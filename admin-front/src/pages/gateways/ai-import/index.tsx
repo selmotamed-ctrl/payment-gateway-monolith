@@ -3,12 +3,12 @@ import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VDivider, VExpansionPanel, VExpansionPanelText, VExpansionPanelTitle, VExpansionPanels, VFileInput, VIcon, VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
+import {VAlert, PgButton, PgDivider, PgExpansionPanel, PgExpansionPanelText, PgExpansionPanelTitle, PgExpansionPanels, PgFileUpload, PgIcon, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -16,15 +16,15 @@ import { showSnackBar } from "@/utils/snackBar";
 import { useSafeguard } from "@/components/guide/useSafeguard";
 import { showConfirm } from "@/utils/confirm";
 
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { MetricStrip } from "@/components/ui/MetricStrip";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {MetricStrip} from "@pg/ui";
 type RailKind = "OTP_PULL" | "REDIRECT" | "EMBEDDED" | "QR_DISPLAY" | "PUSH_APPROVAL" | "HYBRID";
 
 const RAIL_KINDS: RailKind[] = ["OTP_PULL", "REDIRECT", "EMBEDDED", "QR_DISPLAY", "PUSH_APPROVAL", "HYBRID"];
@@ -494,7 +494,7 @@ const GatewayAiImportPage = dc(() => {
                     </div>
                 )}
 
-                <VDivider />
+                <PgDivider />
 
                 <pre class="pg-mono" style={{ ...monoStyle, maxHeight: "320px", overflowY: "auto" }}>
                     {payload.markdown || t("No transcript content returned.")}
@@ -680,10 +680,10 @@ const GatewayAiImportPage = dc(() => {
                     {vectors.length === 0 ? (
                         <ThemedText style={{ opacity: 0.7 }}>{t("No vector results returned.")}</ThemedText>
                     ) : (
-                        <VExpansionPanels multiple>
+                        <PgExpansionPanels multiple>
                             {vectors.map((vector, index) => (
-                                <VExpansionPanel key={`${vector.name}-${index}`} value={index}>
-                                    <VExpansionPanelTitle>
+                                <PgExpansionPanel key={`${vector.name}-${index}`} value={index}>
+                                    <PgExpansionPanelTitle>
                                         <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                             <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>
                                                 {vector.name}
@@ -704,8 +704,8 @@ const GatewayAiImportPage = dc(() => {
                                                 </MetaPill>
                                             )}
                                         </div>
-                                    </VExpansionPanelTitle>
-                                    <VExpansionPanelText>
+                                    </PgExpansionPanelTitle>
+                                    <PgExpansionPanelText>
                                         <div style={{ display: "flex", flexDirection: "column", gap: "12px", paddingTop: "6px" }}>
                                             {renderKeyValues(t("Extractions"), vector.extractions)}
                                             {renderRequests(vector.requests)}
@@ -722,10 +722,10 @@ const GatewayAiImportPage = dc(() => {
                                                 </VAlert>
                                             )}
                                         </div>
-                                    </VExpansionPanelText>
-                                </VExpansionPanel>
+                                    </PgExpansionPanelText>
+                                </PgExpansionPanel>
                             ))}
-                        </VExpansionPanels>
+                        </PgExpansionPanels>
                     )}
                 </SurfaceCardText>
             </SurfaceCard>
@@ -793,9 +793,9 @@ const GatewayAiImportPage = dc(() => {
                         {t("Copy this prompt and paste it back into your external AI assistant, then upload the corrected spec.")}
                     </ThemedText>
                     <ThemedView style={{ flexDirection: "row" }}>
-                        <VBtn color="warning" prependIcon={"mdi-content-copy"} onClick={() => void copyText(prompt)}>
+                        <PgButton color="warning" prependIcon={"mdi-content-copy"} onClick={() => void copyText(prompt)}>
                             {label}
-                        </VBtn>
+                        </PgButton>
                     </ThemedView>
                 </ThemedView>
             </VAlert>
@@ -811,7 +811,7 @@ const GatewayAiImportPage = dc(() => {
                 <div style={{ display: "flex", flexDirection: "row", gap: "12px", flexWrap: "wrap", alignItems: "flex-end" }}>
                     <div style={{ minWidth: "260px", maxWidth: "320px", flex: "0 1 320px" }}>
                         <FormField label={t("Rail Kind (optional)")}>
-                            <VSelect
+                            <PgAutocomplete
                                 items={RAIL_KINDS}
                                 clearable
                                 modelValue={railKind.value}
@@ -821,7 +821,7 @@ const GatewayAiImportPage = dc(() => {
                             />
                         </FormField>
                     </div>
-                    <VBtn
+                    <PgButton
                         color="primary"
                         prependIcon={"mdi-download"}
                         loading={downloading.value}
@@ -829,15 +829,15 @@ const GatewayAiImportPage = dc(() => {
                         onClick={downloadTranscript}
                     >
                         {t("Download")}
-                    </VBtn>
-                    <VBtn
+                    </PgButton>
+                    <PgButton
                         variant="tonal"
                         prependIcon={"mdi-content-copy"}
                         disabled={!transcript.value || transcriptLoading.value}
                         onClick={() => transcript.value && void copyText(transcript.value.markdown)}
                     >
                         {t("Copy transcript")}
-                    </VBtn>
+                    </PgButton>
                 </div>
 
                 {transcriptLoading.value ? (
@@ -866,7 +866,7 @@ const GatewayAiImportPage = dc(() => {
             >
                 <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                     <FormField label={t("Spec File")}>
-                        <VFileInput
+                        <PgFileUpload
                             {...{ accept: ".json,application/json" }}
                             modelValue={specFileModel.value}
                             onUpdate:modelValue={(value: File | File[] | null) => void readSpecFile(value)}
@@ -997,7 +997,7 @@ const GatewayAiImportPage = dc(() => {
                                                 required={credential.is_secret}
                                                 sensitiveMakerChecker={credential.is_secret}
                                             >
-                                                <VTextField
+                                                <PgTextField
                                                     modelValue={credentialsValues.value[credential.key] ?? ""}
                                                     onUpdate:modelValue={(value: string) => {
                                                         credentialsValues.value = {
@@ -1012,7 +1012,7 @@ const GatewayAiImportPage = dc(() => {
                                             </FormField>
                                         </div>
                                         {credential.is_secret && (
-                                            <VBtn
+                                            <PgButton
                                                 icon
                                                 variant="text"
                                                 aria-label={visible ? t("Hide secret") : t("Show secret")}
@@ -1023,8 +1023,8 @@ const GatewayAiImportPage = dc(() => {
                                                     };
                                                 }}
                                             >
-                                                <VIcon icon={visible ? "mdi-eye-off" : "mdi-eye"} />
-                                            </VBtn>
+                                                <PgIcon icon={visible ? "mdi-eye-off" : "mdi-eye"} />
+                                            </PgButton>
                                         )}
                                     </div>
                                 </div>
@@ -1061,7 +1061,7 @@ const GatewayAiImportPage = dc(() => {
                 v-slots={{
                     headerActions: () => (
                         <>
-                            <VIcon icon={"mdi-check-decagram"} color="success" size={"24px"} />
+                            <PgIcon icon={"mdi-check-decagram"} color="success" size={"24px"} />
                             <StatusBadge
                                 status={result.versionState}
                                 label={`${result.versionState} v${result.versionNumber}`}
@@ -1113,7 +1113,7 @@ const GatewayAiImportPage = dc(() => {
                         </ThemedView>
                     )}
 
-                    <VDivider />
+                    <PgDivider />
 
                     <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                         <ThemedText type="defaultSemiBold">{t("Imported Counts")}</ThemedText>
@@ -1130,12 +1130,12 @@ const GatewayAiImportPage = dc(() => {
                     )}
 
                     <div style={{ display: "flex", flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
-                        <VBtn color="primary" prependIcon={"mdi-open-in-new"} onClick={openGateway}>
+                        <PgButton color="primary" prependIcon={"mdi-open-in-new"} onClick={openGateway}>
                             {t("Open Gateway")}
-                        </VBtn>
-                        <VBtn variant="tonal" onClick={() => void startOver()}>
+                        </PgButton>
+                        <PgButton variant="tonal" onClick={() => void startOver()}>
                             {t("Start another import")}
-                        </VBtn>
+                        </PgButton>
                     </div>
                 </SurfaceCardText>
             </SurfaceCard>
@@ -1177,7 +1177,7 @@ const GatewayAiImportPage = dc(() => {
 
                         <div style={{ maxWidth: "360px" }}>
                             <FormField label={t("Import Mode")}>
-                                <VSelect
+                                <PgAutocomplete
                                     items={IMPORT_MODES.map((mode) => ({ title: t(mode.title), value: mode.value }))}
                                     modelValue={importMode.value}
                                     onUpdate:modelValue={(value: ImportMode | null) => {
@@ -1238,16 +1238,16 @@ const GatewayAiImportPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Smart AI Integration")} subtitle={t("Verify an AI-generated gateway specification before binding live secrets.")}>(
                         <div class="d-flex flex-wrap ga-2">
-                            <VBtn variant="text" prependIcon="mdi-restart" onClick={() => void startOver()}>
+                            <PgButton variant="text" prependIcon="mdi-restart" onClick={() => void startOver()}>
                                 {t("Start over")}
-                            </VBtn>
-                            <VBtn
+                            </PgButton>
+                            <PgButton
                                 variant="text"
                                 prependIcon={"mdi-arrow-left"}
                                 onClick={() => void router.push({ name: "Gateways" })}
                             >
                                 {t("Back to Gateways")}
-                            </VBtn>
+                            </PgButton>
                         </div>
                     )</PageHeader>
 
@@ -1278,27 +1278,27 @@ const GatewayAiImportPage = dc(() => {
                         flexWrap: "wrap",
                     }}
                 >
-                    <VBtn variant="tonal" disabled={step.value <= 1} onClick={goBack}>
+                    <PgButton variant="tonal" disabled={step.value <= 1} onClick={goBack}>
                         {t("Back")}
-                    </VBtn>
+                    </PgButton>
 
                     <div style={{ display: "flex", flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
                         {step.value === 1 && (
-                            <VBtn color="primary" onClick={() => (step.value = 2)}>
+                            <PgButton color="primary" onClick={() => (step.value = 2)}>
                                 {t("Continue to Verify")}
-                            </VBtn>
+                            </PgButton>
                         )}
                         {step.value === 2 && (
-                            <VBtn
+                            <PgButton
                                 color="primary"
                                 disabled={!report.value?.valid || verifyLoading.value}
                                 onClick={() => (step.value = 3)}
                             >
                                 {t("Continue to Import")}
-                            </VBtn>
+                            </PgButton>
                         )}
                         {step.value === 3 && !importResult.value && (
-                            <VBtn
+                            <PgButton
                                 color="primary"
                                 prependIcon={"mdi-database-plus"}
                                 loading={importLoading.value}
@@ -1306,12 +1306,12 @@ const GatewayAiImportPage = dc(() => {
                                 onClick={() => void runImport()}
                             >
                                 {t("Create Draft")}
-                            </VBtn>
+                            </PgButton>
                         )}
                         {step.value === 3 && importResult.value && (
-                            <VBtn color="primary" onClick={openGateway}>
+                            <PgButton color="primary" onClick={openGateway}>
                                 {t("Open Gateway")}
-                            </VBtn>
+                            </PgButton>
                         )}
                     </div>
                 </div>

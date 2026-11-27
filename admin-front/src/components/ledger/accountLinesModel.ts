@@ -1,5 +1,5 @@
 import Decimal from "decimal.js";
-import type { FilterOption, TableFilter } from "@/components/Table/filters";
+import type { FilterOption, TableFilter } from "@pg/ui";
 import { REF_TYPES, flipToNatural } from "./journalModel";
 
 /**

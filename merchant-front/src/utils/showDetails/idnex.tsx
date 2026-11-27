@@ -1,6 +1,6 @@
 import { ref } from "vue";
-import { DetailsFieldsDialog } from "@/components/detailsFieldsDialog";
-import type { FieldProps } from "@/components/Field";
+import {DetailsFieldsDialog} from "@pg/ui";
+import type { FieldProps } from "@pg/ui";
 
 export const detailsDialogRef = ref(null as null | InstanceType<typeof DetailsFieldsDialog>);
 

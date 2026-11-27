@@ -2,13 +2,13 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn, VCol, VFileInput, VRow, VSwitch, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { ThemedView } from "@/components/ThemedView";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { MetaPill, MonoRef, PageHeader, SegmentedTabs, StatusBadge, SurfaceCard } from "@/components/ui";
+import {VAlert, PgButton, PgCol, PgFileUpload, PgRow, PgSwitch, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {MetaPill, MonoRef, PageHeader, SegmentedTabs, StatusBadge, SurfaceCard} from "@pg/ui";
 import { ReportSandboxedHtmlSurface } from "@/lib/reportEngineSdk";
 import { renderChromeHtml, type ReportChromeSpec, type ReportExecutionBundle } from "@/lib/reportEngineSdk";
 import { api } from "@/state/api";
@@ -314,12 +314,12 @@ const Page = dc(() => {
       <ThemedView style={{ gap: "18px" }}>
         <PageHeader title={t("Report Branding")} subtitle={t("Upload a logo and add your company name to your reports")}>(
             <div class="d-flex flex-wrap ga-2">
-              <VBtn variant="tonal" prependIcon="mdi-alert-decagram-outline" onClick={() => void router.push({ name: "MerchantReportsChromeNeedsMigration" })}>
+              <PgButton variant="tonal" prependIcon="mdi-alert-decagram-outline" onClick={() => void router.push({ name: "MerchantReportsChromeNeedsMigration" })}>
                 {t("Needs Migration")}
-              </VBtn>
-              <VBtn variant="tonal" prependIcon="mdi-download" loading={busy.value} onClick={() => void downloadTranscript()}>
+              </PgButton>
+              <PgButton variant="tonal" prependIcon="mdi-download" loading={busy.value} onClick={() => void downloadTranscript()}>
                 {t("Download branding transcript")}
-              </VBtn>
+              </PgButton>
             </div>
           )</PageHeader>
 
@@ -331,16 +331,16 @@ const Page = dc(() => {
 
         <SurfaceCard title={t("My Headers & Footers")} subtitle={t("Manage your company header and footer for your own reports")}>
           <div class="d-flex flex-column ga-3">
-            <VRow dense>
-              <VCol cols={12} md={6}>
-                <VFileInput label={t("Header/footer spec (.json)")} {...{ accept: "application/json,.json" }} modelValue={null} onUpdate:modelValue={(files: File | File[] | null) => void readFile(pickFile(files))} />
-              </VCol>
-              <VCol cols={12} md={6}>
-                <VFileInput label={t("Logo bundle (.zip, optional)")} {...{ accept: "application/zip,.zip" }} modelValue={zipFile.value} onUpdate:modelValue={(files: File | File[] | null) => (zipFile.value = pickFile(files))} />
-              </VCol>
-            </VRow>
+            <PgRow dense>
+              <PgCol cols={12} md={6}>
+                <PgFileUpload label={t("Header/footer spec (.json)")} {...{ accept: "application/json,.json" }} modelValue={null} onUpdate:modelValue={(files: File | File[] | null) => void readFile(pickFile(files))} />
+              </PgCol>
+              <PgCol cols={12} md={6}>
+                <PgFileUpload label={t("Logo bundle (.zip, optional)")} {...{ accept: "application/zip,.zip" }} modelValue={zipFile.value} onUpdate:modelValue={(files: File | File[] | null) => (zipFile.value = pickFile(files))} />
+              </PgCol>
+            </PgRow>
             {editingNeedsZip.value && <VAlert type="info" variant="tonal">{t("This header/footer uses assets. Re-attach its logo bundle (.zip).")}</VAlert>}
-            <VTextarea
+            <PgTextarea
               label={t("Header/footer spec (.json)")}
               modelValue={specJson.value}
               onUpdate:modelValue={(value: string) => (specJson.value = value)}
@@ -349,14 +349,14 @@ const Page = dc(() => {
               class="pg-mono"
             />
             <div class="d-flex flex-wrap ga-2">
-              <VBtn size="small" variant="text" onClick={clearEditor}>{t("Clear editor")}</VBtn>
+              <PgButton size="small" variant="text" onClick={clearEditor}>{t("Clear editor")}</PgButton>
             </div>
             <div class="d-flex flex-wrap ga-4 align-center">
-              <VBtn color="primary" loading={busy.value} disabled={!canSave.value} onClick={() => void save(publish.value)}>
+              <PgButton color="primary" loading={busy.value} disabled={!canSave.value} onClick={() => void save(publish.value)}>
                 {t("Verify & save header/footer")}
-              </VBtn>
-              <VSwitch label={t("Publish")} hideDetails color="primary" modelValue={publish.value} onUpdate:modelValue={(value: boolean | null) => (publish.value = Boolean(value))} />
-              <VSwitch label={t("Make default")} hideDetails color="primary" disabled={!publish.value} modelValue={makeDefault.value} onUpdate:modelValue={(value: boolean | null) => (makeDefault.value = Boolean(value))} />
+              </PgButton>
+              <PgSwitch label={t("Publish")} hideDetails color="primary" modelValue={publish.value} onUpdate:modelValue={(value: boolean | null) => (publish.value = Boolean(value))} />
+              <PgSwitch label={t("Make default")} hideDetails color="primary" disabled={!publish.value} modelValue={makeDefault.value} onUpdate:modelValue={(value: boolean | null) => (makeDefault.value = Boolean(value))} />
             </div>
           </div>
         </SurfaceCard>

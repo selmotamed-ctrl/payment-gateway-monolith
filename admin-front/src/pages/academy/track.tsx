@@ -2,7 +2,7 @@ import { computed, onMounted, ref, watch, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
+import {PgButton, PgIcon} from "@pg/ui";
 import { AcademyShell, Skeleton, useAcademyData } from "@/components/academy/AcademyShell";
 import { BadgeChip } from "@/components/academy/BadgeChip";
 import { ModuleList } from "@/components/academy/ModuleList";
@@ -14,12 +14,12 @@ import { Callout } from "@/components/academy/ui/Callout";
 import { StateIcon } from "@/components/academy/ui/StateIcon";
 import { useAcademyProgress } from "@/components/academy/useAcademyProgress";
 import { useEligibility } from "@/components/academy/useEligibility";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { PageHeader } from "@/components/ui/PageHeader";
+import {DescriptionList} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
 import { showSnackBar } from "@/utils/snackBar";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {StatusBadge} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
 
 /** Requirements shown in the exam-readiness card before collapsing the rest into "and n more". */
 const MISSING_SHOWN = 6;
@@ -126,13 +126,13 @@ export const AdminAcademyTrackPage = defineComponent({
                                             </p>
                                         )}
                                         <div>
-                                            <VBtn
+                                            <PgButton
                                                 variant={isActive ? "tonal" : "outlined"}
                                                 prependIcon={isActive ? "mdi-check" : undefined}
                                                 onClick={() => academy.setActiveTrack(tr.id)}
                                             >
                                                 {isActive ? t("This is your active track") : t("Make this my active track")}
-                                            </VBtn>
+                                            </PgButton>
                                         </div>
                                     </div>
                                     <div class="ac-learner-summary__rings">
@@ -182,7 +182,7 @@ export const AdminAcademyTrackPage = defineComponent({
                                         ]}
                                     />
                                 )}
-                                <VBtn
+                                <PgButton
                                     class="ac-learner-cta__btn"
                                     block
                                     color={passed ? undefined : "primary"}
@@ -191,8 +191,8 @@ export const AdminAcademyTrackPage = defineComponent({
                                     to={{ name: "AdminAcademyExam", params: { examId: tr.examId } }}
                                 >
                                     {passed ? t("Retake the exam") : t("Go to the exam")}
-                                    <VIcon end class="ac-flip" icon="mdi-arrow-right" size={18} aria-hidden="true" />
-                                </VBtn>
+                                    <PgIcon end class="ac-flip" icon="mdi-arrow-right" size={18} aria-hidden="true" />
+                                </PgButton>
                                 <div class="ac-stack ac-stack--sm" aria-live="polite">
                                     {!ready.value && missingList.length > 0 && (
                                         <>
@@ -233,9 +233,9 @@ export const AdminAcademyTrackPage = defineComponent({
                                 { label: t("Tracks"), to: router.resolve({ name: "AdminAcademyTracks" }).fullPath },
                                 { label: tr?.title ?? t("Track") },
                             ]}>(
-                                <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyTrackSummary()}>
+                                <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyTrackSummary()}>
                                     {t("Copy track summary")}
-                                </VBtn>
+                                </PgButton>
                             )</PageHeader>
                     )}
                 >

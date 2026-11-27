@@ -2,21 +2,21 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -190,8 +190,8 @@ const FilingAdaptersPage = dc(() => {
         <ScreenContainer>
             <PageHeader title={t("Filing Adapters")} subtitle={t("Configure the manual or HTTPS channel used to file an approved regulatory report")} badge="AML-CONFIDENTIAL" badgeTone="danger">(
                     <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                        <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => refreshHook.value?.refreshAsIs()}>{t("Refresh")}</VBtn>
-                        <VBtn color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("New adapter")}</VBtn>
+                        <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => refreshHook.value?.refreshAsIs()}>{t("Refresh")}</PgButton>
+                        <PgButton color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("New adapter")}</PgButton>
                     </ThemedView>
                 )</PageHeader>
             <ApiTable<Adapter>
@@ -212,14 +212,14 @@ const FilingAdaptersPage = dc(() => {
             <FormModal modelValue={formOpen.value} onUpdate:modelValue={(value: boolean) => (formOpen.value = value)} title={editingId.value ? t("Edit filing adapter") : t("New filing adapter")} size="lg" loading={saving.value} submitLabel={t("Submit for approval")} onSubmit={() => void save()}>
                 <VAlert type="info" variant="tonal" class="mb-4">{t("Endpoint and secret changes use maker-checker. The adapter becomes active only after a second person approves the change.")}</VAlert>
                 {formError.value && <VAlert type="error" variant="tonal" class="mb-4">{formError.value}</VAlert>}
-                <FormField label={t("Name")} required><VTextField modelValue={form.value.name} onUpdate:modelValue={(value: string) => (form.value.name = value)} hideDetails /></FormField>
-                <FormField label={t("Authority")} required><VTextField modelValue={form.value.authority} onUpdate:modelValue={(value: string) => (form.value.authority = value)} hideDetails /></FormField>
-                <FormField label={t("Kind")} required><VSelect items={["MANUAL", "HTTP"].map((value) => ({ title: value, value }))} modelValue={form.value.kind} onUpdate:modelValue={(value: string) => (form.value.kind = value)} hideDetails /></FormField>
-                <FormField label={t("Status")} required><VSelect items={["ACTIVE", "DISABLED"].map((value) => ({ title: value, value }))} modelValue={form.value.status} onUpdate:modelValue={(value: string) => (form.value.status = value)} hideDetails /></FormField>
-                {form.value.kind === "HTTP" && <FormField label={t("HTTPS endpoint")} required><VTextField modelValue={form.value.endpointUrl} onUpdate:modelValue={(value: string) => (form.value.endpointUrl = value)} hideDetails /></FormField>}
-                {form.value.kind === "HTTP" && <FormField label={t("Auth header")}><VTextField modelValue={form.value.authHeaderName} onUpdate:modelValue={(value: string) => (form.value.authHeaderName = value)} hideDetails /></FormField>}
-                {form.value.kind === "HTTP" && <FormField label={t("Auth secret")}><VTextField type="password" autocomplete="new-password" modelValue={form.value.authSecret} onUpdate:modelValue={(value: string) => (form.value.authSecret = value)} placeholder={editingId.value ? t("Leave blank to keep the existing secret") : ""} hideDetails /></FormField>}
-                <FormField label={t("Timeout seconds")}><VTextField type="number" modelValue={form.value.timeoutSeconds} onUpdate:modelValue={(value: string) => (form.value.timeoutSeconds = Number(value) || 30)} hideDetails /></FormField>
+                <FormField label={t("Name")} required><PgTextField modelValue={form.value.name} onUpdate:modelValue={(value: string) => (form.value.name = value)} hideDetails /></FormField>
+                <FormField label={t("Authority")} required><PgTextField modelValue={form.value.authority} onUpdate:modelValue={(value: string) => (form.value.authority = value)} hideDetails /></FormField>
+                <FormField label={t("Kind")} required><PgAutocomplete items={["MANUAL", "HTTP"].map((value) => ({ title: value, value }))} modelValue={form.value.kind} onUpdate:modelValue={(value: string) => (form.value.kind = value)} hideDetails /></FormField>
+                <FormField label={t("Status")} required><PgAutocomplete items={["ACTIVE", "DISABLED"].map((value) => ({ title: value, value }))} modelValue={form.value.status} onUpdate:modelValue={(value: string) => (form.value.status = value)} hideDetails /></FormField>
+                {form.value.kind === "HTTP" && <FormField label={t("HTTPS endpoint")} required><PgTextField modelValue={form.value.endpointUrl} onUpdate:modelValue={(value: string) => (form.value.endpointUrl = value)} hideDetails /></FormField>}
+                {form.value.kind === "HTTP" && <FormField label={t("Auth header")}><PgTextField modelValue={form.value.authHeaderName} onUpdate:modelValue={(value: string) => (form.value.authHeaderName = value)} hideDetails /></FormField>}
+                {form.value.kind === "HTTP" && <FormField label={t("Auth secret")}><PgTextField type="password" autocomplete="new-password" modelValue={form.value.authSecret} onUpdate:modelValue={(value: string) => (form.value.authSecret = value)} placeholder={editingId.value ? t("Leave blank to keep the existing secret") : ""} hideDetails /></FormField>}
+                <FormField label={t("Timeout seconds")}><PgTextField type="number" modelValue={form.value.timeoutSeconds} onUpdate:modelValue={(value: string) => (form.value.timeoutSeconds = Number(value) || 30)} hideDetails /></FormField>
                 <FormChecklist
                     checks={[...CHANGE_CHECKS]}
                     modelValue={changeChecklist.value}

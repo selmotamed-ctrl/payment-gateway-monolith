@@ -74,3 +74,14 @@ Database-backed suites require PostgreSQL 18 and Redis; report skipped suites ex
 - `git diff --check` passes.
 - Typechecks/tests/builds relevant to the change pass, or the environment limitation is stated.
 - `project-design/TRACKER.md` has a dated entry for material changes.
+
+## UI & Design System Governance (STRICT — ZERO EXCEPTIONS)
+
+1. **Single Source of Truth (`@pg/ui`):** All reusable UI primitives, layout containers, form controls, tables, alerts, toasts, dialogs and design tokens live exclusively in `packages/ui` (`@pg/ui`). Never copy-paste UI components or CSS token files into `admin-front`, `merchant-front`, `checkout-front` or `fake-rails-front`. The package is consumed through the `@pg/ui` Vite/TypeScript alias so every portal compiles the same source with Vue 3.6 Vapor.
+2. **Forbidden Raw Controls:** Never write raw `<select>`, `<select multiple>`, `<input type="date">`, `<input type="checkbox">`, `<input type="text">`, `<textarea>` or hand-styled alert/toast divs inside application pages. Always use `PgAutocomplete`, `PgDateInput`, `PgCheckbox`, `PgTextField`, `PgSearchInput`, `PgTextarea`, `PgAlert`, `PgDialog`, `PgMetricStrip` and `showToast` from `@pg/ui`.
+3. **Global Spacing Policy:** Never override container padding or form gaps with ad-hoc inline `style={{ padding: ... }}` on `PgPage`, `PgCard`, `PgDialog`, `PgDrawer` or `PgSection`. Rely on the `--pg-space-*` tokens and the component props. Table cells and compact chips keep their own metric.
+4. **Floating Overlays:** `PgAutocomplete`, `PgDateInput`, `PgMenu`, `PgTooltip`, `PgDialog`, `PgDrawer` and `PgCommandPalette` own their positioning. Do not wrap them in a clipped `overflow: hidden` container or re-implement a floating panel in a page.
+5. **Creating a New Component:** If a feature genuinely requires a UI pattern not yet in `@pg/ui`, you MUST:
+   - Design and implement it inside `packages/ui/src/` as a 100% Vue 3.6 Vapor-valid, accessible, RTL-ready, dark/light-mode component using `--pg-*` tokens.
+   - Export it from `packages/ui/src/index.ts`, add unit tests in `packages/ui/test/`, and document its props and usage in `packages/ui/CATALOG.md` **before** using it in any page.
+6. **CI Gate:** Run `bun run ui:audit`, `bun run ui:test` and `bun run ui:typecheck` before completing any frontend task. `bun run ui:icons:check` must also pass after adding a new `mdi-*` icon.

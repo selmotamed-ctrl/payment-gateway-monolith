@@ -1,9 +1,9 @@
 import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VAlert, VSelect, VSwitch, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgAutocomplete, PgSwitch, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
-import { FormField } from "@/components/ui/FormField";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {FormField} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 import { PARSER_ERROR_MESSAGES } from "./messages";
 import {
     COLUMN_LOGICAL_KEYS,
@@ -71,28 +71,28 @@ export const ParserConfigBuilder = defineComponent({
                 <div style={{ display: "flex", flexDirection: "column", gap: "14px", minInlineSize: 0 }}>
                     <div style={GRID}>
                         <FormField label={t("Statement format")} error={errorFor("format")}>
-                            <VSelect modelValue={form.format} onUpdate:modelValue={(value: string) => patch({ format: value })} items={formatItems} density="compact" hideDetails />
+                            <PgAutocomplete modelValue={form.format} onUpdate:modelValue={(value: string) => patch({ format: value })} items={formatItems} density="compact" hideDetails />
                         </FormField>
                         <FormField label={t("Text encoding")} error={errorFor("encoding")}>
-                            <VSelect modelValue={form.encoding} onUpdate:modelValue={(value: string) => patch({ encoding: value })} items={encodingItems} density="compact" hideDetails />
+                            <PgAutocomplete modelValue={form.encoding} onUpdate:modelValue={(value: string) => patch({ encoding: value })} items={encodingItems} density="compact" hideDetails />
                         </FormField>
                         {form.format === "CSV" && (
                             <FormField label={t("Delimiter")} error={errorFor("delimiter")} hint={t("One character, for example a comma or a semicolon.")}>
-                                <VTextField modelValue={form.delimiter} onUpdate:modelValue={(value: string) => patch({ delimiter: value })} density="compact" hideDetails />
+                                <PgTextField modelValue={form.delimiter} onUpdate:modelValue={(value: string) => patch({ delimiter: value })} density="compact" hideDetails />
                             </FormField>
                         )}
                         <FormField label={t("Statement currency")} error={errorFor("currency")}>
-                            <VTextField modelValue={form.currency} onUpdate:modelValue={(value: string) => patch({ currency: value.toUpperCase() })} density="compact" hideDetails />
+                            <PgTextField modelValue={form.currency} onUpdate:modelValue={(value: string) => patch({ currency: value.toUpperCase() })} density="compact" hideDetails />
                         </FormField>
                         <FormField label={t("Date format")} hint={t("Leave empty for ISO dates.")}>
-                            <VTextField modelValue={form.dateFormat} onUpdate:modelValue={(value: string) => patch({ dateFormat: value })} density="compact" hideDetails />
+                            <PgTextField modelValue={form.dateFormat} onUpdate:modelValue={(value: string) => patch({ dateFormat: value })} density="compact" hideDetails />
                         </FormField>
                         <FormField label={t("Statement time zone")} error={errorFor("timezone")} hint={t("For example Africa/Tripoli.")}>
-                            <VTextField modelValue={form.timezone} onUpdate:modelValue={(value: string) => patch({ timezone: value })} density="compact" hideDetails />
+                            <PgTextField modelValue={form.timezone} onUpdate:modelValue={(value: string) => patch({ timezone: value })} density="compact" hideDetails />
                         </FormField>
                     </div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 20px" }}>
-                        <VSwitch
+                        <PgSwitch
                             modelValue={form.headerRow}
                             onUpdate:modelValue={(value: boolean | null) => patch({ headerRow: value === true })}
                             label={t("The first row is a header")}
@@ -100,7 +100,7 @@ export const ParserConfigBuilder = defineComponent({
                             density="compact"
                             hideDetails
                         />
-                        <VSwitch
+                        <PgSwitch
                             modelValue={form.supportsBatchNet}
                             onUpdate:modelValue={(value: boolean | null) => patch({ supportsBatchNet: value === true })}
                             label={t("Settlements are paid net of batch fees")}
@@ -128,7 +128,7 @@ export const ParserConfigBuilder = defineComponent({
                                         error={errorFor(`columns.${key}`)}
                                         hint={hint ? t(hint) : ""}
                                     >
-                                        <VTextField modelValue={form.columns[key]} onUpdate:modelValue={(value: string) => patchColumn(key, value)} density="compact" hideDetails />
+                                        <PgTextField modelValue={form.columns[key]} onUpdate:modelValue={(value: string) => patchColumn(key, value)} density="compact" hideDetails />
                                     </FormField>
                                 );
                             })}

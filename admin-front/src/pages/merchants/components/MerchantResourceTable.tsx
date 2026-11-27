@@ -1,10 +1,10 @@
 import { ref, watch } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { ApiTable } from "@/components/Table/ApiTable";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues, type TableFilter } from "@/components/Table/filters";
-import type { TableHeader } from "@/components/Table/types";
+import {ApiTable} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues, type TableFilter} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
 
 type MerchantResourceTableProps<T> = {
     title: string;

@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VSelect, VTextarea, VTextField } from "@/components/vael/VuetifyShim";
-import { ThemedText } from "@/components/ThemedText";
+import {VAlert, PgAutocomplete, PgTextarea, PgTextField} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -11,10 +11,10 @@ import { showSnackBar } from "@/utils/snackBar";
 import { REVIEW_REASON_CODES } from "../kybReviewHelp";
 import type { KybDocumentSummary } from "../types";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {FormModal} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
 const REVIEW_CHECKS = [
     { key: "DOCUMENT_IDENTITY_VERIFIED", label: "Document identity and merchant matched" },
     { key: "FILE_INTEGRITY_REVIEWED", label: "File integrity and malware status reviewed" },
@@ -132,21 +132,21 @@ const KybReviewDialog = dc(
                         {decision.value === "ACCEPTED" ? (
                             <>
                                 <FormField label={t("Expiry date (YYYY-MM-DD, optional)")}>
-                                    <VTextField v-model={expiresOn.value} />
+                                    <PgTextField v-model={expiresOn.value} />
                                 </FormField>
                                 {duplicate.value && (
                                     <FormField label={t("Duplicate justification (required, at least 10 characters)")} required>
-                                        <VTextarea v-model={duplicateJustification.value} rows={3} autoGrow />
+                                        <PgTextarea v-model={duplicateJustification.value} rows={3} autoGrow />
                                     </FormField>
                                 )}
                             </>
                         ) : (
                             <FormField label={t("Rejection reason")} required>
-                                <VSelect v-model={reasonCode.value} items={REVIEW_REASON_CODES} />
+                                <PgAutocomplete v-model={reasonCode.value} items={REVIEW_REASON_CODES} />
                             </FormField>
                         )}
                         <FormField label={t("Reviewer notes")}>
-                            <VTextarea v-model={notes.value} rows={3} autoGrow />
+                            <PgTextarea v-model={notes.value} rows={3} autoGrow />
                         </FormField>
                         <FormChecklist
                             checks={[...REVIEW_CHECKS]}

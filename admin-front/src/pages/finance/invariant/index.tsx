@@ -2,30 +2,30 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn, VTextarea } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgTextarea} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MetricStrip } from "@/components/ui/MetricStrip";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { TableRowActions } from "@/components/Table/TableRowActions";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MetricStrip} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
 import { GlAccountDrawer } from "@/components/ledger/GlAccountDrawer";
 import { LedgerRefLink } from "@/components/ledger/LedgerRefLink";
 import { isValidReason, normalizeReason } from "@/components/ledger/mutationReason";
@@ -198,8 +198,8 @@ const InvariantPage = dc(() => {
                 <PageHeader title={t("Ledger Audit & Invariant")} subtitle={t("Verify the double-entry ledger invariant and inspect account-level balances.")} badge={t("Ledger control")} badgeTone="info">(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             {data.value?.checkedAt && <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Last run")} {new Date(data.value.checkedAt).toLocaleTimeString()}</ThemedText>}
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export snapshot")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export snapshot")}</PgButton>
                         </ThemedView>
                     )</PageHeader>
 
@@ -355,7 +355,7 @@ const InvariantPage = dc(() => {
                     {t("A shard whose lines do not add up to its balance is not advanced and the action names that shard. Payments are not blocked. The action is audited.")}
                 </VAlert>
                 <FormField label={t("Reason")} required hint={t("At least 10 characters; written to the audit log")}>
-                    <VTextarea modelValue={rollupReason.value} onUpdate:modelValue={(value: string) => void (rollupReason.value = value)} rows={3} autoGrow {...{ maxlength: 500 }} />
+                    <PgTextarea modelValue={rollupReason.value} onUpdate:modelValue={(value: string) => void (rollupReason.value = value)} rows={3} autoGrow {...{ maxlength: 500 }} />
                 </FormField>
                 <FormChecklist
                     checks={[...ROLLUP_CHECKS]}

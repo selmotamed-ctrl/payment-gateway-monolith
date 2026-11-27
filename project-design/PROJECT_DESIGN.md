@@ -10010,7 +10010,7 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 
 <a id="admin-uisystem"></a>
 
-> **Part ID:** `admin-ui.system` · **Status:** `partial` · **Last verified:** 2026-11-26 · **Verified against:** `da23ed8e+working-tree`
+> **Part ID:** `admin-ui.system` · **Status:** `partial` · **Last verified:** 2026-11-27 · **Verified against:** `working-tree`
 
 # Admin UI System
 
@@ -10095,7 +10095,7 @@ Theme mode is `system | light | dark`. `utils/theme` resolves the persisted mode
 
 ### 3.4 Primitives and extras
 
-`admin-front/src/components/ui/index.ts` is the primitive barrel. The compliance test requires these 13 named exports:
+`packages/ui/src/index.ts` is the primitive barrel. The compliance test requires these 13 named exports:
 
 | Primitive | Responsibility |
 | :--- | :--- |
@@ -10187,15 +10187,15 @@ However, the stale files are still physically present:
 
 | Surface | Location |
 | :--- | :--- |
-| vael-ui provider | `admin-front/src/components/vael/VaelProvider.tsx`, `merchant-front/src/components/vael/VaelProvider.tsx`, `checkout-front/src/components/vael/VaelProvider.tsx` |
+| vael-ui provider | `packages/ui/src/provider/PgProvider.tsx`, `packages/ui/src/provider/PgProvider.tsx`, `packages/ui/src/provider/PgProvider.tsx` |
 | Tokens | `*/src/styles/fintech-minimal.css` |
 | Global styles | `*/src/styles/globals/app.scss`, `admin-front/src/styles/command-palette.css` |
 | Fonts | `*/src/assets/fonts/fonts.css` and the adjacent font files |
-| Primitives | `*/src/components/ui/**` |
+| Primitives | `packages/ui/src/**` |
 | Tables | `*/src/components/Table/**` |
 | Shells | `admin-front/src/layouts/default.tsx`, `merchant-front/src/layouts/default.tsx`, `checkout-front/src/layouts/checkout.tsx` |
 | Auth layout | `admin-front/src/layouts/auth.tsx` |
-| Compliance test | `admin-front/src/components/ui/__tests__/ui-abstraction-compliance.test.ts` |
+| Compliance test | `packages/ui/test/governanceAudit.test.ts` |
 | Deploy flags | `ADMIN_SHOW_CHECKLISTS`, `ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST`, `ADMIN_SHOW_HELP_PANELS`, `FAKE_RAILS_ENABLED`, `FAKE_RAILS_ALLOW_IN_PRODUCTION` |
 
 ## 6. Operational usage
@@ -10262,18 +10262,18 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 ### Code paths
 
-- `admin-front/src/components/vael/VaelProvider.tsx`
+- `packages/ui/src/provider/PgProvider.tsx`
 - `admin-front/src/styles/fintech-minimal.css`
 - `admin-front/src/styles/globals/app.scss`
 - `admin-front/src/assets/fonts/fonts.css`
 - `admin-front/src/layouts/default.tsx`
 - `admin-front/src/layouts/auth.tsx`
 - `admin-front/src/layouts/sections.tsx`
-- `admin-front/src/components/ui/index.ts`
-- `admin-front/src/components/ui/__tests__/ui-abstraction-compliance.test.ts`
+- `packages/ui/src/index.ts`
+- `packages/ui/test/governanceAudit.test.ts`
 - `admin-front/src/constants/env/index.ts`
 - `deploy/deploy.ts`
-- `fake-rails-front/src/components/ui/**`
+- `packages/ui/src/**`
 
 ### Generated appendices
 
@@ -10356,8 +10356,110 @@ Known residuals: the shim tag names still read as Vuetify in JSX; all forms are 
 - **Shim `VTextField`:** now uses `inheritAttrs: false`, binds only real input attributes, keeps an explicit `aria-label` (falling back to `label`) so field names remain accessible, and renders a visible label/hint/error shell (`.pg-text-field`, `.pg-field-label`, `.pg-field-hint`) when those props are present. This restores labels on the new settings workspace and auth pages while `FormField` keeps owning labels in existing forms. The shim `VSwitch` keeps vael-ui's `role="switch"`; Playwright tests target `getByRole("switch")`.
 - **Shim link resolution:** `VBtn`/`VListItem` resolve `to` through `useRouter()`, falling back to the app router on the current instance when the component is created inside a drawer slot. Before this fix, a `VBtn to=…` rendered inside `SlideOverDrawer`'s `v-slots` silently dropped its link (a `TypeError` was swallowed by the slot render).
 - **Theme bridge:** `styles/vael-theme.css` now also defines the Vuetify-style RGB triplets (`--v-theme-primary`, `--v-theme-on-surface`, `--v-theme-background`, …) inherited styles still reference (`rgb(var(--v-theme-primary))`), in light and dark. Native `<option>` elements from the shim `VSelect` are visible to `getByText`, so tests scope environment text to the table.
-- **ECharts lazy chunk:** `merchant-front/src/components/EChart/lazy.tsx` was added (the merchant cards imported `@/components/EChart/lazy` without the module).
+- **ECharts lazy chunk:** `merchant-front/src/charts/EChart/lazy.tsx` was added (the merchant cards imported `@/components/EChart/lazy` without the module).
 - **Icons:** the generator now emits 244 admin icons (the new settings/section/auth `mdi-*` names) while merchant/checkout/Fake Rails stay at 138/52/35.
+
+## 19. 2026 Fintech Vapor design system (`@pg/ui`) — 2026-11-27
+
+The plan `design/06-ui/fintech_2026_vapor_ui_architecture_and_remediation_plan.md` was implemented as a shared
+package plus a migration sweep. The previous `vael-ui-migration` branch kept four copies of a compatibility shim and
+still rendered native `<select>`, `<input type="date">`, `<input type="checkbox">`, raw text fields and a dead
+snackbar. That is now replaced by one source of truth.
+
+### 19.1 Architecture
+
+- **Package:** `packages/ui` (`@pg/ui`), a 100% Vue 3.6 Vapor TSX package. It is consumed through the
+  `@pg/ui` Vite alias (`../packages/ui/src`) and the matching `tsconfig` paths in all four portals, so every
+  portal compiles the same source with `vueJsx({ vapor: true })`; there is no duplicate build artifact.
+- **Provider:** `PgProvider` supplies `PgUiConfig` (API client, error extractor, XLSX exporter, confirm dialog,
+  router resolve/navigate, clipboard, admin contextual-help button) and mounts the one `PgToaster`. It wraps
+  vael-ui's `ConfigProvider` only for the checkbox/switch/radio/file controls that remain vael-based; vael-ui is
+  never imported by page code.
+- **Tokens:** `tokens/fintech-2026.css` (the exact "Calm Precision" palette: neutral obsidian focus ring, 40 px
+  controls, 2026 radii/shadows/status tokens, dark theme, `--ui-*` bridge), `tokens/layout-policy.css`
+  (28/36 px desktop and 20/16 px mobile page padding, 1480 px max width, 28 px section rhythm, 24 px card body,
+  20/24 header, 16/24 footer, 48 px table rows, 42 px sticky header, seamless metric grid) and
+  `tokens/components.css` (all primitives plus the inherited pre-migration layout classes).
+- **Primitives:** `PgPage`, `PgSection`, `PgCard`, `PgPageHeader`, `PgButton`, `PgIcon`, `PgTextField`,
+  `PgTextarea`, `PgSearchInput`, `PgAutocomplete`, `PgApiAutocomplete`, `PgDateInput`, `PgDateRangeInput`,
+  `PgCheckbox`, `PgChoice`, `PgSwitch`, `PgRadioGroup`, `PgFileUpload`, `PgOtpInput`, `PgCodeEditor`,
+  `PgAlert`, `PgToast`, `PgStatusBadge`, `PgEmptyState`, `PgStateView`, `PgDialog`, `PgDrawer`,
+  `PgFormModal`, `PgConfirmDialog`, `PgDetailsDialog`, `PgCommandPalette`, `PgMenu`, `PgTooltip`,
+  `PgMetricStrip`, `PgMoneyText`, `PgMonoRef`, `PgDescriptionList`, `PgField`, `PgFieldsSection`,
+  `PgTable`, `PgApiTable`, `PgTableFilters`, `PgTableRowActions`, `PgTableHeader`, `PgTableFooter`,
+  `PgFormChecklist`, `PgSummaryExportCard`, `PgThemeMenu`, `PgThemeLanguageControls`, `PgSegmentedTabs`
+  and the JSON diff/viewer set. `packages/ui/CATALOG.md` lists props and usage.
+- **Icons:** `scripts/generate-ui-icons.ts` scans the package and all four portals for `mdi-*` names and writes
+  one `actions/icons.generated.ts`. The old per-portal `AppIcon` directories are deleted.
+
+### 19.2 Defect fixes from the plan
+
+1. **Dropdowns/autocomplete:** `PgAutocomplete` is a WAI-ARIA combobox with single/multi select, removable chips,
+   `+N` overflow, `creatable`, full keyboard navigation, fixed-position viewport-flipping panel and no native
+   `<select>` anywhere. `VSelect`, `VAutocomplete` and `VCombobox` are aliases of the same component.
+2. **Date input:** `PgDateInput` has a typed `YYYY-MM-DD` field, calendar grid, month/year jump, today ring,
+   min/max, clear, and a range mode with `Today`, `Last 7 Days`, `Last 30 Days`, `This Month`, `Last Month` and
+   `Year to Date` presets.
+3. **Checkbox:** `PgCheckbox` uses the shared animated control with `indeterminate` and a `variant="card"`
+   safeguard row; `PgChoice` wraps the native radio/checkbox for exam/lab/safeguard cards, so no page writes a
+   raw checkbox input.
+4. **Text fields/table search:** `PgTextField`/`PgSearchInput` restore label, hint, error, icons, prefix/suffix,
+   clear, password reveal, max-length counter and rules. Focus is the neutral `#0f172a` border plus a soft neutral
+   halo; the blue glow is gone. `PgSearchInput` is the table/toolbar search.
+5. **Snackbar:** the broken shim snackbar is deleted. `showToast` has a guaranteed 4.5 s / 6.5 s timer, a 2 px
+   countdown bar, pause-on-hover/focus, a four-toast stack cap, an action button and a close button.
+6. **Alerts:** one `PgAlert` with `tone` mapped 1:1 to `--pg-status-*` replaces `SandboxBanner`, `AlertView`,
+   `VAlert` and every hand-styled `role="alert"` banner.
+7. **KPI strips:** `PgMetricStrip` uses `gap: 0` with inset hairlines and negative tile margins, so wrapping rows
+   never expose a gray dead cell; `PageStats`/`MiniStats` are aliases of the same strip and the transparent-text
+   hack is gone.
+8. **Dialogs and command palette:** `PgDialog` uses a strict three-row header/body/footer; the close button is a
+   flex-end header item, never absolute, so it cannot overlap a title, input or badge. `PgCommandPalette` has a
+   bare 56 px search header and padded results.
+9. **Duplication:** the four `VuetifyShim`/`VaelProvider` copies, the 48 duplicated primitive directories and the
+   four drifted `fintech-minimal.css`/`vael-shim.css`/`vael-theme.css` sets are deleted. Feature-only composites
+   moved to `src/features`, `src/forms`, `src/tables`, `src/charts` and `src/printables`.
+
+### 19.3 Migration and governance
+
+- `scripts/migrate-to-pg-ui.ts` rewrote 461 files: shim imports and `V*` tags became `Pg*`, pure local component
+  imports became `@pg/ui`, and the feature folders moved out of `src/components`.
+- The four apps import `@pg/ui/tokens/index.css` once in `main.ts`; `App.tsx` mounts `PgProvider` with a small
+  `src/uiConfig.tsx` host object. `utils/vael-compat.ts`, `utils/vuetify-compat.ts` and `state/theme.ts` are
+  re-exports of the package services, so existing page imports keep working.
+- **Gate:** `scripts/ui-full-sweep-audit.ts` runs the pure rules in
+  `packages/ui/src/testing/governanceAudit.ts`: UI-01 raw `<select>`, UI-02 date inputs, UI-03 raw checkbox,
+  UI-04 raw input/textarea, UI-05 VuetifyShim/vael-ui imports, UI-06 hardcoded page hex, UI-07 container padding
+  (only `PgPage`/`PgCard`/`PgDialog`/`PgDrawer`/`PgSection`/`SurfaceCard`/`PgFormModal`), UI-08 hand-styled
+  `role="alert"`, UI-09 transparent text fill, UI-10 duplicated primitive directories and UI-11 legacy
+  stylesheets. The current tree passes with **0 violations**. The UI-07 scope is the plan's stated policy: table
+  cells, chips and compact rows keep their own metric; pages may not override a layout container's padding.
+- `bun run ui:audit`, `bun run ui:test`, `bun run ui:typecheck` and `bun run ui:icons:check` are the frontend
+  gates; the policy is appended to the root `AGENTS.md`.
+
+### 19.4 Verification and deviations
+
+- All four portals type-check and build (`admin-front`, `merchant-front`, `checkout-front` via `bun run build`;
+  `fake-rails-front` via `bun run build`); `packages/ui` type-checks and its 25 unit tests pass; the root Vitest
+  suite is 546 passing.
+- Browser smoke (cached Chromium against `vite preview`/`vite dev` with mocked APIs): admin login, dashboard,
+  sidebar, KPI strip, checklist, currency autocomplete (open/select), user menu and toast; no page errors and no
+  console errors. The login page renders `PgTextField`/`PgButton`/`PgOtpInput` with zero native selects.
+- **Deviation — Teleport:** Vue `Teleport` does not mount inside the `dc` Vapor render path on this rc, so
+  `PgAutocomplete`, `PgDateInput`, `PgMenu`, `PgTooltip`, `PgDialog`, `PgDrawer` and `PgCommandPalette` use
+  `position: fixed` panels with viewport flip/clamping. They are not clipped by `overflow: hidden` because no
+  ancestor establishes a containing block; revisit when the runtime supports Teleport here (GAP-084).
+- **Deviation — dc re-render:** the package `dc` only wraps a render in a `DynamicFragment` when the component
+  opts into `rerender: true` (top-level reactive branches). This avoids the rc's `currentInstance` null crash on
+  DOM prop patches in ordinary components; package components that branch on `modelValue` (dialogs, drawers,
+  state view, money/mono refs) opt in.
+- **Deviation — workspace:** `@pg/ui` is consumed by Vite/TS aliases rather than a hoisted Bun workspace so the
+  four independent portal lockfiles and installs are untouched (GAP-086). The single-source guarantee is the
+  alias, the package barrel and the governance gate, not a root install.
+- **Residual:** feature-level `DataTable`, `DataPage`, `InputFields`, `FiltersContainer`, `AuthoritiesPicker`,
+  `ApiImage`, `CordsInputMap`, `Printables` and the stats cards remain per-portal composites under
+  `src/{tables,forms,features,charts,printables}`. They are data-connected feature code, not duplicated
+  primitives, but they still copy some logic (GAP-085).
 
 ---
 
@@ -10753,16 +10855,16 @@ The v2 design intends tables to look operational rather than decorative:
 
 | Component | File | Responsibility |
 | :--- | :--- | :--- |
-| `ApiTable` | `admin-front/src/components/Table/ApiTable.tsx` | Page-driven server fetch. The parent supplies `onRefresh`, data/total extractors, headers and optional filters. Supports local search suppression, refresh hooks, and XLSX export of the rendered page. |
-| `DataTable` | `admin-front/src/components/Table/DataTable.tsx` | Either local data mode or "server" mode driven by a `server` prop or `tableRegistry[route.name]`. Server mode fetches one page of up to 200 rows and paginates locally. Persists server search/filter/sort state in `sessionStorage`. |
-| `Table` | `admin-front/src/components/Table/Table.tsx` | Renders the Vuetify table, compact row styling, selection, column filters, row tone, and cell rendering. |
-| `TableFilters` | `admin-front/src/components/Table/TableFilters.tsx` | Renders filter controls by type, active chips, summary text, a mobile/desktop surface, and an injection key so the toolbar can toggle filters. |
-| `TableRowActions` | `admin-front/src/components/Table/TableRowActions.tsx` | One optional primary action plus a right-aligned overflow menu. Supports danger/disabled/hidden items and dividers. It also binds the row context menu (`contextmenu` + `Shift+F10`), shares the menu panel with the overflow trigger, and owns the one-open-menu coordinator. |
-| `HeaderFooter` | `admin-front/src/components/Table/HeaderFooter.tsx` | Desktop/mobile toolbar and pagination, search, refresh, filter trigger, record count, XLSX button, and `useTableXlsx`. |
-| `tableRegistry` | `admin-front/src/components/Table/tableRegistry.ts` | Maps a route name to a URL, list key, filters, default sort, optional storage key, params, and row mapper. |
-| `filters` | `admin-front/src/components/Table/filters.ts` | Filter union type, active-state detection, query mapping, and server config type. |
-| `referenceOptions` | `admin-front/src/components/Table/referenceOptions.ts` | Cached `/options/:kind` loaders for merchant/rail/gateway/user/wallet filters. |
-| `statusTone` | `admin-front/src/components/Table/statusTone.ts` | Status-to-tone mapping used by filters and status pills. |
+| `ApiTable` | `admin-front/src/tables/ApiTable.tsx` | Page-driven server fetch. The parent supplies `onRefresh`, data/total extractors, headers and optional filters. Supports local search suppression, refresh hooks, and XLSX export of the rendered page. |
+| `DataTable` | `admin-front/src/tables/DataTable.tsx` | Either local data mode or "server" mode driven by a `server` prop or `tableRegistry[route.name]`. Server mode fetches one page of up to 200 rows and paginates locally. Persists server search/filter/sort state in `sessionStorage`. |
+| `Table` | `admin-front/src/tables/Table.tsx` | Renders the Vuetify table, compact row styling, selection, column filters, row tone, and cell rendering. |
+| `TableFilters` | `admin-front/src/tables/TableFilters.tsx` | Renders filter controls by type, active chips, summary text, a mobile/desktop surface, and an injection key so the toolbar can toggle filters. |
+| `TableRowActions` | `admin-front/src/tables/TableRowActions.tsx` | One optional primary action plus a right-aligned overflow menu. Supports danger/disabled/hidden items and dividers. It also binds the row context menu (`contextmenu` + `Shift+F10`), shares the menu panel with the overflow trigger, and owns the one-open-menu coordinator. |
+| `HeaderFooter` | `admin-front/src/tables/HeaderFooter.tsx` | Desktop/mobile toolbar and pagination, search, refresh, filter trigger, record count, XLSX button, and `useTableXlsx`. |
+| `tableRegistry` | `admin-front/src/tables/tableRegistry.ts` | Maps a route name to a URL, list key, filters, default sort, optional storage key, params, and row mapper. |
+| `filters` | `admin-front/src/tables/filters.ts` | Filter union type, active-state detection, query mapping, and server config type. |
+| `referenceOptions` | `admin-front/src/tables/referenceOptions.ts` | Cached `/options/:kind` loaders for merchant/rail/gateway/user/wallet filters. |
+| `statusTone` | `admin-front/src/tables/statusTone.ts` | Status-to-tone mapping used by filters and status pills. |
 
 ### 3.1.1 Row context menu and sticky action column (2026-11-07)
 
@@ -10905,12 +11007,12 @@ When checklists are hidden, page-side completeness computations generally become
 
 | Surface | Location |
 | :--- | :--- |
-| Table components | `admin-front/src/components/Table/**` |
-| Table registry | `admin-front/src/components/Table/tableRegistry.ts` |
-| Filter types and query mapping | `admin-front/src/components/Table/filters.ts` |
+| Table components | `admin-front/src/tables/**` |
+| Table registry | `admin-front/src/tables/tableRegistry.ts` |
+| Filter types and query mapping | `admin-front/src/tables/filters.ts` |
 | XLSX engine | `admin-front/src/utils/xlsx/**` |
-| Summary export card | `admin-front/src/components/ui/SummaryExportCard.tsx` |
-| Checklist component | `admin-front/src/components/ui/FormChecklist.tsx` |
+| Summary export card | `packages/ui/src/data/PgSummaryExportCard.tsx` |
+| Checklist component | `packages/ui/src/data/PgFormChecklist.tsx` |
 | Visibility flags | `admin-front/src/constants/env/index.ts` |
 | Deploy flags | `admin-front/deploy` schema and `deploy/deploy.ts` |
 
@@ -10967,7 +11069,7 @@ Common export endpoints include `*/export` and `*/summary/export` routes in `adm
 
 - `tests/e2e/admin/table-and-padding-geometry.spec.ts` checks compact rows, row-action discipline, filter padding, toolbar/table padding, and expanded filters.
 - `tests/e2e/admin/create.spec.ts` checks table search behavior on gateway data.
-- `admin-front/src/components/ui/__tests__/ui-abstraction-compliance.test.ts` checks `TableRowActions` existence, action-column discipline, no rainbow tints, no gradients, and the presence of the unified table components.
+- `packages/ui/test/governanceAudit.test.ts` checks `TableRowActions` existence, action-column discipline, no rainbow tints, no gradients, and the presence of the unified table components.
 - `tests/e2e/admin/a11y.spec.ts` covers table accessibility basics.
 
 No database is required for the unit/static compliance checks; the Playwright geometry suite requires the live stack.
@@ -10982,15 +11084,15 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 ### Code paths
 
-- `admin-front/src/components/Table/ApiTable.tsx`
-- `admin-front/src/components/Table/DataTable.tsx`
-- `admin-front/src/components/Table/TableFilters.tsx`
-- `admin-front/src/components/Table/TableRowActions.tsx`
-- `admin-front/src/components/Table/tableRegistry.ts`
-- `admin-front/src/components/Table/filters.ts`
-- `admin-front/src/components/Table/HeaderFooter.tsx`
-- `admin-front/src/components/ui/SummaryExportCard.tsx`
-- `admin-front/src/components/ui/FormChecklist.tsx`
+- `admin-front/src/tables/ApiTable.tsx`
+- `admin-front/src/tables/DataTable.tsx`
+- `admin-front/src/tables/TableFilters.tsx`
+- `admin-front/src/tables/TableRowActions.tsx`
+- `admin-front/src/tables/tableRegistry.ts`
+- `admin-front/src/tables/filters.ts`
+- `admin-front/src/tables/HeaderFooter.tsx`
+- `packages/ui/src/data/PgSummaryExportCard.tsx`
+- `packages/ui/src/data/PgFormChecklist.tsx`
 - `admin-front/src/utils/xlsx/**`
 - `admin-front/src/constants/env/index.ts`
 
@@ -11346,7 +11448,7 @@ This part owns the admin contextual-help button and drawer, the 30-screen contex
 
 ### 2.1 Button
 
-`admin-front/src/components/ui/PageHeader.tsx` renders `ContextHelpButton` automatically. The button uses the current route name, preferring `route.meta.parentName` over `route.name`, and opens a shared drawer through `useContextHelp()`. Pages never wire the button by hand. The app-bar "Help & SOP" button and the `?` shortcut open the same drawer with the same parent-first rule.
+`packages/ui/src/layout/PgPageHeader.tsx` renders `ContextHelpButton` automatically. The button uses the current route name, preferring `route.meta.parentName` over `route.name`, and opens a shared drawer through `useContextHelp()`. Pages never wire the button by hand. The app-bar "Help & SOP" button and the `?` shortcut open the same drawer with the same parent-first rule.
 
 The accessible name is "How this page works".
 
@@ -11404,7 +11506,7 @@ The integration points are the 22 action areas named in the guide design: approv
 | Shared state | `admin-front/src/components/guide/useContextHelp.ts` |
 | Safeguard dialog | `admin-front/src/components/guide/SafeguardDialog.tsx` |
 | Safeguard composable | `admin-front/src/components/guide/useSafeguard.ts` |
-| PageHeader mount | `admin-front/src/components/ui/PageHeader.tsx` |
+| PageHeader mount | `packages/ui/src/layout/PgPageHeader.tsx` |
 | Global mount | `admin-front/src/layouts/default.tsx` |
 | Context map | `admin-front/src/content/guide/generated/context-map.json` |
 | Merchant drawer | `merchant-front/src/components/guide/ContextualHelpDrawer.tsx` |
@@ -11659,7 +11761,7 @@ The UI hides write controls where it knows the authority. The backend remains au
 | Academy pages | `admin-front/src/pages/academy/*.tsx` |
 | URL map | `admin-front/src/constants/urlsMap/index.ts` |
 | XLSX pipeline | `admin-front/src/utils/xlsx/**` |
-| Summary/checklist primitives | `admin-front/src/components/ui/SummaryExportCard.tsx`, `FormChecklist.tsx` |
+| Summary/checklist primitives | `packages/ui/src/data/PgSummaryExportCard.tsx`, `FormChecklist.tsx` |
 | Deploy flags | `ADMIN_SHOW_CHECKLISTS`, `ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST`, `ADMIN_SHOW_HELP_PANELS` |
 | Backup config | deploy `FAKE_RAILS_*` is unrelated; backup daemon config is in the deploy/backup parts |
 
@@ -11786,8 +11888,8 @@ Lifecycle status must be honest: if nothing reads the key at runtime, mark it
 - `docs/developer/platform-settings.md`
 - `admin-front/src/pages/academy/*.tsx`
 - `admin-front/src/utils/xlsx/**`
-- `admin-front/src/components/ui/SummaryExportCard.tsx`
-- `admin-front/src/components/ui/FormChecklist.tsx`
+- `packages/ui/src/data/PgSummaryExportCard.tsx`
+- `packages/ui/src/data/PgFormChecklist.tsx`
 - `core-back/api/internal/backups.ts`
 - `core-back/api/internal/admin.ts` (settings handlers), `core-back/api/internal/academy.ts`
 - `core-back/lib/approvalQueue.ts`
@@ -12401,6 +12503,17 @@ authorization-code + PKCE flow: the button receives `authorizationUrl`, the edge
 callback redirects to `/auth/google/finish?ticket=...`, and the page exchanges
 the one-time ticket for the normal session. All new pages are EN/AR and follow
 the existing AuthLayout/SurfaceCard/FormField system.
+
+## 2026 Fintech Vapor design system (`@pg/ui`)
+
+The portal no longer owns UI primitives. `PgProvider` + `@pg/ui` supply the app shell, buttons, fields,
+autocomplete, date input, checkbox, alerts, toasts, dialogs/drawers, metric strip, money/ref components and the
+table toolbar. `src/uiConfig.tsx` supplies the API client, error extractor, XLSX exporter, confirm dialog, router
+and clipboard to the package. The old `components/vael/VuetifyShim`, `components/ui/*`, `TextField`, `Card`,
+`AlertView`, `SnackBar`, `ThemeMenu` copies and `styles/{fintech-minimal,vael-shim,vael-theme}.css` are deleted.
+Feature-only `InputFields`/`FiltersContainer`/`DataTable`/`EChart`/`Printables` moved to `src/forms`,
+`src/tables`, `src/charts` and `src/printables`; no primitive is duplicated. Tokens are imported once in
+`main.ts` (`@pg/ui/tokens/index.css`). The UI gate (`bun run ui:audit`) passes with zero violations.
 
 ---
 
@@ -13102,6 +13215,14 @@ or canary `visibleRails` list from core. See `core.route-health`.
 ## Second-pass slot error message (2026-11-25)
 
 `PAYMENT_LINK_SLOT_UNAVAILABLE` now maps to the bilingual **Payment in progress** message, matching the Guide's description of a second payer trying a reserved link.
+
+## 2026 Fintech Vapor design system (`@pg/ui`)
+
+The payer flow uses the shared `@pg/ui` primitives (`PgProvider`, `PgPage`, `PgCard`, `PgButton`, `PgTextField`,
+`PgAutocomplete`, `PgAlert`, `PgDialog`, `PgDrawer`, `PgOtpInput`, `PgStatusBadge`, `PgMoneyText`) through
+`src/uiConfig.tsx`. The local `components/vael/VuetifyShim`, `components/ui/*` and legacy stylesheets are deleted;
+checkout-specific renderers/rail fields/sandbox inspector remain feature components under `src/components`.
+The UI gate (`bun run ui:audit`) passes with zero violations.
 
 ---
 
@@ -14341,6 +14462,13 @@ The Fake Rails tester portal applies the same overlay text-color rule as the oth
 ## v2 tester surfaces (2026-11-13)
 
 The portal gains account and checkout-helper routes: `GET/POST/PATCH /portal-api/accounts*`, `GET /portal-api/checkout-helper/:reference` and `POST /portal-api/checkout-helper/:reference/simulate-action`. They expose balances, holds, daily limits, statuses, OTPs and the push/QR approve/decline/variance/duplicate/tampered actions. The same routes are mounted at `/control/*` for the Sandbox core, protected by `x-fake-rails-control-token` when configured; production refuses the control plane without the token.
+
+## 2026 Fintech Vapor design system (`@pg/ui`)
+
+The tester portal consumes the shared `@pg/ui` primitives through `src/uiConfig.tsx` (`PgProvider`, `PgApp`,
+`PgPage`, `PgCard`, `PgTable`, `PgButton`, `PgTextField`, `PgAutocomplete`, `PgCheckbox`, `PgAlert`,
+`PgStatusBadge`, `PgDialog`, `PgDrawer`). The local shim/provider, `ui/*`, `ScreenContainer`, `SectionFields`,
+`ThemeMenu` and legacy stylesheets are deleted. The UI gate (`bun run ui:audit`) passes with zero violations.
 
 ---
 
@@ -18330,6 +18458,17 @@ provisioning. `tests/unit/i18n-catalogue.test.ts` guards the new EN/AR keys and
 `tests/e2e/merchant/auth.spec.ts` covers the no-phone registration, email MFA
 copy and maintenance screen. Deploy config tests cover the SMTP/SMS/Google
 validation.
+
+## `@pg/ui` package and UI governance gate (2026-11-27)
+
+| Suite | Command | Scope |
+| :--- | :--- | :--- |
+| Package unit | `cd packages/ui && bun run test` | `core.test.ts` (date, money, options, rules, status), `toastStore.test.ts` (auto-dismiss, pause/resume, stack cap, tone), `governanceAudit.test.ts` (rules, container padding, duplicated dirs, component source contracts). 25 tests. |
+| Package typecheck | `cd packages/ui && bun run typecheck` | Vapor TSX component contracts. |
+| UI full-sweep gate | `bun run ui:audit` | UI-01..UI-11 across the four portals; 0 violations. |
+| Icon registry | `bun run ui:icons:check` | Generated `@mdi/js` registry is current. |
+| Portal gates | each portal `bun run type-check && bun run build` | Admin/merchant/checkout/Fake Rails compile the shared package through the Vite alias. |
+| Browser smoke | cached Chromium against `vite preview` or `vite dev` with mocked APIs | Login, dashboard, sidebar, KPI strip, checklist, autocomplete, menu and toast; zero page/console errors. |
 
 ---
 

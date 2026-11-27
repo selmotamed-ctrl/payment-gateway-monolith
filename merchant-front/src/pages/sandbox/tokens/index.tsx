@@ -1,22 +1,22 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { StateView } from "@/components/StateView";
-import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
-import SandboxResourceTable from "@/components/sandbox/SandboxResourceTable";
-import { tokenFilters } from "@/components/sandbox/sandboxFilters";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { SectionFields } from "@/components/SectionFields";
+import {VAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { SandboxBanner } from "@/features/sandbox/SandboxBanner";
+import { SandboxResourceTable } from "@/features/sandbox/SandboxResourceTable";
+import { tokenFilters } from "@/features/sandbox/sandboxFilters";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { sandboxGet, sandboxPost, type SandboxSummaryResponse, type SandboxTokenRow } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -154,7 +154,7 @@ const SandboxTokensPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={t("Sandbox API Keys & Webhooks")} subtitle={t("pg_test_ tokens reach only the sandbox core; pg_live_ tokens are refused.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => { refresh.value?.(); void loadSummary(); }}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-webhook" loading={busy.value === "webhook"} onClick={() => void testWebhook()}>{t("Send test webhook")}</VBtn><VBtn color="primary" prependIcon="mdi-plus" onClick={() => { formError.value = ""; createOpen.value = true; }}>{t("Create pg_test_ token")}</VBtn></div></PageHeader>
+            <PageHeader title={t("Sandbox API Keys & Webhooks")} subtitle={t("pg_test_ tokens reach only the sandbox core; pg_live_ tokens are refused.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => { refresh.value?.(); void loadSummary(); }}>{t("Refresh")}</PgButton><PgButton variant="tonal" prependIcon="mdi-webhook" loading={busy.value === "webhook"} onClick={() => void testWebhook()}>{t("Send test webhook")}</PgButton><PgButton color="primary" prependIcon="mdi-plus" onClick={() => { formError.value = ""; createOpen.value = true; }}>{t("Create pg_test_ token")}</PgButton></div></PageHeader>
             <SandboxBanner subtitle={t("Point your staging website or mobile app at the Sandbox API with a pg_test_ token.")} />
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             {createdToken.value ? <VAlert type="warning" variant="tonal" class="mb-4"> {t("Copy this token now; it is shown once")}: <code>{createdToken.value}</code></VAlert> : null}
@@ -166,11 +166,11 @@ const SandboxTokensPage = dc(() => {
             </StateView>
             <FormModal modelValue={createOpen.value} onUpdate:modelValue={(v: any) => (createOpen.value = v)} title={t("Create sandbox API token")} size="md" loading={busy.value === "create"} errorMessage={formError.value} submitLabel={t("Create")} onSubmit={() => void create()}>
                 <SectionFields title={t("Token details")}>
-                    <FormField label={t("Token name")} required><VTextField modelValue={form.value.name} onUpdate:modelValue={(v: string) => (form.value.name = v)} hideDetails /></FormField>
-                    <FormField label={t("Application")} required><VSelect items={applications.value.map((app) => ({ title: app.name, value: app.id }))} modelValue={form.value.applicationId} onUpdate:modelValue={(v: string) => (form.value.applicationId = v)} hideDetails /></FormField>
-                    <FormField label={t("Scopes")} required><VSelect items={SCOPES} multiple chips modelValue={form.value.scopes} onUpdate:modelValue={(v: string[]) => (form.value.scopes = v)} hideDetails /></FormField>
-                    <FormField label={t("Expiry")}><VTextField type="datetime-local" modelValue={form.value.expiresAt} onUpdate:modelValue={(v: string) => (form.value.expiresAt = v)} hideDetails /></FormField>
-                    <FormField label={t("IP allowlist")}><VTextField modelValue={form.value.allowedCidrs} onUpdate:modelValue={(v: string) => (form.value.allowedCidrs = v)} placeholder={t("Comma separated CIDR ranges.")} hideDetails /></FormField>
+                    <FormField label={t("Token name")} required><PgTextField modelValue={form.value.name} onUpdate:modelValue={(v: string) => (form.value.name = v)} hideDetails /></FormField>
+                    <FormField label={t("Application")} required><PgAutocomplete items={applications.value.map((app) => ({ title: app.name, value: app.id }))} modelValue={form.value.applicationId} onUpdate:modelValue={(v: string) => (form.value.applicationId = v)} hideDetails /></FormField>
+                    <FormField label={t("Scopes")} required><PgAutocomplete items={SCOPES} multiple chips modelValue={form.value.scopes} onUpdate:modelValue={(v: string[]) => (form.value.scopes = v)} hideDetails /></FormField>
+                    <FormField label={t("Expiry")}><PgTextField type="datetime-local" modelValue={form.value.expiresAt} onUpdate:modelValue={(v: string) => (form.value.expiresAt = v)} hideDetails /></FormField>
+                    <FormField label={t("IP allowlist")}><PgTextField modelValue={form.value.allowedCidrs} onUpdate:modelValue={(v: string) => (form.value.allowedCidrs = v)} placeholder={t("Comma separated CIDR ranges.")} hideDetails /></FormField>
                 </SectionFields>
             </FormModal>
         </ScreenContainer>

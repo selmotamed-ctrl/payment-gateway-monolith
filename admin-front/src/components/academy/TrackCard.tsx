@@ -2,8 +2,8 @@ import { type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { RouterLink } from "vue-router/experimental/vapor";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn } from "@/components/vael/VuetifyShim";
-import { MetaPill } from "@/components/ui/MetaPill";
+import {PgButton} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
 import type { Track } from "@/content/academy";
 import { BadgeChip } from "./BadgeChip";
 import type { TrackStats } from "./nextStep";
@@ -101,9 +101,9 @@ export const TrackCard = defineComponent({
                                 <ProgressBar value={done} max={total} label={`${track.title}: ${t("Lessons and labs completed")}`} />
                             </div>
                         )}
-                        <VBtn class="ac-learner-track__open" variant="outlined" size="small" height={32} to={to} aria-label={`${t("Open track")}: ${track.title}`}>
+                        <PgButton class="ac-learner-track__open" variant="outlined" size="small" height={32} to={to} aria-label={`${t("Open track")}: ${track.title}`}>
                             {t("Open track")}
-                        </VBtn>
+                        </PgButton>
                     </div>
                 </article>
             );

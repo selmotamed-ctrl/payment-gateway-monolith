@@ -2,13 +2,13 @@ import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn, VTextarea } from "@/components/vael/VuetifyShim";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { StateView } from "@/components/StateView";
+import {VAlert, PgButton, PgTextarea} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {StateView} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -148,11 +148,11 @@ export const ShardRepairModal = defineComponent({
                     {submitted.value !== null ? (
                         <VAlert type="success" variant="tonal" density="compact">
                             {t("Submitted for approval. The repair is applied only after an independent checker approves it.")}{" "}
-                            <VBtn size="small" variant="text" onClick={() => void router.push({ name: "Approvals", query: submitted.value ? { open: submitted.value } : {} })}>{t("Open Approvals")}</VBtn>
+                            <PgButton size="small" variant="text" onClick={() => void router.push({ name: "Approvals", query: submitted.value ? { open: submitted.value } : {} })}>{t("Open Approvals")}</PgButton>
                         </VAlert>
                     ) : (
                         <FormField label={t("Reason")} required hint={t("At least 10 characters; written to the audit log")}>
-                            <VTextarea modelValue={reason.value} onUpdate:modelValue={(value: string) => void (reason.value = value)} rows={3} autoGrow {...{ maxlength: 500 }} />
+                            <PgTextarea modelValue={reason.value} onUpdate:modelValue={(value: string) => void (reason.value = value)} rows={3} autoGrow {...{ maxlength: 500 }} />
                         </FormField>
                     )}
                 </div>

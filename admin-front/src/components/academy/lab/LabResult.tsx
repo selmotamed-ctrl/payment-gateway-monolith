@@ -2,12 +2,12 @@ import { onMounted, ref, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { RouterLink } from "vue-router/experimental/vapor";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn } from "@/components/vael/VuetifyShim";
+import {PgButton} from "@pg/ui";
 import type { Lab, LabTask } from "@/content/academy";
 import { loadArticles } from "@/content/guide";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {StatusBadge} from "@pg/ui";
 import { showSnackBar } from "@/utils/snackBar";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {SurfaceCard} from "@pg/ui";
 import { Callout } from "../ui/Callout";
 import { IconTile } from "../ui/IconTile";
 import { ProgressBar } from "../ui/ProgressBar";
@@ -118,15 +118,15 @@ export const LabResult = defineComponent({
                                     tone={result.passed ? "success" : criticalFail ? "danger" : "warning"}
                                 />
                                 {belowMark ? <p class="ac-text">{t("You need at least the pass mark to pass. Review the notes below and try again.")}</p> : null}
-                                <VBtn size="small" variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyResult()}>
+                                <PgButton size="small" variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyResult()}>
                                     {t("Copy result")}
-                                </VBtn>
+                                </PgButton>
                             </div>
                         </div>
                     </SurfaceCard>
 
                     {criticalFail ? (
-                        <Callout tone="danger" role="alert" icon="mdi-alert-octagon-outline" title={t("Failed because of a critical error")}>
+                        <Callout tone="danger" icon="mdi-alert-octagon-outline" title={t("Failed because of a critical error")}>
                             <p class="ac-lab-line">
                                 {t(
                                     "A critical error means a choice that would be seriously harmful in real life, such as losing money, exposing private data or bypassing a control. You cannot pass a lab with a critical error, even with a high score. Read the notes below, then try again.",
@@ -197,12 +197,12 @@ export const LabResult = defineComponent({
                     </section>
 
                     <div class="ac-row ac-row--wrap">
-                        <VBtn color="primary" onClick={() => props.onRetry()}>
+                        <PgButton color="primary" onClick={() => props.onRetry()}>
                             {t("Try again")}
-                        </VBtn>
-                        <VBtn variant="outlined" to={{ name: "AdminAcademyModule", params: { moduleId: lab.module } }}>
+                        </PgButton>
+                        <PgButton variant="outlined" to={{ name: "AdminAcademyModule", params: { moduleId: lab.module } }}>
                             {t("Back to the module")}
-                        </VBtn>
+                        </PgButton>
                     </div>
                 </div>
             );

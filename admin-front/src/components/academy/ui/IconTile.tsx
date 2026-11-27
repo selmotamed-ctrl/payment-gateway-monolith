@@ -1,6 +1,6 @@
 import { type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VIcon } from "@/components/vael/VuetifyShim";
+import {PgIcon} from "@pg/ui";
 
 /** Rounded square holding one MDI icon (track identity, empty states, certificate seal). */
 export const IconTile = defineComponent({
@@ -13,7 +13,7 @@ export const IconTile = defineComponent({
     setup(props) {
         return () => (
             <span class={["ac-tile", props.large ? "ac-tile--lg" : "", props.tone !== "neutral" ? `ac-tile--${props.tone}` : ""]} aria-hidden="true">
-                <VIcon icon={props.icon} size={props.large ? 22 : 18} />
+                <PgIcon icon={props.icon} size={props.large ? 22 : 18} />
             </span>
         );
     },

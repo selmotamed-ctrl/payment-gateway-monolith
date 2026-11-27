@@ -4,6 +4,7 @@ import { useLocale } from "@/utils/vael-compat";
 import type { MultiTask as MultiTaskType } from "@/content/academy";
 import type { MultiAnswer } from "../labScoring";
 import { choiceTag, renderInline } from "./PanelView";
+import { PgChoice } from "@pg/ui";
 
 export const MultiTask = defineComponent({
     name: "AcademyLabMultiTask",
@@ -48,20 +49,18 @@ export const MultiTask = defineComponent({
                             }
                             return (
                                 <div class="ac-lab-opt" key={option.id}>
-                                    <label class={["ac-choice", state ? `ac-choice--${state}` : "", props.locked ? "ac-choice--locked" : ""]}>
-                                        <input
-                                            type="checkbox"
-                                            value={option.id}
-                                            checked={isOn}
-                                            disabled={props.locked}
-                                            aria-describedby={showFeedback ? noteId : undefined}
-                                            onChange={(event: Event) => toggle(option.id, (event.target as HTMLInputElement).checked)}
-                                        />
-                                        <span class="ac-choice__label" dir="auto">
-                                            {renderInline(option.label)}
-                                        </span>
+                                    <PgChoice
+                                        type="checkbox"
+                                        value={option.id}
+                                        checked={isOn}
+                                        disabled={props.locked}
+                                        ariaDescribedBy={showFeedback ? noteId : ""}
+                                        state={state}
+                                        onChange={(value: boolean) => toggle(option.id, value)}
+                                    >
+                                        <span dir="auto">{renderInline(option.label)}</span>
                                         {tag}
-                                    </label>
+                                    </PgChoice>
                                     {showFeedback ? (
                                         <p id={noteId} class="ac-choice__note ac-lab-opt__note" dir="auto">
                                             {option.feedback}

@@ -2,31 +2,31 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn } from "@/components/vael/VuetifyShim";
+import {PgButton} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions, type RowActionItem } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import type { TableHeader } from "@/components/Table/types";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions, type RowActionItem} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { useOpenQuery } from "@/composables/useOpenQuery";
 import { urlsMap } from "@/constants/urlsMap";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {MetricStrip, type MetricItem} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 import { ApplicationDetailDrawer, type ApplicationTab } from "@/pages/merchants/components/ApplicationDetailDrawer";
 import ApplicationPolicyModal, { type PolicyApplication } from "@/pages/merchants/components/ApplicationPolicyModal";
 import ReasonModal from "@/pages/merchants/components/ReasonModal";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {FormChecklist} from "@pg/ui";
 import { showSnackBar } from "@/utils/snackBar";
 import {
     ApprovalSubmittedNotice,
@@ -314,14 +314,14 @@ const ApplicationsPage = dc(() => {
         }));
 
     const merchantCell = (merchant: MerchantRef) => (
-        <VBtn
+        <PgButton
             size="small"
             variant="text"
             style={{ paddingInline: "2px", textTransform: "none", justifyContent: "flex-start" }}
             onClick={() => void router.push({ name: "MerchantDetail", params: { id: merchant.id } })}
         >
             {merchant.tradeName || merchant.legalName}
-        </VBtn>
+        </PgButton>
     );
 
     const dateCell = (value: string | null) => <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(value)}</ThemedText>;
@@ -506,7 +506,7 @@ const ApplicationsPage = dc(() => {
             label: "Application",
             value: (row) => row.application?.name ?? "",
             Value: ({ row }: { row: ApplicationTokenRow }) => (
-                <VBtn
+                <PgButton
                     size="small"
                     variant="text"
                     style={{ paddingInline: "2px", textTransform: "none", justifyContent: "flex-start" }}
@@ -516,7 +516,7 @@ const ApplicationsPage = dc(() => {
                     }}
                 >
                     {row.application?.name ?? row.applicationId}
-                </VBtn>
+                </PgButton>
             ),
         },
         {
@@ -792,7 +792,7 @@ const ApplicationsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Applications")} subtitle={t("Merchant applications, their payment links and POS terminals: allowlists, tokens and containment.")} badge={t("Commerce")} badgeTone="info"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn></PageHeader>
+                <PageHeader title={t("Applications")} subtitle={t("Merchant applications, their payment links and POS terminals: allowlists, tokens and containment.")} badge={t("Commerce")} badgeTone="info"><PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton></PageHeader>
 
                 {notice.value && <ApprovalSubmittedNotice approvalRequestId={notice.value.approvalRequestId} onDismiss={() => (notice.value = null)} />}
 

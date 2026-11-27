@@ -3,18 +3,18 @@ import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VProgressCircular, VSelect, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { statusTone } from "@/components/Table/statusTone";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import type { TableHeader } from "@/components/Table/types";
+import {VAlert, PgButton, PgSpinner, PgAutocomplete, PgTextField, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {statusTone} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { useOpenQuery } from "@/composables/useOpenQuery";
 import { urlsMap } from "@/constants/urlsMap";
@@ -23,17 +23,17 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { showConfirm } from "@/utils/confirm";
 import { useSafeguard } from "@/components/guide/useSafeguard";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
-import { SectionFields } from "@/components/SectionFields";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 type RegulatoryReport = {
     id: string;
     reportRef: string;
@@ -798,9 +798,9 @@ const AmlReportsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("AML Reports")} subtitle={t("Draft, approve, submit, and acknowledge regulatory reports under restricted access.")} badge="AML-CONFIDENTIAL" badgeTone="danger">(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</VBtn>
-                            <VBtn color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("Draft report")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</PgButton>
+                            <PgButton color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("Draft report")}</PgButton>
                         </ThemedView>
                     )</PageHeader>
                 <VAlert type="error" variant="tonal">
@@ -856,7 +856,7 @@ const AmlReportsPage = dc(() => {
                     searchValue={search.value}
                     setSearchValue={(value) => (search.value = value)}
                     headers={headers.value}
-                    rowColor={(row) => (row.status === "REJECTED_BY_AUTHORITY" ? "#dc2626" : row.status === "PENDING_CHECKER" ? "#d97706" : undefined)}
+                    rowColor={(row) => (row.status === "REJECTED_BY_AUTHORITY" ? "var(--pg-status-danger-dot)" : row.status === "PENDING_CHECKER" ? "var(--pg-status-warning-dot)" : undefined)}
                     apiDataExtractor={(data) => {
                         const payload = data as { reports?: RegulatoryReport[]; rows?: RegulatoryReport[] };
                         return payload.reports ?? payload.rows ?? [];
@@ -907,7 +907,7 @@ const AmlReportsPage = dc(() => {
                     footer: () => (
                         <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
                             {selected.value?.status === "APPROVED" && filingAdapters.value.length > 0 && (
-                                <VSelect
+                                <PgAutocomplete
                                     items={filingAdapters.value.map((adapter) => ({ title: adapter.name, value: adapter.id }))}
                                     modelValue={filingAdapterId.value}
                                     onUpdate:modelValue={(value: string | null) => (filingAdapterId.value = value)}
@@ -918,22 +918,22 @@ const AmlReportsPage = dc(() => {
                                 />
                             )}
                             {selected.value?.status === "APPROVED" && filingAdapterId.value && (
-                                <VBtn variant="tonal" loading={filingLoading.value} onClick={() => void fileViaAdapter()}>{t("File via adapter")}</VBtn>
+                                <PgButton variant="tonal" loading={filingLoading.value} onClick={() => void fileViaAdapter()}>{t("File via adapter")}</PgButton>
                             )}
                             {canSubmitReport.value && (
-                                <VBtn color="primary" onClick={() => { submissionError.value = ""; submitOpen.value = true; }}>{t("Submit report")}</VBtn>
+                                <PgButton color="primary" onClick={() => { submissionError.value = ""; submitOpen.value = true; }}>{t("Submit report")}</PgButton>
                             )}
                             {canAcknowledgeReport.value && (
-                                <VBtn color="primary" onClick={() => { ackError.value = ""; ackOpen.value = true; }}>{t("Record authority decision")}</VBtn>
+                                <PgButton color="primary" onClick={() => { ackError.value = ""; ackOpen.value = true; }}>{t("Record authority decision")}</PgButton>
                             )}
-                            <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
+                            <PgButton variant="text" onClick={closeDetails}>{t("Close")}</PgButton>
                         </ThemedView>
                     ),
                 }}
             >
                 {detailLoading.value || !selected.value ? (
                     <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "280px", gap: "12px" }}>
-                        <VProgressCircular indeterminate size={52} color="primary" />
+                        <PgSpinner indeterminate size={52} color="primary" />
                         <ThemedText style={{ opacity: 0.65 }}>{t("Loading regulatory report")}</ThemedText>
                     </ThemedView>
                 ) : (
@@ -974,7 +974,7 @@ const AmlReportsPage = dc(() => {
                                     { label: t("Submitted"), value: formatDateTime(selected.value.submittedAt) },
                                 ]} />
                                 {selected.value.approvalRequestId && (
-                                    <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</VBtn>
+                                    <PgButton size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</PgButton>
                                 )}
                             </ThemedView>
                         </ThemedView>
@@ -993,7 +993,7 @@ const AmlReportsPage = dc(() => {
                         </ThemedView>
                         <ThemedView style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "16px" }}>
                             <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Generated outputs")}</ThemedText>
-                            {payloadLoading.value && <VProgressCircular indeterminate size={22} color="primary" />}
+                            {payloadLoading.value && <PgSpinner indeterminate size={22} color="primary" />}
                             {(selected.value.outputs ?? reportPayload.value?.outputs ?? []).length === 0 && (
                                 <VAlert type="warning" variant="tonal">{t("No output has been generated yet.")}</VAlert>
                             )}
@@ -1008,7 +1008,7 @@ const AmlReportsPage = dc(() => {
                                     <MonoRef value={output.contentSha256} />
                                     {output.schemaCode && <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>{output.schemaCode} v{output.schemaVersion ?? "?"} {output.schemaStatus ?? ""}</ThemedText>}
                                     {output.schemaId && (
-                                        <VBtn size="small" variant="text" onClick={() => void router.push({ name: "AmlReportingStudio", query: { open: output.schemaId } })}>{t("Open in Studio")}</VBtn>
+                                        <PgButton size="small" variant="text" onClick={() => void router.push({ name: "AmlReportingStudio", query: { open: output.schemaId } })}>{t("Open in Studio")}</PgButton>
                                     )}
                                     {output.validationErrors != null && (
                                         <VAlert type="warning" variant="tonal" density="compact" style={{ width: "100%" }}>
@@ -1016,10 +1016,10 @@ const AmlReportsPage = dc(() => {
                                         </VAlert>
                                     )}
                                     {output.validationStatus === "VALIDATED" && (
-                                        <VBtn size="small" variant="tonal" onClick={() => void downloadOutput(output.format)}>{t("Download")}</VBtn>
+                                        <PgButton size="small" variant="tonal" onClick={() => void downloadOutput(output.format)}>{t("Download")}</PgButton>
                                     )}
                                     {(selected.value?.status === "DRAFT" || selected.value?.status === "PENDING_CHECKER") && (
-                                        <VBtn size="small" variant="text" loading={outputLoading.value === output.format} onClick={() => void generateOutput(output.format)}>{t("Regenerate")}</VBtn>
+                                        <PgButton size="small" variant="text" loading={outputLoading.value === output.format} onClick={() => void generateOutput(output.format)}>{t("Regenerate")}</PgButton>
                                     )}
                                 </ThemedView>
                             ))}
@@ -1027,7 +1027,7 @@ const AmlReportsPage = dc(() => {
                                 <ThemedView key={`missing-${format}`} style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                                     <StatusBadge status={format} toneOverride="warning" />
                                     <ThemedText style={{ fontSize: "11px" }}>{t("Not generated")}</ThemedText>
-                                    <VBtn size="small" variant="tonal" loading={outputLoading.value === format} onClick={() => void generateOutput(format as "XML" | "XLSX" | "DOCX")}>{t("Generate")}</VBtn>
+                                    <PgButton size="small" variant="tonal" loading={outputLoading.value === format} onClick={() => void generateOutput(format as "XML" | "XLSX" | "DOCX")}>{t("Generate")}</PgButton>
                                 </ThemedView>
                             ))}
                             {selected.value.requiredOutputFormats && selected.value.requiredOutputFormats.length > 0 && (
@@ -1036,7 +1036,7 @@ const AmlReportsPage = dc(() => {
                                 </ThemedText>
                             )}
                             {selected.value.status === "DRAFT" && (
-                                <VBtn size="small" color="primary" loading={actionLoading.value} onClick={() => void requestReportApproval()}>{t("Submit for approval")}</VBtn>
+                                <PgButton size="small" color="primary" loading={actionLoading.value} onClick={() => void requestReportApproval()}>{t("Submit for approval")}</PgButton>
                             )}
                         </ThemedView>
                         {Object.keys(narrativeDraft.value).length > 0 && (
@@ -1047,11 +1047,11 @@ const AmlReportsPage = dc(() => {
                                     const value = narrativeDraft.value[key] ?? "";
                                     return (
                                     <FormField key={key} label={section?.title ?? key}>
-                                        <VTextarea modelValue={value} onUpdate:modelValue={(next: string) => (narrativeDraft.value = { ...narrativeDraft.value, [key]: next })} rows={3} hideDetails />
+                                        <PgTextarea modelValue={value} onUpdate:modelValue={(next: string) => (narrativeDraft.value = { ...narrativeDraft.value, [key]: next })} rows={3} hideDetails />
                                     </FormField>
                                     );
                                 })}
-                                <VBtn size="small" variant="tonal" loading={actionLoading.value} onClick={() => void saveNarrative()}>{t("Save narrative")}</VBtn>
+                                <PgButton size="small" variant="tonal" loading={actionLoading.value} onClick={() => void saveNarrative()}>{t("Save narrative")}</PgButton>
                             </ThemedView>
                         )}
                         <VAlert type="info" variant="tonal">
@@ -1095,7 +1095,7 @@ const AmlReportsPage = dc(() => {
                 <VAlert type="info" variant="tonal">{t("The report is drafted as PENDING_CHECKER. A different MLRO must approve it before it is frozen and submitted.")}</VAlert>
                 <SectionFields title={t("Report definition")}>
                     <FormField label={t("Reporting rule")} required sensitiveMakerChecker>
-                        <VSelect
+                        <PgAutocomplete
                             items={rules.value.map((rule) => ({ title: `${rule.reportType} · ${rule.status} · ${rule.sourceReference ?? rule.id}`, value: rule.id }))}
                             modelValue={form.value.reportingRuleId}
                             onUpdate:modelValue={(value: string) => onRuleChanged(value)}
@@ -1103,7 +1103,7 @@ const AmlReportsPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Report type")} required sensitiveMakerChecker>
-                        <VSelect
+                        <PgAutocomplete
                             items={REPORT_TYPES.map((value) => ({ title: value, value }))}
                             modelValue={form.value.reportType}
                             onUpdate:modelValue={(value: string) => (form.value.reportType = value)}
@@ -1111,21 +1111,21 @@ const AmlReportsPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Authority")} required sensitiveMakerChecker>
-                        <VTextField modelValue={form.value.authority} onUpdate:modelValue={(value: string) => (form.value.authority = value)} hideDetails />
+                        <PgTextField modelValue={form.value.authority} onUpdate:modelValue={(value: string) => (form.value.authority = value)} hideDetails />
                     </FormField>
                     <FormField label={t("Period start")} required sensitiveMakerChecker>
-                        <VTextField type="date" modelValue={form.value.periodStart} onUpdate:modelValue={(value: string) => (form.value.periodStart = value)} hideDetails />
+                        <PgTextField type="date" modelValue={form.value.periodStart} onUpdate:modelValue={(value: string) => (form.value.periodStart = value)} hideDetails />
                     </FormField>
                     <FormField label={t("Period end")} required sensitiveMakerChecker>
-                        <VTextField type="date" modelValue={form.value.periodEnd} onUpdate:modelValue={(value: string) => (form.value.periodEnd = value)} hideDetails />
+                        <PgTextField type="date" modelValue={form.value.periodEnd} onUpdate:modelValue={(value: string) => (form.value.periodEnd = value)} hideDetails />
                     </FormField>
                 </SectionFields>
                 <SectionFields title={t("Case linkage and notes")}>
                     <FormField label={t("AML case ID (optional)")} sensitiveMakerChecker>
-                        <VTextField modelValue={form.value.caseId} onUpdate:modelValue={(value: string) => (form.value.caseId = value)} hideDetails />
+                        <PgTextField modelValue={form.value.caseId} onUpdate:modelValue={(value: string) => (form.value.caseId = value)} hideDetails />
                     </FormField>
                     <FormField label={t("Notes")} sensitiveMakerChecker>
-                        <VTextarea modelValue={form.value.notes} onUpdate:modelValue={(value: string) => (form.value.notes = value)} rows={3} hideDetails />
+                        <PgTextarea modelValue={form.value.notes} onUpdate:modelValue={(value: string) => (form.value.notes = value)} rows={3} hideDetails />
                     </FormField>
                 </SectionFields>
                 <FormChecklist
@@ -1154,7 +1154,7 @@ const AmlReportsPage = dc(() => {
                     {t("Submission freezes the report and records the authority reference. Verify the deadline and payload digest first.")}
                 </VAlert>
                 <FormField label={t("Submission reference")} required sensitiveMakerChecker>
-                    <VTextField
+                    <PgTextField
                         modelValue={submissionRef.value}
                         onUpdate:modelValue={(value: string) => (submissionRef.value = value)}
                         hideDetails
@@ -1187,7 +1187,7 @@ const AmlReportsPage = dc(() => {
                 </VAlert>
                 <SectionFields title={t("Authority decision")}>
                     <FormField label={t("Authority decision")} required sensitiveMakerChecker>
-                        <VSelect
+                        <PgAutocomplete
                             items={[
                                 { title: t("Acknowledged"), value: "ACKNOWLEDGED" },
                                 { title: t("Rejected by authority"), value: "REJECTED_BY_AUTHORITY" },
@@ -1198,7 +1198,7 @@ const AmlReportsPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Rejection reason")} sensitiveMakerChecker>
-                        <VTextarea
+                        <PgTextarea
                             rows={2}
                             modelValue={ackReason.value}
                             onUpdate:modelValue={(value: string) => (ackReason.value = value)}

@@ -1,15 +1,19 @@
-import type {
-    AwaitedConfirmationDialog,
-    ConfirmOptions,
-} from "@/components/ConfirmDialog";
 import { ref } from "vue";
 
-export const confirmDialogInstance = ref(
-    null as null | InstanceType<typeof AwaitedConfirmationDialog>,
-);
+export interface ConfirmOptions {
+    title: string;
+    message: string;
+    submitButtonLabel?: string;
+    type: "error" | "warning" | "primary";
+    slot?: (props: { form: any }) => any;
+    onConfirm?: (form: any) => void | Promise<void>;
+}
+
+export const confirmDialogInstance = ref<{ show(opts: ConfirmOptions): Promise<boolean> } | null>(null);
+
 /**
- * Show a confirm dialog.
- * @returns true if user clicked “Confirm”, false on “Cancel”.
+ * Show the shared confirmation dialog.
+ * @returns true if the user confirmed, false on cancel.
  */
 export function showConfirm(opts: ConfirmOptions): Promise<boolean> {
     if (!confirmDialogInstance.value) {

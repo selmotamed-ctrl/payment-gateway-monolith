@@ -1,11 +1,11 @@
 import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
-import { VAlert, VBtn, VCol, VRow, VSelect, VSlider, VSwitch, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgCol, PgRow, PgAutocomplete, PgSlider, PgSwitch, PgTextField} from "@pg/ui";
 import PortalLayout from "@/layouts/portal";
-import { SectionFields } from "@/components/SectionFields";
-import { DataTable } from "@/components/Table/DataTable";
-import { MonoRef } from "@/components/ui/MonoRef";
-import type { TableHeader } from "@/components/Table/types";
+import {SectionFields} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import {MonoRef} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
 import { api, download } from "@/utils/api";
 
 const StatementsPage = dc(() => {
@@ -61,19 +61,19 @@ const StatementsPage = dc(() => {
 
   return () => (
     <PortalLayout>
-      <VRow>
-        <VCol cols={12} lg={6}>
+      <PgRow>
+        <PgCol cols={12} lg={6}>
           <SectionFields
             title="Settlement statement generator"
             subtitle="Produce a synthetic gateway statement with controlled anomalies."
             v-slots={{
-              footer: () => <VBtn size="small" onClick={generate}>Generate &amp; download</VBtn>,
+              footer: () => <PgButton size="small" onClick={generate}>Generate &amp; download</PgButton>,
             }}
           >
             {message.value ? <VAlert type="success" variant="tonal" density="compact">{message.value}</VAlert> : null}
             <div class="pg-field-wrapper">
               <label>Gateway</label>
-              <VSelect
+              <PgAutocomplete
                 density="compact"
                 variant="outlined"
                 hideDetails
@@ -84,7 +84,7 @@ const StatementsPage = dc(() => {
             </div>
             <div class="pg-field-wrapper">
               <label>From</label>
-              <VTextField
+              <PgTextField
                 type="date"
                 density="compact"
                 variant="outlined"
@@ -95,7 +95,7 @@ const StatementsPage = dc(() => {
             </div>
             <div class="pg-field-wrapper">
               <label>To</label>
-              <VTextField
+              <PgTextField
                 type="date"
                 density="compact"
                 variant="outlined"
@@ -106,7 +106,7 @@ const StatementsPage = dc(() => {
             </div>
             <div class="pg-field-wrapper">
               <label>Format</label>
-              <VSelect
+              <PgAutocomplete
                 density="compact"
                 variant="outlined"
                 hideDetails
@@ -118,7 +118,7 @@ const StatementsPage = dc(() => {
             <div class="pg-field-wrapper">
               <label>Fee variance (+0.150 LYD)</label>
               <div class="d-flex align-center ga-3">
-                <VSlider
+                <PgSlider
                   class="flex-grow-1"
                   modelValue={feeVariancePercent.value}
                   onUpdate:modelValue={(value: number) => { feeVariancePercent.value = value; }}
@@ -132,14 +132,14 @@ const StatementsPage = dc(() => {
             </div>
             <div class="pg-field-wrapper">
               <label>Anomalies</label>
-              <VSwitch
+              <PgSwitch
                 label="Omit one transaction (MISSING_AT_GATEWAY)"
                 density="compact"
                 hideDetails
                 modelValue={omitOne.value}
                 onUpdate:modelValue={(value: boolean | null) => { omitOne.value = value === true; }}
               />
-              <VSwitch
+              <PgSwitch
                 label="Add one unrecorded transaction (MISSING_LOCALLY)"
                 density="compact"
                 hideDetails
@@ -148,16 +148,16 @@ const StatementsPage = dc(() => {
               />
             </div>
           </SectionFields>
-        </VCol>
-        <VCol cols={12} lg={6}>
+        </PgCol>
+        <PgCol cols={12} lg={6}>
           <DataTable
             data={statements.value}
             headers={headers}
             title="Recent statements"
             numberOfItemsPerPage={10}
           />
-        </VCol>
-      </VRow>
+        </PgCol>
+      </PgRow>
     </PortalLayout>
   );
 });

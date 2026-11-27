@@ -1,4 +1,4 @@
-import ThemedView from "@/components/ThemedView/index";
+import {PgView as ThemedView} from "@pg/ui";
 import { dc, type DCExpose } from "@/utils/dc";
 import { ref, nextTick } from "vue";
 import type { ComponentPublicInstance } from "vue";

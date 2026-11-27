@@ -2,19 +2,19 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
-import { VBtn } from "@/components/vael/VuetifyShim";
+import {PgButton} from "@pg/ui";
 import { useRouter } from "vue-router";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import { statusTone } from "@/components/Table/statusTone";
-import type { TableHeader } from "@/components/Table/types";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import {statusTone} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
@@ -30,12 +30,12 @@ import {
 } from "./joinRequestHelp";
 import type { JoinRequestSummary } from "./types";
 
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
+import {SlideOverDrawer} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
 type JoinRequestsSummary = {
     total: number;
     open: number;
@@ -444,16 +444,16 @@ const JoinRequestsPage = dc(() => {
                 <PageHeader title={t("Join Requests")} subtitle={t("Review onboarding applications, KYB evidence and SLA-bound decisions in one queue.")} badge={t("KYB review")} badgeTone="info">(
                         <ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
                             <StatusBadge status="info" label={`${total.value} ${t("requests")}`} toneOverride="info" showDot={false} />
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</PgButton>
                             {canWrite.value && (
-                                <VBtn
+                                <PgButton
                                     color="primary"
                                     prependIcon="mdi-account-plus-outline"
                                     onClick={() => void router.push({ name: "JoinRequestNew" })}
                                 >
                                     {t("New admin-assisted request")}
-                                </VBtn>
+                                </PgButton>
                             )}
                         </ThemedView>
                     )</PageHeader>
@@ -582,8 +582,8 @@ const JoinRequestsPage = dc(() => {
                             ]}
                         />
                         <ThemedView style={{ flexDirection: "row", gap: "8px", justifyContent: "flex-end" }}>
-                            <VBtn variant="text" onClick={() => (inspectionOpen.value = false)}>{t("Close")}</VBtn>
-                            <VBtn
+                            <PgButton variant="text" onClick={() => (inspectionOpen.value = false)}>{t("Close")}</PgButton>
+                            <PgButton
                                 color="primary"
                                 prependIcon="mdi-open-in-new"
                                 onClick={() => {
@@ -593,7 +593,7 @@ const JoinRequestsPage = dc(() => {
                                 }}
                             >
                                 {t("Open")}
-                            </VBtn>
+                            </PgButton>
                         </ThemedView>
                     </ThemedView>
                 )}

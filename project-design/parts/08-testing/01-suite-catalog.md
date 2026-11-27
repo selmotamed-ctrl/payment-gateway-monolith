@@ -650,3 +650,14 @@ provisioning. `tests/unit/i18n-catalogue.test.ts` guards the new EN/AR keys and
 `tests/e2e/merchant/auth.spec.ts` covers the no-phone registration, email MFA
 copy and maintenance screen. Deploy config tests cover the SMTP/SMS/Google
 validation.
+
+## `@pg/ui` package and UI governance gate (2026-11-27)
+
+| Suite | Command | Scope |
+| :--- | :--- | :--- |
+| Package unit | `cd packages/ui && bun run test` | `core.test.ts` (date, money, options, rules, status), `toastStore.test.ts` (auto-dismiss, pause/resume, stack cap, tone), `governanceAudit.test.ts` (rules, container padding, duplicated dirs, component source contracts). 25 tests. |
+| Package typecheck | `cd packages/ui && bun run typecheck` | Vapor TSX component contracts. |
+| UI full-sweep gate | `bun run ui:audit` | UI-01..UI-11 across the four portals; 0 violations. |
+| Icon registry | `bun run ui:icons:check` | Generated `@mdi/js` registry is current. |
+| Portal gates | each portal `bun run type-check && bun run build` | Admin/merchant/checkout/Fake Rails compile the shared package through the Vite alias. |
+| Browser smoke | cached Chromium against `vite preview` or `vite dev` with mocked APIs | Login, dashboard, sidebar, KPI strip, checklist, autocomplete, menu and toast; zero page/console errors. |

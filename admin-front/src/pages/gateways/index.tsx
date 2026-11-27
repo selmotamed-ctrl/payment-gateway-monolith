@@ -4,33 +4,33 @@ import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MonoRef } from "@/components/ui/MonoRef";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { statusTone } from "@/components/Table/statusTone";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import type { TableHeader } from "@/components/Table/types";
+import {VAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {statusTone} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { SectionFields } from "@/components/SectionFields";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import GatewayHealthDrawer from "./components/GatewayHealthDrawer";
 const ROLLBACK_CHECKS = [
     { key: "TARGET_VERSION_VERIFIED", label: "Target version verified" },
@@ -481,10 +481,10 @@ const GatewaysPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Gateways")} subtitle={t("Gateway portfolio, version state, and live route health.")}>(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
-                            <VBtn color="primary" variant="tonal" prependIcon="mdi-robot-outline" onClick={() => void router.push({ name: "GatewayAiImport" })}>{t("Smart AI Integration")}</VBtn>
-                            <VBtn color="primary" variant="flat" prependIcon="mdi-plus" onClick={openCreate}>{t("New Gateway")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</PgButton>
+                            <PgButton color="primary" variant="tonal" prependIcon="mdi-robot-outline" onClick={() => void router.push({ name: "GatewayAiImport" })}>{t("Smart AI Integration")}</PgButton>
+                            <PgButton color="primary" variant="flat" prependIcon="mdi-plus" onClick={openCreate}>{t("New Gateway")}</PgButton>
                         </ThemedView>
                     )</PageHeader>
 
@@ -590,10 +590,10 @@ const GatewaysPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <>
-                            <VBtn variant="outlined" disabled={rollbackLoading.value} onClick={() => (rollbackOpen.value = false)}>
+                            <PgButton variant="outlined" disabled={rollbackLoading.value} onClick={() => (rollbackOpen.value = false)}>
                                 {t("Cancel")}
-                            </VBtn>
-                            <VBtn
+                            </PgButton>
+                            <PgButton
                                 color="warning"
                                 variant="flat"
                                 {...{ type: "submit" }}
@@ -601,7 +601,7 @@ const GatewaysPage = dc(() => {
                                 disabled={!rollbackChecklistComplete.value}
                             >
                                 {t("Rollback")}
-                            </VBtn>
+                            </PgButton>
                         </>
                     ),
                 }}
@@ -611,7 +611,7 @@ const GatewaysPage = dc(() => {
                 </VAlert>
                 <SectionFields title={t("Rollback details")}>
                     <FormField label={t("Target version")} required sensitiveMakerChecker>
-                        <VSelect
+                        <PgAutocomplete
                             items={(rollbackGateway.value ? rollbackTargets(rollbackGateway.value) : []).map((version) => ({
                                 title: `v${version.versionNumber} · ${version.state}`,
                                 value: version.id,
@@ -621,7 +621,7 @@ const GatewaysPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Rollback reason")} required sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             modelValue={rollbackReason.value}
                             onUpdate:modelValue={(value: string) => (rollbackReason.value = value)}
                         />
@@ -670,10 +670,10 @@ const GatewaysPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <>
-                            <VBtn variant="outlined" disabled={creating.value} onClick={() => (createOpen.value = false)}>
+                            <PgButton variant="outlined" disabled={creating.value} onClick={() => (createOpen.value = false)}>
                                 {t("Cancel")}
-                            </VBtn>
-                            <VBtn
+                            </PgButton>
+                            <PgButton
                                 color="primary"
                                 variant="flat"
                                 {...{ type: "submit" }}
@@ -681,29 +681,29 @@ const GatewaysPage = dc(() => {
                                 disabled={!form.value.code.trim() || !form.value.name.trim()}
                             >
                                 {t("Create")}
-                            </VBtn>
+                            </PgButton>
                         </>
                     ),
                 }}
             >
                 <SectionFields title={t("Gateway profile")}>
                     <FormField label={t("Gateway code")} hint="lowercase letters, digits, - and _" required sensitiveMakerChecker>
-                        <VTextField modelValue={form.value.code} onUpdate:modelValue={(value: string) => (form.value.code = value)} />
+                        <PgTextField modelValue={form.value.code} onUpdate:modelValue={(value: string) => (form.value.code = value)} />
                     </FormField>
                     <FormField label={t("Gateway name")} required>
-                        <VTextField modelValue={form.value.name} onUpdate:modelValue={(value: string) => (form.value.name = value)} />
+                        <PgTextField modelValue={form.value.name} onUpdate:modelValue={(value: string) => (form.value.name = value)} />
                     </FormField>
                     <FormField label={t("Operator")}>
-                        <VTextField modelValue={form.value.operator} onUpdate:modelValue={(value: string) => (form.value.operator = value)} />
+                        <PgTextField modelValue={form.value.operator} onUpdate:modelValue={(value: string) => (form.value.operator = value)} />
                     </FormField>
                     <FormField label={t("Kind")}>
-                        <VSelect items={["DIRECT", "AGGREGATOR", "NATIVE_ADAPTER", "INTERNAL"]} modelValue={form.value.kind} onUpdate:modelValue={(value: string) => (form.value.kind = value)} />
+                        <PgAutocomplete items={["DIRECT", "AGGREGATOR", "NATIVE_ADAPTER", "INTERNAL"]} modelValue={form.value.kind} onUpdate:modelValue={(value: string) => (form.value.kind = value)} />
                     </FormField>
                     <FormField label={t("Country")}>
-                        <VTextField modelValue={form.value.country} onUpdate:modelValue={(value: string) => (form.value.country = value)} />
+                        <PgTextField modelValue={form.value.country} onUpdate:modelValue={(value: string) => (form.value.country = value)} />
                     </FormField>
                     <FormField label={t("Risk class")} sensitiveMakerChecker>
-                        <VSelect items={["NORMAL", "HIGH_RISK"]} modelValue={form.value.riskClass} onUpdate:modelValue={(value: string) => (form.value.riskClass = value)} />
+                        <PgAutocomplete items={["NORMAL", "HIGH_RISK"]} modelValue={form.value.riskClass} onUpdate:modelValue={(value: string) => (form.value.riskClass = value)} />
                     </FormField>
                 </SectionFields>
             </FormModal>

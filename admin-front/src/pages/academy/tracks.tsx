@@ -1,17 +1,17 @@
 import { computed, onMounted, ref, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn } from "@/components/vael/VuetifyShim";
+import {PgButton} from "@pg/ui";
 import { AcademyShell, Skeleton, useAcademyData, userRole } from "@/components/academy/AcademyShell";
 import { TrackCard } from "@/components/academy/TrackCard";
 import { trackStats } from "@/components/academy/nextStep";
 import { Callout } from "@/components/academy/ui/Callout";
 import { useAcademyProgress } from "@/components/academy/useAcademyProgress";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { PageHeader } from "@/components/ui/PageHeader";
+import {EmptyState} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
 import { showSnackBar } from "@/utils/snackBar";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {SegmentedTabs} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
 import { roleTrackFor, type TrackId } from "@/content/academy";
 
 type TrackFilter = "all" | "role" | "certified";
@@ -106,9 +106,9 @@ export const AdminAcademyTracksPage = defineComponent({
                 <AcademyShell
                     header={() => (
                         <PageHeader title={t("Tracks")} subtitle={t("Everyone starts with Foundation, then takes the track for their role.")}>(
-                                <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyTracksSummary()}>
+                                <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyTracksSummary()}>
                                     {t("Copy tracks summary")}
-                                </VBtn>
+                                </PgButton>
                             )</PageHeader>
                     )}
                 >

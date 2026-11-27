@@ -6,13 +6,13 @@ confidence: high
 last_verified: 2026-11-23
 verified_against: 53afea5+working-tree
 code:
-  - admin-front/src/components/Table/**
+  - admin-front/src/tables/**
   - admin-front/src/utils/xlsx/**
-  - admin-front/src/components/ui/SummaryExportCard.tsx
-  - admin-front/src/components/ui/FormChecklist.tsx
+  - packages/ui/src/data/PgSummaryExportCard.tsx
+  - packages/ui/src/data/PgFormChecklist.tsx
   - admin-front/src/constants/env/index.ts
   - admin-front/src/pages/**
-  - admin-front/src/components/Table/registry/**
+  - admin-front/src/tables/registry/**
 design_sources:
   - design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md
   - design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md
@@ -21,7 +21,7 @@ tests:
   - tests/e2e/admin/table-and-padding-geometry.spec.ts
   - tests/e2e/admin/table-row-context-menu.spec.ts
   - tests/e2e/admin/create.spec.ts
-  - admin-front/src/components/ui/__tests__/ui-abstraction-compliance.test.ts
+  - packages/ui/test/governanceAudit.test.ts
 gaps:
   - DataTable "server" mode fetches the first 200 rows with page=1 and pageSize=200, then paginates in the browser; it is not true server-side pagination for larger result sets.
   - ApiTable and DataTable XLSX export only the currently rendered page, not the full filtered result set.
@@ -58,16 +58,16 @@ The v2 design intends tables to look operational rather than decorative:
 
 | Component | File | Responsibility |
 | :--- | :--- | :--- |
-| `ApiTable` | `admin-front/src/components/Table/ApiTable.tsx` | Page-driven server fetch. The parent supplies `onRefresh`, data/total extractors, headers and optional filters. Supports local search suppression, refresh hooks, and XLSX export of the rendered page. |
-| `DataTable` | `admin-front/src/components/Table/DataTable.tsx` | Either local data mode or "server" mode driven by a `server` prop or `tableRegistry[route.name]`. Server mode fetches one page of up to 200 rows and paginates locally. Persists server search/filter/sort state in `sessionStorage`. |
-| `Table` | `admin-front/src/components/Table/Table.tsx` | Renders the Vuetify table, compact row styling, selection, column filters, row tone, and cell rendering. |
-| `TableFilters` | `admin-front/src/components/Table/TableFilters.tsx` | Renders filter controls by type, active chips, summary text, a mobile/desktop surface, and an injection key so the toolbar can toggle filters. |
-| `TableRowActions` | `admin-front/src/components/Table/TableRowActions.tsx` | One optional primary action plus a right-aligned overflow menu. Supports danger/disabled/hidden items and dividers. It also binds the row context menu (`contextmenu` + `Shift+F10`), shares the menu panel with the overflow trigger, and owns the one-open-menu coordinator. |
-| `HeaderFooter` | `admin-front/src/components/Table/HeaderFooter.tsx` | Desktop/mobile toolbar and pagination, search, refresh, filter trigger, record count, XLSX button, and `useTableXlsx`. |
-| `tableRegistry` | `admin-front/src/components/Table/tableRegistry.ts` | Maps a route name to a URL, list key, filters, default sort, optional storage key, params, and row mapper. |
-| `filters` | `admin-front/src/components/Table/filters.ts` | Filter union type, active-state detection, query mapping, and server config type. |
-| `referenceOptions` | `admin-front/src/components/Table/referenceOptions.ts` | Cached `/options/:kind` loaders for merchant/rail/gateway/user/wallet filters. |
-| `statusTone` | `admin-front/src/components/Table/statusTone.ts` | Status-to-tone mapping used by filters and status pills. |
+| `ApiTable` | `admin-front/src/tables/ApiTable.tsx` | Page-driven server fetch. The parent supplies `onRefresh`, data/total extractors, headers and optional filters. Supports local search suppression, refresh hooks, and XLSX export of the rendered page. |
+| `DataTable` | `admin-front/src/tables/DataTable.tsx` | Either local data mode or "server" mode driven by a `server` prop or `tableRegistry[route.name]`. Server mode fetches one page of up to 200 rows and paginates locally. Persists server search/filter/sort state in `sessionStorage`. |
+| `Table` | `admin-front/src/tables/Table.tsx` | Renders the Vuetify table, compact row styling, selection, column filters, row tone, and cell rendering. |
+| `TableFilters` | `admin-front/src/tables/TableFilters.tsx` | Renders filter controls by type, active chips, summary text, a mobile/desktop surface, and an injection key so the toolbar can toggle filters. |
+| `TableRowActions` | `admin-front/src/tables/TableRowActions.tsx` | One optional primary action plus a right-aligned overflow menu. Supports danger/disabled/hidden items and dividers. It also binds the row context menu (`contextmenu` + `Shift+F10`), shares the menu panel with the overflow trigger, and owns the one-open-menu coordinator. |
+| `HeaderFooter` | `admin-front/src/tables/HeaderFooter.tsx` | Desktop/mobile toolbar and pagination, search, refresh, filter trigger, record count, XLSX button, and `useTableXlsx`. |
+| `tableRegistry` | `admin-front/src/tables/tableRegistry.ts` | Maps a route name to a URL, list key, filters, default sort, optional storage key, params, and row mapper. |
+| `filters` | `admin-front/src/tables/filters.ts` | Filter union type, active-state detection, query mapping, and server config type. |
+| `referenceOptions` | `admin-front/src/tables/referenceOptions.ts` | Cached `/options/:kind` loaders for merchant/rail/gateway/user/wallet filters. |
+| `statusTone` | `admin-front/src/tables/statusTone.ts` | Status-to-tone mapping used by filters and status pills. |
 
 ### 3.1.1 Row context menu and sticky action column (2026-11-07)
 
@@ -210,12 +210,12 @@ When checklists are hidden, page-side completeness computations generally become
 
 | Surface | Location |
 | :--- | :--- |
-| Table components | `admin-front/src/components/Table/**` |
-| Table registry | `admin-front/src/components/Table/tableRegistry.ts` |
-| Filter types and query mapping | `admin-front/src/components/Table/filters.ts` |
+| Table components | `admin-front/src/tables/**` |
+| Table registry | `admin-front/src/tables/tableRegistry.ts` |
+| Filter types and query mapping | `admin-front/src/tables/filters.ts` |
 | XLSX engine | `admin-front/src/utils/xlsx/**` |
-| Summary export card | `admin-front/src/components/ui/SummaryExportCard.tsx` |
-| Checklist component | `admin-front/src/components/ui/FormChecklist.tsx` |
+| Summary export card | `packages/ui/src/data/PgSummaryExportCard.tsx` |
+| Checklist component | `packages/ui/src/data/PgFormChecklist.tsx` |
 | Visibility flags | `admin-front/src/constants/env/index.ts` |
 | Deploy flags | `admin-front/deploy` schema and `deploy/deploy.ts` |
 
@@ -272,7 +272,7 @@ Common export endpoints include `*/export` and `*/summary/export` routes in `adm
 
 - `tests/e2e/admin/table-and-padding-geometry.spec.ts` checks compact rows, row-action discipline, filter padding, toolbar/table padding, and expanded filters.
 - `tests/e2e/admin/create.spec.ts` checks table search behavior on gateway data.
-- `admin-front/src/components/ui/__tests__/ui-abstraction-compliance.test.ts` checks `TableRowActions` existence, action-column discipline, no rainbow tints, no gradients, and the presence of the unified table components.
+- `packages/ui/test/governanceAudit.test.ts` checks `TableRowActions` existence, action-column discipline, no rainbow tints, no gradients, and the presence of the unified table components.
 - `tests/e2e/admin/a11y.spec.ts` covers table accessibility basics.
 
 No database is required for the unit/static compliance checks; the Playwright geometry suite requires the live stack.
@@ -287,15 +287,15 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 ### Code paths
 
-- `admin-front/src/components/Table/ApiTable.tsx`
-- `admin-front/src/components/Table/DataTable.tsx`
-- `admin-front/src/components/Table/TableFilters.tsx`
-- `admin-front/src/components/Table/TableRowActions.tsx`
-- `admin-front/src/components/Table/tableRegistry.ts`
-- `admin-front/src/components/Table/filters.ts`
-- `admin-front/src/components/Table/HeaderFooter.tsx`
-- `admin-front/src/components/ui/SummaryExportCard.tsx`
-- `admin-front/src/components/ui/FormChecklist.tsx`
+- `admin-front/src/tables/ApiTable.tsx`
+- `admin-front/src/tables/DataTable.tsx`
+- `admin-front/src/tables/TableFilters.tsx`
+- `admin-front/src/tables/TableRowActions.tsx`
+- `admin-front/src/tables/tableRegistry.ts`
+- `admin-front/src/tables/filters.ts`
+- `admin-front/src/tables/HeaderFooter.tsx`
+- `packages/ui/src/data/PgSummaryExportCard.tsx`
+- `packages/ui/src/data/PgFormChecklist.tsx`
 - `admin-front/src/utils/xlsx/**`
 - `admin-front/src/constants/env/index.ts`
 

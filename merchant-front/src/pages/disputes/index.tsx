@@ -1,26 +1,26 @@
-import ThemedText from "@/components/ThemedText/index";
+import {PgText as ThemedText} from "@pg/ui";
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VFileInput, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { StateView } from "@/components/StateView";
-import { DataTable } from "@/components/Table/DataTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { SectionFields } from "@/components/SectionFields";
+import {PgButton, PgFileUpload, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
 type Attachment = {
     id: string;
     label: string;
@@ -260,7 +260,7 @@ const DisputesPage = dc(() => {
             >
                 <SectionFields title={t("Evidence")}>
                     <FormField label={t("Label or note")}>
-                        <VTextarea
+                        <PgTextarea
                             modelValue={note.value}
                             onUpdate:modelValue={(v: string) => (note.value = v)}
                             rows={2}
@@ -268,7 +268,7 @@ const DisputesPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Evidence file")}>
-                        <VFileInput
+                        <PgFileUpload
                             modelValue={file.value}
                             onUpdate:modelValue={(v: File | File[] | null) => {
                                 file.value = Array.isArray(v) ? (v[0] ?? null) : v;
@@ -291,8 +291,8 @@ const DisputesPage = dc(() => {
                                 {attachment.byteSize && <ThemedText class="text-medium-emphasis">{attachment.byteSize} B</ThemedText>}
                             </ThemedView>
                             <ThemedView style={{ display: "flex", gap: "6px" }}>
-                                <VBtn size="small" variant="text" disabled={attachment.status !== "ACTIVE"} onClick={() => void downloadAttachment(attachment)}>{t("Download")}</VBtn>
-                                <VBtn size="small" variant="text" color="error" onClick={() => void deleteAttachment(attachment)}>{t("Delete")}</VBtn>
+                                <PgButton size="small" variant="text" disabled={attachment.status !== "ACTIVE"} onClick={() => void downloadAttachment(attachment)}>{t("Download")}</PgButton>
+                                <PgButton size="small" variant="text" color="error" onClick={() => void deleteAttachment(attachment)}>{t("Delete")}</PgButton>
                             </ThemedView>
                         </ThemedView>
                     ))}

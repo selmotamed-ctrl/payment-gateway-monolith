@@ -2,26 +2,26 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import { VBtn } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { StateView } from "@/components/StateView";
-import { DataTable } from "@/components/Table/DataTable";
-import TableFilters from "@/components/Table/TableFilters";
-import type { TableFilter } from "@/components/Table/filters";
-import type { TableHeader } from "@/components/Table/types";
+import {PgButton} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import {TableFilters} from "@pg/ui";
+import type { TableFilter } from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { DescriptionList, type DescriptionItem } from "@/components/ui/DescriptionList";
-import { EmptyState } from "@/components/ui/EmptyState";
+import {SurfaceCard} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {DescriptionList, type DescriptionItem} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
 type Wallet = {
     id: string;
     name: string;
@@ -264,9 +264,9 @@ const StatementsPage = dc(() => {
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Statements")} subtitle={t("Settlement statements and downloadable reconciliation records.")}>(
-                        <VBtn variant="tonal" disabled={!walletId.value} onClick={() => void exportStatement()}>
+                        <PgButton variant="tonal" disabled={!walletId.value} onClick={() => void exportStatement()}>
                             {t("Export")}
-                        </VBtn>
+                        </PgButton>
                     )</PageHeader>
 
                 {error.value ? (

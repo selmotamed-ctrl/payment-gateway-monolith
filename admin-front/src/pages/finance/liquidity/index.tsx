@@ -1,28 +1,28 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn, VProgressLinear } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgProgressBar} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MetricStrip } from "@/components/ui/MetricStrip";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { DescriptionList } from "@/components/ui/DescriptionList";
+import {SurfaceCard} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MetricStrip} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
 import { buildCapViews, type CapTone, type RouteCapRow } from "./routeCaps";
 const EXPORT_CHECKS = [
     { key: "LIQUIDITY_SCOPE_VERIFIED", label: "Liquidity scope verified" },
@@ -159,8 +159,8 @@ const LiquidityPage = dc(() => {
                 <PageHeader title={t("Liquidity")} subtitle={t("Monitor treasury cover, clearing ageing, cash-out demand, and held balances.")} badge={t("Treasury control")} badgeTone="info">(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             {data.value?.checkedAt && <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Updated")} {new Date(data.value.checkedAt).toLocaleTimeString()}</ThemedText>}
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export snapshot")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={refreshAll}>{t("Refresh")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export snapshot")}</PgButton>
                         </ThemedView>
                     )</PageHeader>
 
@@ -323,7 +323,7 @@ const LiquidityPage = dc(() => {
                                                     </td>
                                                     <td>
                                                         <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                                                            <VProgressLinear modelValue={view.barPercent} height={8} rounded color={CAP_COLOR[view.tone]} aria-label={`${view.railCode} ${view.utilisationLabel}`} />
+                                                            <PgProgressBar modelValue={view.barPercent} height={8} rounded color={CAP_COLOR[view.tone]} aria-label={`${view.railCode} ${view.utilisationLabel}`} />
                                                             <span class="pg-tabular" style={{ fontSize: "11.5px", color: "var(--pg-ink-secondary)" }}>{view.utilisationLabel}</span>
                                                         </div>
                                                     </td>

@@ -2,28 +2,28 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
-import { VSelect } from "@/components/vael/VuetifyShim";
+import {PgAutocomplete} from "@pg/ui";
 
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
-import { EChart } from "@/components/EChart";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MonoRef } from "@/components/ui/MonoRef";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { EChart } from "@/charts/EChart";
+import {MetricStrip, type MetricItem} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
 
-import { DataTable } from "@/components/Table/DataTable";
-import type { TableHeader } from "@/components/Table/types";
+import { DataTable } from "@/tables/DataTable";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { formatPlainNumber, toDecimal } from "@/utils/money";
 
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {SurfaceCard} from "@pg/ui";
 type Overview = {
     currency?: string;
     walletBalance?: string;
@@ -177,7 +177,7 @@ const DashboardPage = dc(() => {
                                     void load();
                                 }}
                             />
-                            <VSelect
+                            <PgAutocomplete
                                 modelValue={selectedCurrency.value}
                                 onUpdate:modelValue={(value: string) => {
                                     selectedCurrency.value = value;

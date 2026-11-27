@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
-import { VBtn, VCard, VCardText, VChip, VMenu } from "@/components/vael/VuetifyShim";
+import {PgButton, PgCard, PgCardText, PgChip, PgMenu} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
 import { lookupTerm } from "@/content/guide/legacy";
 
 type TermTooltipProps = {
@@ -19,15 +19,15 @@ export const TermTooltip = dc(
         return () => {
             const explanation = lookupTerm(props.term);
             if (!explanation) {
-                return <VChip size={props.size ?? "x-small"} variant="tonal">{props.label ?? props.term}</VChip>;
+                return <PgChip size={props.size ?? "x-small"} variant="tonal">{props.label ?? props.term}</PgChip>;
             }
             const meaning = isArabic() && explanation.meaningAr ? explanation.meaningAr : explanation.meaningEn;
             const action = isArabic() && explanation.actionAr ? explanation.actionAr : explanation.actionEn;
             return (
-                <VMenu openOnClick openOnHover location="bottom start" closeDelay={120}>
+                <PgMenu openOnClick openOnHover location="bottom start" closeDelay={120}>
                     {{
                         activator: ({ props: activatorProps }: any) => (
-                            <VChip
+                            <PgChip
                                 {...activatorProps}
                                 size={props.size ?? "x-small"}
                                 color={props.tone ?? "primary"}
@@ -35,14 +35,14 @@ export const TermTooltip = dc(
                                 style={{ cursor: "help", fontWeight: 700 }}
                             >
                                 {props.label ?? props.term}
-                            </VChip>
+                            </PgChip>
                         ),
                         default: () => (
-                            <VCard maxWidth={460} style={{ overflow: "hidden" }}>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                            <PgCard maxWidth={460} style={{ overflow: "hidden" }}>
+                                <PgCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                     <ThemedView style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
                                         <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{explanation.title}</ThemedText>
-                                        <VChip size="x-small" variant="text">{explanation.category}</VChip>
+                                        <PgChip size="x-small" variant="text">{explanation.category}</PgChip>
                                     </ThemedView>
                                     <ThemedText style={{ fontSize: "13px", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{meaning}</ThemedText>
                                     {action ? (
@@ -59,7 +59,7 @@ export const TermTooltip = dc(
                                             {action}
                                         </div>
                                     ) : null}
-                                    <VBtn
+                                    <PgButton
                                         size="small"
                                         variant="text"
                                         appendIcon="mdi-book-open-variant"
@@ -67,12 +67,12 @@ export const TermTooltip = dc(
                                         style={{ alignSelf: "flex-end" }}
                                     >
                                         Open the full guide
-                                    </VBtn>
-                                </VCardText>
-                            </VCard>
+                                    </PgButton>
+                                </PgCardText>
+                            </PgCard>
                         ),
                     }}
-                </VMenu>
+                </PgMenu>
             );
         };
     },

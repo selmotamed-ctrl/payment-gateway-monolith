@@ -1,4 +1,4 @@
-import { humanizeKey, isPlainObject } from "@/components/ui/jsonDiffModel";
+import {humanizeKey, isPlainObject} from "@pg/ui/data/json/jsonDiffModel";
 
 export interface ListVersionChip {
     /** Humanised list name, e.g. `adverse_media` -> `Adverse Media`, `ofac` -> `OFAC`. */

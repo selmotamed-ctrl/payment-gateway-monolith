@@ -1,11 +1,11 @@
 import { ref, watch, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VSelect, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
+import {VAlert, PgAutocomplete, PgTextField, PgTextarea} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
 import { showSnackBar } from "@/utils/snackBar";
 import { reportCommerceError } from "../governedRequest";
 import {
@@ -75,7 +75,7 @@ export const RevalidationModal = defineComponent({
                     {t("The merchant is notified and the KYB status returns to pending until the document is re-submitted and reviewed.")}
                 </VAlert>
                 <FormField label={t("Document type")} required error={field("docType")}>
-                    <VSelect
+                    <PgAutocomplete
                         modelValue={form.value.docType}
                         onUpdate:modelValue={(value: RevalidationForm["docType"]) => (form.value.docType = value)}
                         items={KYB_DOC_TYPES.map((type) => ({ title: t(KYB_DOC_TYPE_LABELS[type]), value: type }))}
@@ -83,10 +83,10 @@ export const RevalidationModal = defineComponent({
                     />
                 </FormField>
                 <FormField label={t("Due date (YYYY-MM-DD)")} required error={field("dueAt")}>
-                    <VTextField modelValue={form.value.dueAt} onUpdate:modelValue={(value: string) => (form.value.dueAt = value)} {...{ dir: "ltr" }} hideDetails />
+                    <PgTextField modelValue={form.value.dueAt} onUpdate:modelValue={(value: string) => (form.value.dueAt = value)} {...{ dir: "ltr" }} hideDetails />
                 </FormField>
                 <FormField label={t("Message to the merchant")} required error={field("message")}>
-                    <VTextarea modelValue={form.value.message} onUpdate:modelValue={(value: string) => (form.value.message = value)} rows={3} autoGrow {...{ maxlength: 1000 }} hideDetails />
+                    <PgTextarea modelValue={form.value.message} onUpdate:modelValue={(value: string) => (form.value.message = value)} rows={3} autoGrow {...{ maxlength: 1000 }} hideDetails />
                 </FormField>
             </FormModal>
         );

@@ -1,8 +1,8 @@
 import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VTextField } from "@/components/vael/VuetifyShim";
+import {PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
-import { FormField } from "@/components/ui/FormField";
+import {FormField} from "@pg/ui";
 import { ChipListInput, OptionChips } from "./ChipListInput";
 import { MISMATCH_ERROR_MESSAGE, SCOPE_ERROR_MESSAGES } from "./messages";
 import {
@@ -120,7 +120,7 @@ export const MismatchPolicyBuilder = defineComponent({
                     hint={t("Reconciliation differences up to this amount are accepted without a case.")}
                     error={invalid ? t(MISMATCH_ERROR_MESSAGE) : ""}
                 >
-                    <VTextField
+                    <PgTextField
                         modelValue={props.modelValue.toleranceAmount}
                         onUpdate:modelValue={(value: string) => emit("update:modelValue", { ...props.modelValue, toleranceAmount: value })}
                         readonly={props.readonly}

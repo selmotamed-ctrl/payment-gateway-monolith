@@ -1,4 +1,4 @@
-import { isPlainObject } from "@/components/ui/jsonDiffModel";
+import {isPlainObject} from "@pg/ui/data/json/jsonDiffModel";
 
 /**
  * Dispute evidence <-> form mapping (single place that knows the wire keys).

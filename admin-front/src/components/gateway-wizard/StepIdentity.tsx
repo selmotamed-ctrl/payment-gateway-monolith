@@ -1,9 +1,9 @@
 import { dc } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { FormField } from "@/components/ui/FormField";
+import {PgAutocomplete, PgTextField} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {FormField} from "@pg/ui";
 import type { WizardDraft } from "./types";
 
 export type WizardStepProps = {
@@ -50,25 +50,25 @@ export const StepIdentity = dc(
                 <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
                     <div style={gridStyle}>
                         <FormField label={t("Gateway Code")} required>
-                            <VTextField
+                            <PgTextField
                                 modelValue={props.model.identity.code}
                                 onUpdate:modelValue={(v: string) => update({ code: v })}
                             />
                         </FormField>
                         <FormField label={t("Gateway")} required>
-                            <VTextField
+                            <PgTextField
                                 modelValue={props.model.identity.name}
                                 onUpdate:modelValue={(v: string) => update({ name: v })}
                             />
                         </FormField>
                         <FormField label={t("Operator")}>
-                            <VTextField
+                            <PgTextField
                                 modelValue={props.model.identity.operator}
                                 onUpdate:modelValue={(v: string) => update({ operator: v })}
                             />
                         </FormField>
                         <FormField label={t("Country")}>
-                            <VTextField
+                            <PgTextField
                                 modelValue={props.model.identity.country}
                                 onUpdate:modelValue={(v: string) => update({ country: v.toUpperCase() })}
                             />
@@ -76,7 +76,7 @@ export const StepIdentity = dc(
                     </div>
 
                     <FormField label={t("Aliases")} hint="Comma separated">
-                        <VTextField
+                        <PgTextField
                             modelValue={listToString(props.model.identity.aliases)}
                             onUpdate:modelValue={(v: string) => update({ aliases: stringToList(v) })}
                         />
@@ -84,21 +84,21 @@ export const StepIdentity = dc(
 
                     <div style={gridStyle}>
                         <FormField label={t("Kind")}>
-                            <VSelect
+                            <PgAutocomplete
                                 items={["DIRECT", "AGGREGATOR", "NATIVE_ADAPTER", "INTERNAL"]}
                                 modelValue={props.model.identity.kind}
                                 onUpdate:modelValue={(v: any) => update({ kind: v })}
                             />
                         </FormField>
                         <FormField label={t("Verification State")}>
-                            <VSelect
+                            <PgAutocomplete
                                 items={["VERIFIED", "UNVERIFIED"]}
                                 modelValue={props.model.identity.verificationState}
                                 onUpdate:modelValue={(v: any) => update({ verificationState: v })}
                             />
                         </FormField>
                         <FormField label={t("Risk Class")}>
-                            <VSelect
+                            <PgAutocomplete
                                 items={["NORMAL", "HIGH_RISK"]}
                                 modelValue={props.model.identity.riskClass}
                                 onUpdate:modelValue={(v: any) => update({ riskClass: v })}

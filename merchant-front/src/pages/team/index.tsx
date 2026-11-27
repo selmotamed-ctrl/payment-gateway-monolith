@@ -1,23 +1,23 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { StateView } from "@/components/StateView";
-import { DataTable } from "@/components/Table/DataTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { SectionFields } from "@/components/SectionFields";
+import {PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 type TeamMember = {
     id: string;
     name: string;
@@ -206,9 +206,9 @@ const TeamPage = dc(() => {
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Team & Roles")} subtitle={t("Merchant users, authorities, and access posture.")}>(
-                        <VBtn variant="tonal" onClick={() => openDialog(null)}>
+                        <PgButton variant="tonal" onClick={() => openDialog(null)}>
                             {t("Invite Member")}
-                        </VBtn>
+                        </PgButton>
                     )</PageHeader>
 
                 {error.value ? (
@@ -239,10 +239,10 @@ const TeamPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <>
-                            <VBtn variant="outlined" disabled={actionLoading.value} onClick={() => (dialogOpen.value = false)}>
+                            <PgButton variant="outlined" disabled={actionLoading.value} onClick={() => (dialogOpen.value = false)}>
                                 {t("Cancel")}
-                            </VBtn>
-                            <VBtn
+                            </PgButton>
+                            <PgButton
                                 color="primary"
                                 variant="flat"
                                 {...{ type: "submit" }}
@@ -250,14 +250,14 @@ const TeamPage = dc(() => {
                                 disabled={submitDisabled()}
                             >
                                 {editing.value ? t("Save") : t("Invite Member")}
-                            </VBtn>
+                            </PgButton>
                         </>
                     ),
                 }}
             >
                 <SectionFields title={t("Profile")}>
                     <FormField label={t("Full Name")} required style={{ minWidth: "200px" }}>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.name}
                             onUpdate:modelValue={(v: string) => (form.value.name = v)}
                             hideDetails
@@ -265,7 +265,7 @@ const TeamPage = dc(() => {
                     </FormField>
                     {editing.value ? (
                         <FormField label={t("Status")} style={{ minWidth: "180px" }}>
-                            <VSelect
+                            <PgAutocomplete
                                 items={["ACTIVE", "SUSPENDED"]}
                                 modelValue={form.value.status}
                                 onUpdate:modelValue={(v: string) => (form.value.status = v)}
@@ -279,7 +279,7 @@ const TeamPage = dc(() => {
                             required
                             style={{ minWidth: "200px" }}
                         >
-                            <VTextField
+                            <PgTextField
                                 type="password"
                                 modelValue={form.value.password}
                                 onUpdate:modelValue={(v: string) => (form.value.password = v)}
@@ -288,21 +288,21 @@ const TeamPage = dc(() => {
                         </FormField>
                     )}
                     <FormField label={t("Email")} required style={{ minWidth: "200px" }}>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.email}
                             onUpdate:modelValue={(v: string) => (form.value.email = v)}
                             hideDetails
                         />
                     </FormField>
                     <FormField label={t("Phone")} style={{ minWidth: "180px" }}>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.phone}
                             onUpdate:modelValue={(v: string) => (form.value.phone = v)}
                             hideDetails
                         />
                     </FormField>
                     <FormField label={t("Role")} required style={{ minWidth: "220px" }}>
-                        <VSelect
+                        <PgAutocomplete
                             items={ROLES}
                             modelValue={form.value.role}
                             onUpdate:modelValue={(v: string) => (form.value.role = v)}
@@ -312,7 +312,7 @@ const TeamPage = dc(() => {
                 </SectionFields>
                 <SectionFields title={t("Authorities")}>
                     <FormField label={t("Scopes")}>
-                        <VSelect
+                        <PgAutocomplete
                             items={SCOPES.map((scope) => ({ title: scope, value: scope }))}
                             modelValue={form.value.appScopeIds}
                             onUpdate:modelValue={(v: string[]) => (form.value.appScopeIds = v)}
@@ -323,7 +323,7 @@ const TeamPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Authorities")}>
-                        <VSelect
+                        <PgAutocomplete
                             items={Object.keys(AUTHORITY_GROUPS).map((scope) => ({ title: `${scope}.*`, value: scope }))}
                             modelValue={form.value.authorities}
                             onUpdate:modelValue={(v: string[]) => (form.value.authorities = v)}

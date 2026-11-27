@@ -1,6 +1,6 @@
 import { computed, type PropType, createSlot } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VIcon } from "@/components/vael/VuetifyShim";
+import {PgIcon} from "@pg/ui";
 
 export type CalloutTone = "neutral" | "info" | "success" | "warning" | "danger";
 
@@ -32,7 +32,7 @@ export const Callout = defineComponent({
         });
         return () => (
             <div class={["ac-callout", props.tone !== "neutral" ? `ac-callout--${props.tone}` : ""]} role={role.value}>
-                <VIcon class="ac-callout__icon" icon={props.icon || ICON[props.tone]} size={18} aria-hidden="true" />
+                <PgIcon class="ac-callout__icon" icon={props.icon || ICON[props.tone]} size={18} aria-hidden="true" />
                 <div class="ac-callout__body">
                     {props.title ? <strong class="ac-callout__title">{props.title}</strong> : null}
                     {createSlot("default")}

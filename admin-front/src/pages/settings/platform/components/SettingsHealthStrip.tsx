@@ -1,8 +1,8 @@
 import { defineComponent } from "@/utils/dc";
 import { type PropType, type VNodeChild } from "vue";
-import { VBtn } from "@/components/vael/VuetifyShim";
+import {PgButton} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {SurfaceCard} from "@pg/ui";
 import type { SettingEntry } from "@/components/builders/model";
 
 type Metric = { key: string; label: string; value: number; hint: string; tone?: "success" | "warning" | "danger" | "info" };
@@ -44,14 +44,14 @@ export const SettingsHealthStrip = defineComponent({
                     </div>
                     <div class="pg-settings-health__actions">
                         {metrics().find((metric) => metric.key === "defaults")!.value > 0 && props.onReviewDefaults && (
-                            <VBtn size="small" variant="tonal" color="warning" prependIcon="mdi-tune-variant" onClick={() => props.onReviewDefaults?.()}>
+                            <PgButton size="small" variant="tonal" color="warning" prependIcon="mdi-tune-variant" onClick={() => props.onReviewDefaults?.()}>
                                 {t("Review defaults")}
-                            </VBtn>
+                            </PgButton>
                         )}
                         {metrics().find((metric) => metric.key === "attention")!.value > 0 && props.onReviewAttention && (
-                            <VBtn size="small" variant="tonal" color="error" prependIcon="mdi-alert-outline" onClick={() => props.onReviewAttention?.()}>
+                            <PgButton size="small" variant="tonal" color="error" prependIcon="mdi-alert-outline" onClick={() => props.onReviewAttention?.()}>
                                 {t("Review attention")}
-                            </VBtn>
+                            </PgButton>
                         )}
                     </div>
                 </div>

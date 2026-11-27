@@ -1,4 +1,4 @@
-import { deepEqual, humanizeKey, isPlainObject } from "@/components/ui/jsonDiffModel";
+import {deepEqual, humanizeKey, isPlainObject} from "@pg/ui/data/json/jsonDiffModel";
 
 /**
  * Keys that change on every write and say nothing about WHAT changed.

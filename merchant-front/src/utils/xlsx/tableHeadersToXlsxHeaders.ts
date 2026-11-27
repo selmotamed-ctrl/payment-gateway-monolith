@@ -1,5 +1,5 @@
 import { devLog } from "@/utils/devLog";
-import type { TableHeader } from "@/components/Table/types";
+import type { TableHeader } from "@pg/ui";
 import type { XlsxHeader } from "./templateDownload";
 import { t } from "@/plugins/localization";
 import xlsxUIPipeline from ".";

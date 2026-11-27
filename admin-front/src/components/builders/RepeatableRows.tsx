@@ -1,6 +1,6 @@
 import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VBtn } from "@/components/vael/VuetifyShim";
+import {PgButton} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 
 /**
@@ -46,7 +46,7 @@ export const RepeatableRows = defineComponent({
                         >
                             <div style={{ flex: 1, minInlineSize: 0 }}>{slots.default?.({ index })}</div>
                             {!props.disabled && (
-                                <VBtn
+                                <PgButton
                                     icon="mdi-delete-outline"
                                     variant="text"
                                     size="small"
@@ -59,9 +59,9 @@ export const RepeatableRows = defineComponent({
                     ))}
                     {canAdd && (
                         <div>
-                            <VBtn variant="tonal" size="small" prependIcon="mdi-plus" onClick={() => emit("add")}>
+                            <PgButton variant="tonal" size="small" prependIcon="mdi-plus" onClick={() => emit("add")}>
                                 {props.addLabel || t("Add")}
-                            </VBtn>
+                            </PgButton>
                         </div>
                     )}
                 </div>

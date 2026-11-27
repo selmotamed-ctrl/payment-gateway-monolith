@@ -1,26 +1,26 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn, VSelect, VSwitch, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
 import { useRouter } from "vue-router";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { type MetricItem } from "@/components/ui/MetricStrip";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {type MetricItem} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -610,9 +610,9 @@ const IncidentsPage = dc(() => {
         <ScreenContainer>
             <PageHeader title={t("Incidents")} subtitle={t("Operational resilience, response timeline and regulatory incident reporting")} badge="AML-CONFIDENTIAL" badgeTone="danger">(
                     <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                        <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                        <VBtn variant="tonal" prependIcon="mdi-download" loading={listExportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</VBtn>
-                        <VBtn color="primary" prependIcon="mdi-plus" onClick={() => (createOpen.value = true)}>{t("Open incident")}</VBtn>
+                        <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
+                        <PgButton variant="tonal" prependIcon="mdi-download" loading={listExportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</PgButton>
+                        <PgButton color="primary" prependIcon="mdi-plus" onClick={() => (createOpen.value = true)}>{t("Open incident")}</PgButton>
                     </ThemedView>
                 )</PageHeader>
             <SummaryExportCard
@@ -671,9 +671,9 @@ const IncidentsPage = dc(() => {
                 }}
                 TopSlot={({ reset }) => (
                     <ThemedView style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid var(--pg-border-subtle)" }}>
-                        <VSelect items={STATUSES.map((value) => ({ title: value, value }))} clearable modelValue={statusFilter.value} onUpdate:modelValue={(value: string | null) => { statusFilter.value = value; reset(); }} label={t("Status")} hideDetails density="compact" style={{ maxWidth: "190px" }} />
-                        <VSelect items={SEVERITIES.map((value) => ({ title: value, value }))} clearable modelValue={severityFilter.value} onUpdate:modelValue={(value: string | null) => { severityFilter.value = value; reset(); }} label={t("Severity")} hideDetails density="compact" style={{ maxWidth: "160px" }} />
-                        <VSelect items={CATEGORIES.map((value) => ({ title: value, value }))} clearable modelValue={categoryFilter.value} onUpdate:modelValue={(value: string | null) => { categoryFilter.value = value; reset(); }} label={t("Category")} hideDetails density="compact" style={{ maxWidth: "210px" }} />
+                        <PgAutocomplete items={STATUSES.map((value) => ({ title: value, value }))} clearable modelValue={statusFilter.value} onUpdate:modelValue={(value: string | null) => { statusFilter.value = value; reset(); }} label={t("Status")} hideDetails density="compact" style={{ maxWidth: "190px" }} />
+                        <PgAutocomplete items={SEVERITIES.map((value) => ({ title: value, value }))} clearable modelValue={severityFilter.value} onUpdate:modelValue={(value: string | null) => { severityFilter.value = value; reset(); }} label={t("Severity")} hideDetails density="compact" style={{ maxWidth: "160px" }} />
+                        <PgAutocomplete items={CATEGORIES.map((value) => ({ title: value, value }))} clearable modelValue={categoryFilter.value} onUpdate:modelValue={(value: string | null) => { categoryFilter.value = value; reset(); }} label={t("Category")} hideDetails density="compact" style={{ maxWidth: "210px" }} />
                     </ThemedView>
                 )}
             />
@@ -702,16 +702,16 @@ const IncidentsPage = dc(() => {
             </FormModal>
             <FormModal modelValue={createOpen.value} onUpdate:modelValue={(value: boolean) => (createOpen.value = value)} title={t("Open incident")} size="lg" loading={creating.value} submitLabel={t("Open incident")} onSubmit={() => void createIncident()}>
                 {createError.value && <VAlert type="error" variant="tonal" class="mb-4">{createError.value}</VAlert>}
-                <FormField label={t("Title")} required><VTextField modelValue={form.value.title} onUpdate:modelValue={(value: string) => (form.value.title = value)} hideDetails /></FormField>
-                <FormField label={t("Summary")}><VTextarea modelValue={form.value.summary} onUpdate:modelValue={(value: string) => (form.value.summary = value)} rows={4} hideDetails /></FormField>
-                <FormField label={t("Severity")} required><VSelect items={SEVERITIES.map((value) => ({ title: value, value }))} modelValue={form.value.severity} onUpdate:modelValue={(value: string) => (form.value.severity = value)} hideDetails /></FormField>
-                <FormField label={t("Category")} required><VSelect items={CATEGORIES.map((value) => ({ title: value, value }))} modelValue={form.value.category} onUpdate:modelValue={(value: string) => (form.value.category = value)} hideDetails /></FormField>
-                <FormField label={t("Impact scope")} required><VSelect items={IMPACTS.map((value) => ({ title: value, value }))} modelValue={form.value.impactScope} onUpdate:modelValue={(value: string) => (form.value.impactScope = value)} hideDetails /></FormField>
-                <FormField label={t("Detected at")}><VTextField type="datetime-local" modelValue={form.value.detectedAt} onUpdate:modelValue={(value: string) => (form.value.detectedAt = value)} hideDetails /></FormField>
-                <FormField label={t("Commander user ID")}><VTextField modelValue={form.value.commanderUserId} onUpdate:modelValue={(value: string) => (form.value.commanderUserId = value)} hideDetails /></FormField>
-                <FormField label={t("Affected services (comma separated)")}><VTextField modelValue={form.value.affectedServices} onUpdate:modelValue={(value: string) => (form.value.affectedServices = value)} hideDetails /></FormField>
-                <FormField label={t("Affected merchant IDs (comma separated)")}><VTextField modelValue={form.value.affectedMerchantIds} onUpdate:modelValue={(value: string) => (form.value.affectedMerchantIds = value)} hideDetails /></FormField>
-                <FormField label={t("Affected attempt IDs (comma separated)")}><VTextField modelValue={form.value.affectedAttemptIds} onUpdate:modelValue={(value: string) => (form.value.affectedAttemptIds = value)} hideDetails /></FormField>
+                <FormField label={t("Title")} required><PgTextField modelValue={form.value.title} onUpdate:modelValue={(value: string) => (form.value.title = value)} hideDetails /></FormField>
+                <FormField label={t("Summary")}><PgTextarea modelValue={form.value.summary} onUpdate:modelValue={(value: string) => (form.value.summary = value)} rows={4} hideDetails /></FormField>
+                <FormField label={t("Severity")} required><PgAutocomplete items={SEVERITIES.map((value) => ({ title: value, value }))} modelValue={form.value.severity} onUpdate:modelValue={(value: string) => (form.value.severity = value)} hideDetails /></FormField>
+                <FormField label={t("Category")} required><PgAutocomplete items={CATEGORIES.map((value) => ({ title: value, value }))} modelValue={form.value.category} onUpdate:modelValue={(value: string) => (form.value.category = value)} hideDetails /></FormField>
+                <FormField label={t("Impact scope")} required><PgAutocomplete items={IMPACTS.map((value) => ({ title: value, value }))} modelValue={form.value.impactScope} onUpdate:modelValue={(value: string) => (form.value.impactScope = value)} hideDetails /></FormField>
+                <FormField label={t("Detected at")}><PgTextField type="datetime-local" modelValue={form.value.detectedAt} onUpdate:modelValue={(value: string) => (form.value.detectedAt = value)} hideDetails /></FormField>
+                <FormField label={t("Commander user ID")}><PgTextField modelValue={form.value.commanderUserId} onUpdate:modelValue={(value: string) => (form.value.commanderUserId = value)} hideDetails /></FormField>
+                <FormField label={t("Affected services (comma separated)")}><PgTextField modelValue={form.value.affectedServices} onUpdate:modelValue={(value: string) => (form.value.affectedServices = value)} hideDetails /></FormField>
+                <FormField label={t("Affected merchant IDs (comma separated)")}><PgTextField modelValue={form.value.affectedMerchantIds} onUpdate:modelValue={(value: string) => (form.value.affectedMerchantIds = value)} hideDetails /></FormField>
+                <FormField label={t("Affected attempt IDs (comma separated)")}><PgTextField modelValue={form.value.affectedAttemptIds} onUpdate:modelValue={(value: string) => (form.value.affectedAttemptIds = value)} hideDetails /></FormField>
             </FormModal>
 
             <SlideOverDrawer modelValue={drawerOpen.value} onUpdate:modelValue={(value: boolean) => (drawerOpen.value = value)} title={selected.value?.reference ?? t("Incident")} subtitle={selected.value ? `${selected.value.severity} · ${selected.value.status} · ${selected.value.category}` : ""} width={1100}>
@@ -723,9 +723,9 @@ const IncidentsPage = dc(() => {
                             <ThemedText>{selected.value.title}</ThemedText>
                         </ThemedView>
                         <ThemedView style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                            <VSelect items={(TRANSITIONS[selected.value.status] ?? []).map((value) => ({ title: value, value }))} modelValue={transitionTo.value} onUpdate:modelValue={(value: string | null) => (transitionTo.value = value)} label={t("Next status")} hideDetails density="compact" style={{ maxWidth: "220px" }} />
-                            <VTextField modelValue={transitionNote.value} onUpdate:modelValue={(value: string) => (transitionNote.value = value)} label={t("Transition note")} hideDetails density="compact" style={{ maxWidth: "320px" }} />
-                            <VBtn size="small" color="primary" disabled={!transitionTo.value || !transitionChecklistComplete.value} loading={working.value} onClick={() => void transition()}>{t("Transition")}</VBtn>
+                            <PgAutocomplete items={(TRANSITIONS[selected.value.status] ?? []).map((value) => ({ title: value, value }))} modelValue={transitionTo.value} onUpdate:modelValue={(value: string | null) => (transitionTo.value = value)} label={t("Next status")} hideDetails density="compact" style={{ maxWidth: "220px" }} />
+                            <PgTextField modelValue={transitionNote.value} onUpdate:modelValue={(value: string) => (transitionNote.value = value)} label={t("Transition note")} hideDetails density="compact" style={{ maxWidth: "320px" }} />
+                            <PgButton size="small" color="primary" disabled={!transitionTo.value || !transitionChecklistComplete.value} loading={working.value} onClick={() => void transition()}>{t("Transition")}</PgButton>
                         </ThemedView>
                         <FormChecklist
                             checks={[...TRANSITION_CHECKS]}
@@ -737,8 +737,8 @@ const IncidentsPage = dc(() => {
                             incompleteMessage={t("Complete all transition checklist items before continuing")}
                         />
                         <ThemedView style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                            {!selected.value.regulatoryReportId && <VBtn size="small" variant="tonal" loading={working.value} onClick={() => void draftReport()}>{t("Draft regulatory report")}</VBtn>}
-                            {selected.value.regulatoryReportId && <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "AmlReports", query: { open: selected.value?.regulatoryReportId } })}>{t("Open regulatory report")}</VBtn>}
+                            {!selected.value.regulatoryReportId && <PgButton size="small" variant="tonal" loading={working.value} onClick={() => void draftReport()}>{t("Draft regulatory report")}</PgButton>}
+                            {selected.value.regulatoryReportId && <PgButton size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "AmlReports", query: { open: selected.value?.regulatoryReportId } })}>{t("Open regulatory report")}</PgButton>}
                         </ThemedView>
                         <SegmentedTabs modelValue={activeTab.value} onUpdate:modelValue={(value: string) => (activeTab.value = value)} tabs={tabs.value} />
                         {activeTab.value === "overview" && (
@@ -746,17 +746,17 @@ const IncidentsPage = dc(() => {
                                 <SurfaceCard title={t("Incident facts")}>
                                     <SurfaceCardText>
                                         <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
-                                            <FormField label={t("Title")} required><VTextField modelValue={edit.value.title} onUpdate:modelValue={(value: string) => (edit.value.title = value)} hideDetails density="compact" /></FormField>
-                                            <FormField label={t("Severity")} required><VSelect items={SEVERITIES.map((value) => ({ title: value, value }))} modelValue={edit.value.severity} onUpdate:modelValue={(value: string) => (edit.value.severity = value)} hideDetails density="compact" /></FormField>
-                                            <FormField label={t("Category")} required><VSelect items={CATEGORIES.map((value) => ({ title: value, value }))} modelValue={edit.value.category} onUpdate:modelValue={(value: string) => (edit.value.category = value)} hideDetails density="compact" /></FormField>
-                                            <FormField label={t("Impact scope")} required><VSelect items={IMPACTS.map((value) => ({ title: value, value }))} modelValue={edit.value.impactScope} onUpdate:modelValue={(value: string) => (edit.value.impactScope = value)} hideDetails density="compact" /></FormField>
-                                            <FormField label={t("Commander user ID")}><VTextField modelValue={edit.value.commanderUserId} onUpdate:modelValue={(value: string) => (edit.value.commanderUserId = value)} hideDetails density="compact" /></FormField>
+                                            <FormField label={t("Title")} required><PgTextField modelValue={edit.value.title} onUpdate:modelValue={(value: string) => (edit.value.title = value)} hideDetails density="compact" /></FormField>
+                                            <FormField label={t("Severity")} required><PgAutocomplete items={SEVERITIES.map((value) => ({ title: value, value }))} modelValue={edit.value.severity} onUpdate:modelValue={(value: string) => (edit.value.severity = value)} hideDetails density="compact" /></FormField>
+                                            <FormField label={t("Category")} required><PgAutocomplete items={CATEGORIES.map((value) => ({ title: value, value }))} modelValue={edit.value.category} onUpdate:modelValue={(value: string) => (edit.value.category = value)} hideDetails density="compact" /></FormField>
+                                            <FormField label={t("Impact scope")} required><PgAutocomplete items={IMPACTS.map((value) => ({ title: value, value }))} modelValue={edit.value.impactScope} onUpdate:modelValue={(value: string) => (edit.value.impactScope = value)} hideDetails density="compact" /></FormField>
+                                            <FormField label={t("Commander user ID")}><PgTextField modelValue={edit.value.commanderUserId} onUpdate:modelValue={(value: string) => (edit.value.commanderUserId = value)} hideDetails density="compact" /></FormField>
                                         </ThemedView>
-                                        <FormField label={t("Summary")}><VTextarea modelValue={edit.value.summary} onUpdate:modelValue={(value: string) => (edit.value.summary = value)} rows={4} hideDetails density="compact" /></FormField>
-                                        <FormField label={t("Affected services (comma separated)")}><VTextField modelValue={edit.value.affectedServices} onUpdate:modelValue={(value: string) => (edit.value.affectedServices = value)} hideDetails density="compact" /></FormField>
-                                        <FormField label={t("Affected merchant IDs (comma separated)")}><VTextField modelValue={edit.value.affectedMerchantIds} onUpdate:modelValue={(value: string) => (edit.value.affectedMerchantIds = value)} hideDetails density="compact" /></FormField>
-                                        <FormField label={t("Affected attempt IDs (comma separated)")}><VTextField modelValue={edit.value.affectedAttemptIds} onUpdate:modelValue={(value: string) => (edit.value.affectedAttemptIds = value)} hideDetails density="compact" /></FormField>
-                                        <VSwitch modelValue={edit.value.regulatorsNotified} onUpdate:modelValue={(value: boolean | null) => (edit.value.regulatorsNotified = Boolean(value))} label={t("Regulators notified")} hideDetails density="compact" />
+                                        <FormField label={t("Summary")}><PgTextarea modelValue={edit.value.summary} onUpdate:modelValue={(value: string) => (edit.value.summary = value)} rows={4} hideDetails density="compact" /></FormField>
+                                        <FormField label={t("Affected services (comma separated)")}><PgTextField modelValue={edit.value.affectedServices} onUpdate:modelValue={(value: string) => (edit.value.affectedServices = value)} hideDetails density="compact" /></FormField>
+                                        <FormField label={t("Affected merchant IDs (comma separated)")}><PgTextField modelValue={edit.value.affectedMerchantIds} onUpdate:modelValue={(value: string) => (edit.value.affectedMerchantIds = value)} hideDetails density="compact" /></FormField>
+                                        <FormField label={t("Affected attempt IDs (comma separated)")}><PgTextField modelValue={edit.value.affectedAttemptIds} onUpdate:modelValue={(value: string) => (edit.value.affectedAttemptIds = value)} hideDetails density="compact" /></FormField>
+                                        <PgSwitch modelValue={edit.value.regulatorsNotified} onUpdate:modelValue={(value: boolean | null) => (edit.value.regulatorsNotified = Boolean(value))} label={t("Regulators notified")} hideDetails density="compact" />
                                         <ThemedView style={{ display: "flex", gap: "14px", flexWrap: "wrap", marginTop: "8px" }}>
                                             <ThemedText><strong>{t("Detected")}:</strong> {formatDateTime(selected.value.detectedAt)}</ThemedText>
                                             <ThemedText><strong>{t("Declared")}:</strong> {formatDateTime(selected.value.declaredAt)}</ThemedText>
@@ -766,21 +766,21 @@ const IncidentsPage = dc(() => {
                                             <ThemedText><strong>{t("Commander")}:</strong> {selected.value.commanderName ?? selected.value.commanderUserId ?? "—"}</ThemedText>
                                             <ThemedText><strong>{t("Reporter")}:</strong> {selected.value.reporterName ?? selected.value.reporterUserId ?? "—"}</ThemedText>
                                         </ThemedView>
-                                        <VBtn size="small" color="primary" class="mt-4" loading={working.value} onClick={() => void saveIncident()}>{t("Save incident")}</VBtn>
+                                        <PgButton size="small" color="primary" class="mt-4" loading={working.value} onClick={() => void saveIncident()}>{t("Save incident")}</PgButton>
                                     </SurfaceCardText>
                                 </SurfaceCard>
                                 <SurfaceCard title={t("Links")}>
                                     <SurfaceCardText>
                                         <ThemedView style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                                            <VSelect items={["ATTEMPT", "MERCHANT", "RAIL", "GATEWAY", "REPORT", "CASE", "OTHER"].map((value) => ({ title: value, value }))} modelValue={linkType.value} onUpdate:modelValue={(value: string) => (linkType.value = value)} label={t("Link type")} hideDetails density="compact" style={{ maxWidth: "180px" }} />
-                                            <VTextField modelValue={linkTarget.value} onUpdate:modelValue={(value: string) => (linkTarget.value = value)} label={t("Target id")} hideDetails density="compact" style={{ maxWidth: "300px" }} />
-                                            <VTextField modelValue={linkLabel.value} onUpdate:modelValue={(value: string) => (linkLabel.value = value)} label={t("Label")} hideDetails density="compact" style={{ maxWidth: "240px" }} />
-                                            <VBtn size="small" variant="tonal" onClick={() => void addLink()}>{t("Link record")}</VBtn>
+                                            <PgAutocomplete items={["ATTEMPT", "MERCHANT", "RAIL", "GATEWAY", "REPORT", "CASE", "OTHER"].map((value) => ({ title: value, value }))} modelValue={linkType.value} onUpdate:modelValue={(value: string) => (linkType.value = value)} label={t("Link type")} hideDetails density="compact" style={{ maxWidth: "180px" }} />
+                                            <PgTextField modelValue={linkTarget.value} onUpdate:modelValue={(value: string) => (linkTarget.value = value)} label={t("Target id")} hideDetails density="compact" style={{ maxWidth: "300px" }} />
+                                            <PgTextField modelValue={linkLabel.value} onUpdate:modelValue={(value: string) => (linkLabel.value = value)} label={t("Label")} hideDetails density="compact" style={{ maxWidth: "240px" }} />
+                                            <PgButton size="small" variant="tonal" onClick={() => void addLink()}>{t("Link record")}</PgButton>
                                         </ThemedView>
                                         {(selected.value.links ?? []).length === 0 ? <EmptyState title={t("No linked records")} /> : (selected.value.links ?? []).map((link) => (
                                             <ThemedView key={link.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 0", borderTop: "1px solid var(--pg-border-subtle)" }}>
                                                 <ThemedText style={{ flex: 1 }}>{link.linkType}: <MonoRef value={link.targetId} /> {link.label ? `· ${link.label}` : ""}</ThemedText>
-                                                <VBtn size="x-small" variant="text" color="error" onClick={() => void removeLink(link)}>{t("Remove")}</VBtn>
+                                                <PgButton size="x-small" variant="text" color="error" onClick={() => void removeLink(link)}>{t("Remove")}</PgButton>
                                             </ThemedView>
                                         ))}
                                     </SurfaceCardText>
@@ -789,7 +789,7 @@ const IncidentsPage = dc(() => {
                         )}
                         {activeTab.value === "timeline" && (
                             <SurfaceCard><SurfaceCardText>
-                                <ThemedView style={{ display: "flex", gap: "8px" }}><VTextField modelValue={timelineNote.value} onUpdate:modelValue={(value: string) => (timelineNote.value = value)} label={t("Add a note")} hideDetails density="compact" /><VBtn size="small" variant="tonal" onClick={() => void addTimeline()}>{t("Add")}</VBtn></ThemedView>
+                                <ThemedView style={{ display: "flex", gap: "8px" }}><PgTextField modelValue={timelineNote.value} onUpdate:modelValue={(value: string) => (timelineNote.value = value)} label={t("Add a note")} hideDetails density="compact" /><PgButton size="small" variant="tonal" onClick={() => void addTimeline()}>{t("Add")}</PgButton></ThemedView>
                                 {(selected.value.timeline ?? []).length === 0 ? <EmptyState title={t("No timeline entries")} /> : (selected.value.timeline ?? []).map((entry) => (
                                     <ThemedView key={entry.id} style={{ borderTop: "1px solid var(--pg-border-subtle)", padding: "10px 0" }}>
                                         <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{formatDateTime(entry.occurredAt)} · {entry.type}{entry.actorName ? ` · ${entry.actorName}` : ""}</ThemedText>
@@ -800,22 +800,22 @@ const IncidentsPage = dc(() => {
                         )}
                         {activeTab.value === "responders" && (
                             <SurfaceCard><SurfaceCardText>
-                                <ThemedView style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}><VTextField modelValue={responderName.value} onUpdate:modelValue={(value: string) => (responderName.value = value)} label={t("Name")} hideDetails density="compact" /><VSelect items={["INCIDENT_COMMANDER", "ENGINEERING", "COMPLIANCE", "SUPPORT", "COMMUNICATIONS"].map((value) => ({ title: value, value }))} modelValue={responderRole.value} onUpdate:modelValue={(value: string) => (responderRole.value = value)} label={t("Role")} hideDetails density="compact" style={{ maxWidth: "230px" }} /><VBtn size="small" variant="tonal" onClick={() => void addResponder()}>{t("Add responder")}</VBtn></ThemedView>
+                                <ThemedView style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}><PgTextField modelValue={responderName.value} onUpdate:modelValue={(value: string) => (responderName.value = value)} label={t("Name")} hideDetails density="compact" /><PgAutocomplete items={["INCIDENT_COMMANDER", "ENGINEERING", "COMPLIANCE", "SUPPORT", "COMMUNICATIONS"].map((value) => ({ title: value, value }))} modelValue={responderRole.value} onUpdate:modelValue={(value: string) => (responderRole.value = value)} label={t("Role")} hideDetails density="compact" style={{ maxWidth: "230px" }} /><PgButton size="small" variant="tonal" onClick={() => void addResponder()}>{t("Add responder")}</PgButton></ThemedView>
                                 {(selected.value.responders ?? []).length === 0 ? <EmptyState title={t("No responders")} /> : (selected.value.responders ?? []).map((responder) => (
                                     <ThemedView key={responder.id} style={{ display: "flex", gap: "8px", alignItems: "center", padding: "8px 0", borderTop: "1px solid var(--pg-border-subtle)" }}>
                                         <ThemedText style={{ flex: 1 }}>{responder.name} · {responder.role} · {responder.acknowledgedAt ? t("Acknowledged") : t("Paged")}</ThemedText>
-                                        {!responder.acknowledgedAt && <VBtn size="x-small" variant="text" onClick={() => void updateResponder(responder, "acknowledged")}>{t("Acknowledge")}</VBtn>}
-                                        {!responder.releasedAt && <VBtn size="x-small" variant="text" onClick={() => void updateResponder(responder, "released")}>{t("Release")}</VBtn>}
+                                        {!responder.acknowledgedAt && <PgButton size="x-small" variant="text" onClick={() => void updateResponder(responder, "acknowledged")}>{t("Acknowledge")}</PgButton>}
+                                        {!responder.releasedAt && <PgButton size="x-small" variant="text" onClick={() => void updateResponder(responder, "released")}>{t("Release")}</PgButton>}
                                     </ThemedView>
                                 ))}
                             </SurfaceCardText></SurfaceCard>
                         )}
                         {activeTab.value === "actions" && (
                             <SurfaceCard><SurfaceCardText>
-                                <ThemedView style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}><VTextField modelValue={actionTitle.value} onUpdate:modelValue={(value: string) => (actionTitle.value = value)} label={t("Corrective action")} hideDetails density="compact" /><VSelect items={[1, 2, 3, 4].map((value) => ({ title: String(value), value }))} modelValue={actionPriority.value} onUpdate:modelValue={(value: number) => (actionPriority.value = value)} label={t("Priority")} hideDetails density="compact" style={{ maxWidth: "120px" }} /><VTextField type="date" modelValue={actionDue.value} onUpdate:modelValue={(value: string) => (actionDue.value = value)} label={t("Due")} hideDetails density="compact" style={{ maxWidth: "180px" }} /><VBtn size="small" variant="tonal" onClick={() => void addAction()}>{t("Add action")}</VBtn></ThemedView>
+                                <ThemedView style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}><PgTextField modelValue={actionTitle.value} onUpdate:modelValue={(value: string) => (actionTitle.value = value)} label={t("Corrective action")} hideDetails density="compact" /><PgAutocomplete items={[1, 2, 3, 4].map((value) => ({ title: String(value), value }))} modelValue={actionPriority.value} onUpdate:modelValue={(value: number) => (actionPriority.value = value)} label={t("Priority")} hideDetails density="compact" style={{ maxWidth: "120px" }} /><PgTextField type="date" modelValue={actionDue.value} onUpdate:modelValue={(value: string) => (actionDue.value = value)} label={t("Due")} hideDetails density="compact" style={{ maxWidth: "180px" }} /><PgButton size="small" variant="tonal" onClick={() => void addAction()}>{t("Add action")}</PgButton></ThemedView>
                                 {(selected.value.actions ?? []).length === 0 ? <EmptyState title={t("No corrective actions")} /> : (selected.value.actions ?? []).map((action) => (
                                     <ThemedView key={action.id} style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", padding: "8px 0", borderTop: "1px solid var(--pg-border-subtle)" }}>
-                                        <VSelect items={["OPEN", "IN_PROGRESS", "BLOCKED", "DONE", "CANCELLED"].map((value) => ({ title: value, value }))} modelValue={action.status} onUpdate:modelValue={(value: string) => void updateAction(action, value)} hideDetails density="compact" style={{ maxWidth: "170px" }} />
+                                        <PgAutocomplete items={["OPEN", "IN_PROGRESS", "BLOCKED", "DONE", "CANCELLED"].map((value) => ({ title: value, value }))} modelValue={action.status} onUpdate:modelValue={(value: string) => void updateAction(action, value)} hideDetails density="compact" style={{ maxWidth: "170px" }} />
                                         <ThemedText style={{ flex: 1 }}>{action.title}{action.ownerName ? ` · ${action.ownerName}` : ""}</ThemedText>
                                         <ThemedText style={{ fontSize: "12px" }}>{formatDateTime(action.dueAt)}</ThemedText>
                                     </ThemedView>
@@ -825,11 +825,11 @@ const IncidentsPage = dc(() => {
                         {activeTab.value === "comms" && (
                             <SurfaceCard><SurfaceCardText>
                                 <ThemedView style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                                    <VSelect items={["STATUS_PAGE", "EMAIL", "SMS", "REGULATOR", "INTERNAL"].map((value) => ({ title: value, value }))} modelValue={commChannel.value} onUpdate:modelValue={(value: string) => (commChannel.value = value)} label={t("Channel")} hideDetails density="compact" style={{ maxWidth: "220px" }} />
-                                    <VTextField modelValue={commAudience.value} onUpdate:modelValue={(value: string) => (commAudience.value = value)} label={t("Audience")} hideDetails density="compact" style={{ maxWidth: "260px" }} />
+                                    <PgAutocomplete items={["STATUS_PAGE", "EMAIL", "SMS", "REGULATOR", "INTERNAL"].map((value) => ({ title: value, value }))} modelValue={commChannel.value} onUpdate:modelValue={(value: string) => (commChannel.value = value)} label={t("Channel")} hideDetails density="compact" style={{ maxWidth: "220px" }} />
+                                    <PgTextField modelValue={commAudience.value} onUpdate:modelValue={(value: string) => (commAudience.value = value)} label={t("Audience")} hideDetails density="compact" style={{ maxWidth: "260px" }} />
                                 </ThemedView>
-                                <VTextField modelValue={commSubject.value} onUpdate:modelValue={(value: string) => (commSubject.value = value)} label={t("Subject")} hideDetails density="compact" />
-                                <VTextarea modelValue={commBody.value} onUpdate:modelValue={(value: string) => (commBody.value = value)} label={t("Message")} rows={4} hideDetails />
+                                <PgTextField modelValue={commSubject.value} onUpdate:modelValue={(value: string) => (commSubject.value = value)} label={t("Subject")} hideDetails density="compact" />
+                                <PgTextarea modelValue={commBody.value} onUpdate:modelValue={(value: string) => (commBody.value = value)} label={t("Message")} rows={4} hideDetails />
                                 <FormChecklist
                                     checks={[...COMMUNICATION_CHECKS]}
                                     modelValue={commChecklist.value}
@@ -839,7 +839,7 @@ const IncidentsPage = dc(() => {
                                     complete={commChecklistComplete.value}
                                     incompleteMessage={t("Complete all communication checklist items before recording")}
                                 />
-                                <VBtn size="small" variant="tonal" disabled={!commChecklistComplete.value} onClick={() => void addCommunication()}>{t("Record communication")}</VBtn>
+                                <PgButton size="small" variant="tonal" disabled={!commChecklistComplete.value} onClick={() => void addCommunication()}>{t("Record communication")}</PgButton>
                                 {(selected.value.communications ?? []).length === 0 ? <EmptyState title={t("No communications")} /> : (selected.value.communications ?? []).map((communication) => (
                                     <ThemedView key={communication.id} style={{ borderTop: "1px solid var(--pg-border-subtle)", padding: "10px 0" }}>
                                         <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{communication.channel} · {communication.audience} · {formatDateTime(communication.sentAt)}</ThemedText>
@@ -852,9 +852,9 @@ const IncidentsPage = dc(() => {
                         {activeTab.value === "postmortem" && (
                             <SurfaceCard><SurfaceCardText>
                                 {selected.value.postmortemRequired && <VAlert type={selected.value.postmortemSummary ? "success" : "warning"} variant="tonal" class="mb-4">{selected.value.postmortemSummary ? t("Postmortem recorded") : t("A postmortem is required before close")}</VAlert>}
-                                <FormField label={t("Root cause")}><VTextarea modelValue={selected.value.rootCause ?? ""} onUpdate:modelValue={(value: string) => (selected.value!.rootCause = value)} rows={4} hideDetails /></FormField>
-                                <FormField label={t("Postmortem summary")}><VTextarea modelValue={selected.value.postmortemSummary ?? ""} onUpdate:modelValue={(value: string) => (selected.value!.postmortemSummary = value)} rows={8} hideDetails /></FormField>
-                                <VBtn size="small" color="primary" loading={working.value} onClick={() => void savePostmortem()}>{t("Save postmortem")}</VBtn>
+                                <FormField label={t("Root cause")}><PgTextarea modelValue={selected.value.rootCause ?? ""} onUpdate:modelValue={(value: string) => (selected.value!.rootCause = value)} rows={4} hideDetails /></FormField>
+                                <FormField label={t("Postmortem summary")}><PgTextarea modelValue={selected.value.postmortemSummary ?? ""} onUpdate:modelValue={(value: string) => (selected.value!.postmortemSummary = value)} rows={8} hideDetails /></FormField>
+                                <PgButton size="small" color="primary" loading={working.value} onClick={() => void savePostmortem()}>{t("Save postmortem")}</PgButton>
                             </SurfaceCardText></SurfaceCard>
                         )}
                     </ThemedView>

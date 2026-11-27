@@ -2,24 +2,15 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VSelect } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgAutocomplete} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import ScreenContainer from "@/components/ScreenContainer";
-import { ThemedView } from "@/components/ThemedView";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import {
-  FormField,
-  MetaPill,
-  MonoRef,
-  PageHeader,
-  SegmentedTabs,
-  SlideOverDrawer,
-  StatusBadge,
-  SurfaceCard,
-} from "@/components/ui";
+import {FormChecklist} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {FormField, MetaPill, MonoRef, PageHeader, SegmentedTabs, SlideOverDrawer, StatusBadge, SurfaceCard} from "@pg/ui";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { extractApiError } from "@/utils/errors/extractor";
@@ -467,18 +458,18 @@ const ReportsCatalogPage = dc(() => {
       <ThemedView style={{ gap: "18px" }}>
         <PageHeader title={t("Report Catalog")} subtitle={t("Run and export published backoffice and merchant reports")}>(
             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-              <VBtn variant="tonal" prependIcon="mdi-refresh" loading={chromeLoading.value} onClick={() => void refresh()}>
+              <PgButton variant="tonal" prependIcon="mdi-refresh" loading={chromeLoading.value} onClick={() => void refresh()}>
                 {t("Refresh")}
-              </VBtn>
+              </PgButton>
               {canStudio.value && (
-                <VBtn variant="tonal" prependIcon="mdi-robot-outline" onClick={() => void router.push({ name: "ReportsStudio" })}>
+                <PgButton variant="tonal" prependIcon="mdi-robot-outline" onClick={() => void router.push({ name: "ReportsStudio" })}>
                   {t("Open Studio")}
-                </VBtn>
+                </PgButton>
               )}
               {canChrome.value && (
-                <VBtn variant="tonal" prependIcon="mdi-page-layout-header-footer" onClick={() => void router.push({ name: "ReportsChrome" })}>
+                <PgButton variant="tonal" prependIcon="mdi-page-layout-header-footer" onClick={() => void router.push({ name: "ReportsChrome" })}>
                   {t("Headers & Footers")}
-                </VBtn>
+                </PgButton>
               )}
             </ThemedView>
           )</PageHeader>
@@ -491,14 +482,14 @@ const ReportsCatalogPage = dc(() => {
               <span>{t("Reports Needing Migration")}: {health.value?.brokenReportSpecs ?? 0}</span>
               <span>{t("Reports blocked by header/footer")}: {health.value?.reportsBlockedByChrome ?? 0}</span>
               {canMigrateReports.value && (
-                <VBtn size="small" variant="text" onClick={() => void router.push({ name: "ReportsNeedsMigration" })}>
+                <PgButton size="small" variant="text" onClick={() => void router.push({ name: "ReportsNeedsMigration" })}>
                   {t("Report migration")}
-                </VBtn>
+                </PgButton>
               )}
               {canMigrateChrome.value && (
-                <VBtn size="small" variant="text" onClick={() => void router.push({ name: "ReportsChromeNeedsMigration" })}>
+                <PgButton size="small" variant="text" onClick={() => void router.push({ name: "ReportsChromeNeedsMigration" })}>
                   {t("Headers & Footers migration")}
-                </VBtn>
+                </PgButton>
               )}
             </div>
           </VAlert>
@@ -519,13 +510,13 @@ const ReportsCatalogPage = dc(() => {
                     tabs={availableLocales.value.map((entry) => ({ label: entry.toUpperCase(), value: entry }))}
                     ariaLabel={t("Output language")}
                   />
-                  <VBtn size="small" variant="tonal" prependIcon="mdi-refresh" loading={generating.value} onClick={() => void runGenerate(locale.value)}>
+                  <PgButton size="small" variant="tonal" prependIcon="mdi-refresh" loading={generating.value} onClick={() => void runGenerate(locale.value)}>
                     {t("Regenerate")}
-                  </VBtn>
-                  <VBtn size="small" variant="tonal" prependIcon="mdi-microsoft-excel" disabled={!hasRows.value} onClick={() => void exportExcel()}>
+                  </PgButton>
+                  <PgButton size="small" variant="tonal" prependIcon="mdi-microsoft-excel" disabled={!hasRows.value} onClick={() => void exportExcel()}>
                     {t("Export Excel")}
-                  </VBtn>
-                  <VBtn
+                  </PgButton>
+                  <PgButton
                     size="small"
                     variant="tonal"
                     prependIcon="mdi-printer-outline"
@@ -533,7 +524,7 @@ const ReportsCatalogPage = dc(() => {
                     onClick={() => previewRef.value?.printClientSideVectorPdf?.()}
                   >
                     {t("Print")}
-                  </VBtn>
+                  </PgButton>
                 </ThemedView>
               ),
             }}
@@ -604,12 +595,12 @@ const ReportsCatalogPage = dc(() => {
               selected.value ? (
                 <div class="pg-report-actions">
                   <div class="pg-report-actions__secondary">
-                    <VBtn variant="text" onClick={resetInputs}>{t("Reset inputs")}</VBtn>
-                    <VBtn variant="text" onClick={clearSelection}>{t("Clear selection")}</VBtn>
+                    <PgButton variant="text" onClick={resetInputs}>{t("Reset inputs")}</PgButton>
+                    <PgButton variant="text" onClick={clearSelection}>{t("Clear selection")}</PgButton>
                   </div>
-                  <VBtn color="primary" prependIcon="mdi-file-chart" loading={generating.value} disabled={!runChecklistComplete.value} onClick={requestGenerate}>
+                  <PgButton color="primary" prependIcon="mdi-file-chart" loading={generating.value} disabled={!runChecklistComplete.value} onClick={requestGenerate}>
                     {t("Generate Report")}
-                  </VBtn>
+                  </PgButton>
                 </div>
               ) : null,
           }}
@@ -640,7 +631,7 @@ const ReportsCatalogPage = dc(() => {
                         label={t("Output language")}
                         hint={t("Choose the language used for the report text, headings and labels.")}
                       >
-                        <VSelect
+                        <PgAutocomplete
                           v-model={locale.value}
                           items={availableLocales.value}
                           density="compact"
@@ -656,7 +647,7 @@ const ReportsCatalogPage = dc(() => {
                           label={t("Page header")}
                           hint={t("Choose the header used in the printed report.")}
                         >
-                          <VSelect
+                          <PgAutocomplete
                             v-model={headerMode.value}
                             items={chromeModeOptions()}
                             density="compact"
@@ -670,7 +661,7 @@ const ReportsCatalogPage = dc(() => {
                             label={t("Header template")}
                             hint={t("Choose the registered header template.")}
                           >
-                            <VSelect
+                            <PgAutocomplete
                               v-model={headerCode.value}
                               items={chromeCodeOptions("HEADER")}
                               density="compact"
@@ -684,7 +675,7 @@ const ReportsCatalogPage = dc(() => {
                           label={t("Page footer")}
                           hint={t("Choose the footer used in the printed report.")}
                         >
-                          <VSelect
+                          <PgAutocomplete
                             v-model={footerMode.value}
                             items={chromeModeOptions()}
                             density="compact"
@@ -698,7 +689,7 @@ const ReportsCatalogPage = dc(() => {
                             label={t("Footer template")}
                             hint={t("Choose the registered footer template.")}
                           >
-                            <VSelect
+                            <PgAutocomplete
                               v-model={footerCode.value}
                               items={chromeCodeOptions("FOOTER")}
                               density="compact"

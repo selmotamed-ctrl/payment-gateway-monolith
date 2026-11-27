@@ -1,8 +1,8 @@
 import { onBeforeUnmount, ref, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import {PgButton, PgIcon} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
 import {
     LANDING_SNIPPETS,
     LANDING_SNIPPET_RESPONSE,
@@ -72,7 +72,7 @@ export const DeveloperSection = defineComponent({
                         {POINTS.map((point, index) => (
                             <li key={point.title} data-reveal style={{ "--pgl-i": index }}>
                                 <span class="pgl-icon-tile" aria-hidden="true">
-                                    <VIcon icon={point.icon} size={18} />
+                                    <PgIcon icon={point.icon} size={18} />
                                 </span>
                                 <div>
                                     <h3 class="pgl-h4">{t(point.title)}</h3>
@@ -82,14 +82,14 @@ export const DeveloperSection = defineComponent({
                         ))}
                     </ul>
                     <div class="pgl-cta-row">
-                        <VBtn
+                        <PgButton
                             to={{ name: "MerchantDeveloperGuide" }}
                             variant="outlined"
                             class="pgl-btn-secondary"
                             appendIcon={current.value === "ar" ? "mdi-arrow-left" : "mdi-arrow-right"}
                         >
                             {t("Read the developer guide")}
-                        </VBtn>
+                        </PgButton>
                         <span class="pgl-muted-note">{t("Sign-in required")}</span>
                     </div>
                 </div>
@@ -103,7 +103,7 @@ export const DeveloperSection = defineComponent({
                             {...{ "onUpdate:modelValue": (value: string) => (language.value = value as LandingSnippetLanguage) }}
                         />
                         <button type="button" class="pgl-icon-btn pgl-code__copy" onClick={copy} aria-label={t("Copy")}>
-                            <VIcon icon={copied.value ? "mdi-check" : "mdi-content-copy"} size={15} aria-hidden="true" />
+                            <PgIcon icon={copied.value ? "mdi-check" : "mdi-content-copy"} size={15} aria-hidden="true" />
                         </button>
                         <span class="pgl-sr-only" aria-live="polite">
                             {copied.value ? t("Copied") : ""}

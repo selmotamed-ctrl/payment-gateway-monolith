@@ -1,5 +1,5 @@
-import type { TableFilter } from "@/components/Table/filters";
-import { statusTone } from "@/components/Table/statusTone";
+import type { TableFilter } from "@pg/ui";
+import {statusTone} from "@pg/ui";
 
 const options = (values: string[]) =>
     values.map((value) => ({ title: value.replaceAll("_", " "), value, tone: statusTone(value) }));

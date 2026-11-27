@@ -1,5 +1,5 @@
 import { dc } from "@/utils/dc";
-import { VAlert, VBtn, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { ref } from "vue";
 import { api } from "@/state/api";
@@ -7,8 +7,8 @@ import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import router from "@/router";
 import AuthLayout from "@/layouts/auth";
-import { FormField } from "@/components/ui/FormField";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {FormField} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
 
 const ForgotPasswordPage = dc(() => {
     const { t } = useLocale();
@@ -36,7 +36,7 @@ const ForgotPasswordPage = dc(() => {
                 <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                     {error.value && <VAlert type="error" variant="tonal" density="compact">{error.value}</VAlert>}
                     <FormField label={t("Email")} required>
-                        <VTextField
+                        <PgTextField
                             aria-label={t("Email")}
                             type="email"
                             autocomplete="email"
@@ -45,12 +45,12 @@ const ForgotPasswordPage = dc(() => {
                             hideDetails
                         />
                     </FormField>
-                    <VBtn block size="large" loading={loading.value} disabled={!email.value.includes("@")} onClick={() => void submit()}>
+                    <PgButton block size="large" loading={loading.value} disabled={!email.value.includes("@")} onClick={() => void submit()}>
                         {t("Send reset code")}
-                    </VBtn>
-                    <VBtn variant="text" onClick={() => void router.push({ name: "Login" })}>
+                    </PgButton>
+                    <PgButton variant="text" onClick={() => void router.push({ name: "Login" })}>
                         {t("Back to sign in")}
-                    </VBtn>
+                    </PgButton>
                 </div>
             </SurfaceCard>
         </AuthLayout>

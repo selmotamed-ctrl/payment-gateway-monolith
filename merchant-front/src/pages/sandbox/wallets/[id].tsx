@@ -2,26 +2,26 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { StateView } from "@/components/StateView";
-import { DataTable } from "@/components/Table/DataTable";
-import type { TableHeader } from "@/components/Table/types";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
-import SandboxResourceTable from "@/components/sandbox/SandboxResourceTable";
-import { ledgerFilters } from "@/components/sandbox/sandboxFilters";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { SectionFields } from "@/components/SectionFields";
+import {VAlert, PgButton, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {MetricStrip, type MetricItem} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import type { TableHeader } from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import { SandboxBanner } from "@/features/sandbox/SandboxBanner";
+import { SandboxResourceTable } from "@/features/sandbox/SandboxResourceTable";
+import { ledgerFilters } from "@/features/sandbox/sandboxFilters";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { sandboxGet, sandboxPatch, sandboxPost, type SandboxLedgerLine, type SandboxWalletDetail } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -146,10 +146,10 @@ const SandboxWalletDetailPage = dc(() => {
         <ScreenContainer>
             <PageHeader title={wallet.value?.wallet.name || t("Sandbox Wallet")} subtitle={wallet.value?.wallet.id ?? walletId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Wallets"), to: "/sandbox/wallets" }, { label: wallet.value?.wallet.name ?? walletId() }]}>(
                     <div class="d-flex flex-wrap ga-2">
-                        <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => { void load(); ledgerRefresh.value?.(); }}>{t("Refresh")}</VBtn>
-                        <VBtn variant="tonal" prependIcon="mdi-cash-plus" onClick={() => openAction("CREDIT")}>{t("Top up")}</VBtn>
-                        <VBtn variant="tonal" prependIcon="mdi-cash-fast" onClick={() => openAction("CASHOUT")}>{t("Simulate cash-out")}</VBtn>
-                        <VBtn variant="tonal" prependIcon="mdi-pause" onClick={() => openAction(wallet.value?.wallet.status === "FROZEN" ? "UNFREEZE" : "FREEZE")}>{wallet.value?.wallet.status === "FROZEN" ? t("Activate") : t("Freeze")}</VBtn>
+                        <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => { void load(); ledgerRefresh.value?.(); }}>{t("Refresh")}</PgButton>
+                        <PgButton variant="tonal" prependIcon="mdi-cash-plus" onClick={() => openAction("CREDIT")}>{t("Top up")}</PgButton>
+                        <PgButton variant="tonal" prependIcon="mdi-cash-fast" onClick={() => openAction("CASHOUT")}>{t("Simulate cash-out")}</PgButton>
+                        <PgButton variant="tonal" prependIcon="mdi-pause" onClick={() => openAction(wallet.value?.wallet.status === "FROZEN" ? "UNFREEZE" : "FREEZE")}>{wallet.value?.wallet.status === "FROZEN" ? t("Activate") : t("Freeze")}</PgButton>
                     </div>
                 )</PageHeader>
             <SandboxBanner subtitle={t("Sandbox ledger only. Balance changes post balanced journal entries.")} />
@@ -177,10 +177,10 @@ const SandboxWalletDetailPage = dc(() => {
                                 </SurfaceCard>
                                 <SurfaceCard title={t("Balance controls")} style={{ flex: "1 1 360px" }}>
                                     <div class="d-flex flex-wrap ga-2">
-                                        <VBtn color="success" variant="tonal" onClick={() => openAction("CREDIT")}>{t("Credit")}</VBtn>
-                                        <VBtn color="error" variant="tonal" onClick={() => openAction("DEBIT")}>{t("Debit")}</VBtn>
-                                        <VBtn variant="tonal" onClick={() => openAction("SET_EXACT")}>{t("Set exact")}</VBtn>
-                                        <VBtn color="warning" variant="tonal" onClick={() => openAction("CASHOUT")}>{t("Simulate cash-out")}</VBtn>
+                                        <PgButton color="success" variant="tonal" onClick={() => openAction("CREDIT")}>{t("Credit")}</PgButton>
+                                        <PgButton color="error" variant="tonal" onClick={() => openAction("DEBIT")}>{t("Debit")}</PgButton>
+                                        <PgButton variant="tonal" onClick={() => openAction("SET_EXACT")}>{t("Set exact")}</PgButton>
+                                        <PgButton color="warning" variant="tonal" onClick={() => openAction("CASHOUT")}>{t("Simulate cash-out")}</PgButton>
                                     </div>
                                     <p class="text-caption text-medium-emphasis mt-3">{t("Every adjustment is a balanced sandbox journal entry; the ledger keeps the resulting history.")}</p>
                                 </SurfaceCard>
@@ -216,11 +216,11 @@ const SandboxWalletDetailPage = dc(() => {
                 <SectionFields title={t("Action")}>
                     {target.value && !["FREEZE", "UNFREEZE"].includes(target.value) ? (
                         <FormField label={target.value === "CASHOUT" ? t("Cash-out amount") : t("Amount LYD")} required>
-                            <VTextField type="number" modelValue={target.value === "CASHOUT" ? cashoutAmount.value : exact.value} onUpdate:modelValue={(v: string) => target.value === "CASHOUT" ? (cashoutAmount.value = v) : (exact.value = v)} hideDetails />
+                            <PgTextField type="number" modelValue={target.value === "CASHOUT" ? cashoutAmount.value : exact.value} onUpdate:modelValue={(v: string) => target.value === "CASHOUT" ? (cashoutAmount.value = v) : (exact.value = v)} hideDetails />
                         </FormField>
                     ) : null}
                     <FormField label={t("Reason")}>
-                        <VTextField modelValue={reason.value} onUpdate:modelValue={(v: string) => (reason.value = v)} hideDetails />
+                        <PgTextField modelValue={reason.value} onUpdate:modelValue={(v: string) => (reason.value = v)} hideDetails />
                     </FormField>
                 </SectionFields>
             </FormModal>

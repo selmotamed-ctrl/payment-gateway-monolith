@@ -1,6 +1,6 @@
 import { type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VIcon } from "@/components/vael/VuetifyShim";
+import {PgIcon} from "@pg/ui";
 
 export type StepState = "done" | "current" | "todo" | "locked" | "partial" | "failed";
 
@@ -28,7 +28,7 @@ export const StateIcon = defineComponent({
     setup(props) {
         return () => (
             <span class={["ac-state", `ac-state--${props.state}`]} aria-hidden="true">
-                <VIcon icon={props.lab && props.state === "todo" ? "mdi-flask-outline" : ICON[props.state]} size={props.size} />
+                <PgIcon icon={props.lab && props.state === "todo" ? "mdi-flask-outline" : ICON[props.state]} size={props.size} />
             </span>
         );
     },

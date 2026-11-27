@@ -1,4 +1,4 @@
-import type { StatusTone } from "@/components/StatusChip";
+import type { StatusTone } from "@pg/ui";
 
 export const COLUMN_HELP = {
     merchant: "Legal and trade identity of the merchant. The DB ID is the stable reference used by every audit row.",

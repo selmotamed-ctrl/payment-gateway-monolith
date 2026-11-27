@@ -2,34 +2,34 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import { VAlert, VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { JsonDiffViewer } from "@/components/ui/JsonDiffViewer";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import {MetricStrip, type MetricItem} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {JsonDiffViewer} from "@pg/ui";
 import CommissionTiersEditor from "./components/CommissionTiersEditor";
 import { emptyTier, tiersToApi, validateTiers, withoutBlankTiers, type TierError, type TierRow } from "./commissionTiers";
-import { statusTone } from "@/components/Table/statusTone";
+import {statusTone} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { MetaPill } from "@/components/ui/MetaPill";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
 const LIFECYCLE_CHECKS = [
     { key: "LIFECYCLE_SCOPE_REVIEWED", label: "Profile/rule and scope reviewed" },
     { key: "EFFECTIVE_DATE_REVIEWED", label: "Effective date and merchant impact reviewed" },
@@ -448,10 +448,10 @@ const PricingControlsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Pricing & Limits")} subtitle={t("Commission profiles and velocity controls under four-eyes governance.")}>(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
-                            <VBtn color="primary" variant="flat" prependIcon="mdi-plus" onClick={() => (tab.value === "COMMISSION" ? openCommission() : openVelocity())}>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</PgButton>
+                            <PgButton color="primary" variant="flat" prependIcon="mdi-plus" onClick={() => (tab.value === "COMMISSION" ? openCommission() : openVelocity())}>
                                 {tab.value === "COMMISSION" ? t("New commission profile") : t("New velocity rule")}
-                            </VBtn>
+                            </PgButton>
                         </ThemedView>
                     )</PageHeader>
 
@@ -503,9 +503,9 @@ const PricingControlsPage = dc(() => {
                                                 <MetaPill size="x-small" variant="tonal">{profile.feeBearerDefault}</MetaPill>
                                             </ThemedView>
                                             <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "6px", flexWrap: "wrap" }}>
-                                                <VBtn size="small" variant="text" onClick={() => void openHistory("COMMISSION", profile.id, profile.railCode)}>{t("History")}</VBtn>
+                                                <PgButton size="small" variant="text" onClick={() => void openHistory("COMMISSION", profile.id, profile.railCode)}>{t("History")}</PgButton>
                                                 {!profile.effectiveTo && !profile.pendingApprovalId && (
-                                                    <VBtn size="small" variant="text" color="warning" onClick={() => openLifecycle("COMMISSION", profile.id)}>{t("Expire profile")}</VBtn>
+                                                    <PgButton size="small" variant="text" color="warning" onClick={() => openLifecycle("COMMISSION", profile.id)}>{t("Expire profile")}</PgButton>
                                                 )}
                                             </ThemedView>
                                         </SurfaceCardText>
@@ -538,9 +538,9 @@ const PricingControlsPage = dc(() => {
                                                 </ThemedText>
                                             </ThemedView>
                                             <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "6px", flexWrap: "wrap" }}>
-                                                <VBtn size="small" variant="text" onClick={() => void openHistory("VELOCITY", rule.id, rule.scopeType)}>{t("History")}</VBtn>
+                                                <PgButton size="small" variant="text" onClick={() => void openHistory("VELOCITY", rule.id, rule.scopeType)}>{t("History")}</PgButton>
                                                 {rule.active && !rule.pendingApprovalId && (
-                                                    <VBtn size="small" variant="text" color="warning" onClick={() => openLifecycle("VELOCITY", rule.id)}>{t("Deactivate rule")}</VBtn>
+                                                    <PgButton size="small" variant="text" color="warning" onClick={() => openLifecycle("VELOCITY", rule.id)}>{t("Deactivate rule")}</PgButton>
                                                 )}
                                             </ThemedView>
                                         </SurfaceCardText>
@@ -560,7 +560,7 @@ const PricingControlsPage = dc(() => {
                 errorMessage={historyError.value ?? ""}
                 v-slots={{
                     footer: () => (
-                        <VBtn variant="outlined" onClick={() => (historyOpen.value = false)}>{t("Close")}</VBtn>
+                        <PgButton variant="outlined" onClick={() => (historyOpen.value = false)}>{t("Close")}</PgButton>
                     ),
                 }}
             >
@@ -604,54 +604,54 @@ const PricingControlsPage = dc(() => {
                 </VAlert>
                 <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
                     <FormField label={t("Code")} required sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
-                        <VTextField modelValue={commissionForm.value.code} onUpdate:modelValue={(value: string) => (commissionForm.value.code = value)} />
+                        <PgTextField modelValue={commissionForm.value.code} onUpdate:modelValue={(value: string) => (commissionForm.value.code = value)} />
                     </FormField>
                     <FormField label={t("Name")} required style={{ flex: "1 1 220px" }}>
-                        <VTextField modelValue={commissionForm.value.name} onUpdate:modelValue={(value: string) => (commissionForm.value.name = value)} />
+                        <PgTextField modelValue={commissionForm.value.name} onUpdate:modelValue={(value: string) => (commissionForm.value.name = value)} />
                     </FormField>
                 </ThemedView>
                 <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
                     <FormField label={t("Rail code")} required sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
-                        <VTextField modelValue={commissionForm.value.railCode} onUpdate:modelValue={(value: string) => (commissionForm.value.railCode = value)} />
+                        <PgTextField modelValue={commissionForm.value.railCode} onUpdate:modelValue={(value: string) => (commissionForm.value.railCode = value)} />
                     </FormField>
                     <FormField label={t("Model")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
-                        <VSelect items={["FLAT", "PERCENTAGE", "TIERED", "MIXED"]} modelValue={commissionForm.value.model} onUpdate:modelValue={(value: string | null) => (commissionForm.value.model = value ?? "PERCENTAGE")} />
+                        <PgAutocomplete items={["FLAT", "PERCENTAGE", "TIERED", "MIXED"]} modelValue={commissionForm.value.model} onUpdate:modelValue={(value: string | null) => (commissionForm.value.model = value ?? "PERCENTAGE")} />
                     </FormField>
                 </ThemedView>
                 <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
                     {(commissionForm.value.model === "PERCENTAGE" || commissionForm.value.model === "MIXED") && (
                         <FormField label={t("Percentage rate")} hint={t("A fraction of the amount, e.g. 0.0300 charges 3%.")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
-                            <VTextField modelValue={commissionForm.value.percentage} onUpdate:modelValue={(value: string) => (commissionForm.value.percentage = value)} />
+                            <PgTextField modelValue={commissionForm.value.percentage} onUpdate:modelValue={(value: string) => (commissionForm.value.percentage = value)} />
                         </FormField>
                     )}
                     {(commissionForm.value.model === "FLAT" || commissionForm.value.model === "MIXED") && (
                         <FormField label={t("Flat amount")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
-                            <VTextField modelValue={commissionForm.value.flatAmount} onUpdate:modelValue={(value: string) => (commissionForm.value.flatAmount = value)} />
+                            <PgTextField modelValue={commissionForm.value.flatAmount} onUpdate:modelValue={(value: string) => (commissionForm.value.flatAmount = value)} />
                         </FormField>
                     )}
                 </ThemedView>
                 <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
                     <FormField label={t("Minimum fee")} style={{ flex: "1 1 220px" }}>
-                        <VTextField modelValue={commissionForm.value.minFee} onUpdate:modelValue={(value: string) => (commissionForm.value.minFee = value)} />
+                        <PgTextField modelValue={commissionForm.value.minFee} onUpdate:modelValue={(value: string) => (commissionForm.value.minFee = value)} />
                     </FormField>
                     <FormField label={t("Maximum fee")} style={{ flex: "1 1 220px" }}>
-                        <VTextField modelValue={commissionForm.value.maxFee} onUpdate:modelValue={(value: string) => (commissionForm.value.maxFee = value)} />
+                        <PgTextField modelValue={commissionForm.value.maxFee} onUpdate:modelValue={(value: string) => (commissionForm.value.maxFee = value)} />
                     </FormField>
                 </ThemedView>
                 <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
                     <FormField label={t("Fee bearer")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
-                        <VSelect items={["MERCHANT_ABSORBS", "PAYER_SURCHARGE", "SPLIT"]} modelValue={commissionForm.value.feeBearerDefault} onUpdate:modelValue={(value: string | null) => (commissionForm.value.feeBearerDefault = value ?? "MERCHANT_ABSORBS")} />
+                        <PgAutocomplete items={["MERCHANT_ABSORBS", "PAYER_SURCHARGE", "SPLIT"]} modelValue={commissionForm.value.feeBearerDefault} onUpdate:modelValue={(value: string | null) => (commissionForm.value.feeBearerDefault = value ?? "MERCHANT_ABSORBS")} />
                     </FormField>
                     <FormField label={t("Rounding mode")} style={{ flex: "1 1 220px" }}>
-                        <VSelect items={["HALF_UP", "HALF_EVEN", "FLOOR", "CEIL"]} modelValue={commissionForm.value.roundingMode} onUpdate:modelValue={(value: string | null) => (commissionForm.value.roundingMode = value ?? "HALF_UP")} />
+                        <PgAutocomplete items={["HALF_UP", "HALF_EVEN", "FLOOR", "CEIL"]} modelValue={commissionForm.value.roundingMode} onUpdate:modelValue={(value: string | null) => (commissionForm.value.roundingMode = value ?? "HALF_UP")} />
                     </FormField>
                 </ThemedView>
                 <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
                     <FormField label={t("Merchant ID (optional)")} hint={t("Scope this profile to one merchant or application. Leave both empty for the rail default.")} style={{ flex: "1 1 220px" }}>
-                        <VTextField modelValue={commissionForm.value.merchantId} onUpdate:modelValue={(value: string) => (commissionForm.value.merchantId = value)} />
+                        <PgTextField modelValue={commissionForm.value.merchantId} onUpdate:modelValue={(value: string) => (commissionForm.value.merchantId = value)} />
                     </FormField>
                     <FormField label={t("Application ID (optional)")} style={{ flex: "1 1 220px" }}>
-                        <VTextField modelValue={commissionForm.value.applicationId} onUpdate:modelValue={(value: string) => (commissionForm.value.applicationId = value)} />
+                        <PgTextField modelValue={commissionForm.value.applicationId} onUpdate:modelValue={(value: string) => (commissionForm.value.applicationId = value)} />
                     </FormField>
                 </ThemedView>
                 {commissionForm.value.model === "TIERED" && (
@@ -689,12 +689,12 @@ const PricingControlsPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <>
-                            <VBtn variant="outlined" disabled={lifecycleSaving.value} onClick={() => (lifecycleOpen.value = false)}>
+                            <PgButton variant="outlined" disabled={lifecycleSaving.value} onClick={() => (lifecycleOpen.value = false)}>
                                 {t("Cancel")}
-                            </VBtn>
-                            <VBtn color="warning" variant="flat" {...{ type: "submit" }} loading={lifecycleSaving.value}>
+                            </PgButton>
+                            <PgButton color="warning" variant="flat" {...{ type: "submit" }} loading={lifecycleSaving.value}>
                                 {t("Submit for approval")}
-                            </VBtn>
+                            </PgButton>
                         </>
                     ),
                 }}
@@ -704,7 +704,7 @@ const PricingControlsPage = dc(() => {
                 </VAlert>
                 {lifecycleKind.value === "COMMISSION" && (
                     <FormField label={t("Effective to")} sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             type="date"
                             modelValue={lifecycleEffectiveTo.value}
                             onUpdate:modelValue={(value: string) => (lifecycleEffectiveTo.value = value)}
@@ -721,7 +721,7 @@ const PricingControlsPage = dc(() => {
                     incompleteMessage={t("Complete all lifecycle checklist items before submitting")}
                 />
                 <FormField label={t("Reason (optional)")} sensitiveMakerChecker>
-                    <VTextField modelValue={lifecycleReason.value} onUpdate:modelValue={(value: string) => (lifecycleReason.value = value)} />
+                    <PgTextField modelValue={lifecycleReason.value} onUpdate:modelValue={(value: string) => (lifecycleReason.value = value)} />
                 </FormField>
             </FormModal>
 
@@ -740,30 +740,30 @@ const PricingControlsPage = dc(() => {
                 </VAlert>
                 <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
                     <FormField label={t("Code")} required sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
-                        <VTextField modelValue={velocityForm.value.code} onUpdate:modelValue={(value: string) => (velocityForm.value.code = value)} />
+                        <PgTextField modelValue={velocityForm.value.code} onUpdate:modelValue={(value: string) => (velocityForm.value.code = value)} />
                     </FormField>
                     <FormField label={t("Name")} required style={{ flex: "1 1 220px" }}>
-                        <VTextField modelValue={velocityForm.value.name} onUpdate:modelValue={(value: string) => (velocityForm.value.name = value)} />
+                        <PgTextField modelValue={velocityForm.value.name} onUpdate:modelValue={(value: string) => (velocityForm.value.name = value)} />
                     </FormField>
                 </ThemedView>
                 <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
                     <FormField label={t("Scope")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
-                        <VSelect items={["MERCHANT", "APPLICATION", "LINK", "IP"]} modelValue={velocityForm.value.scope} onUpdate:modelValue={(value: string | null) => (velocityForm.value.scope = value ?? "MERCHANT")} />
+                        <PgAutocomplete items={["MERCHANT", "APPLICATION", "LINK", "IP"]} modelValue={velocityForm.value.scope} onUpdate:modelValue={(value: string | null) => (velocityForm.value.scope = value ?? "MERCHANT")} />
                     </FormField>
                     <FormField label={t("Action")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
-                        <VSelect items={["BLOCK", "REVIEW", "THROTTLE", "CHALLENGE"]} modelValue={velocityForm.value.action} onUpdate:modelValue={(value: string | null) => (velocityForm.value.action = value ?? "BLOCK")} />
+                        <PgAutocomplete items={["BLOCK", "REVIEW", "THROTTLE", "CHALLENGE"]} modelValue={velocityForm.value.action} onUpdate:modelValue={(value: string | null) => (velocityForm.value.action = value ?? "BLOCK")} />
                     </FormField>
                 </ThemedView>
                 <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
                     <FormField label={t("Window seconds")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
-                        <VTextField modelValue={velocityForm.value.windowSeconds} onUpdate:modelValue={(value: string) => (velocityForm.value.windowSeconds = value)} />
+                        <PgTextField modelValue={velocityForm.value.windowSeconds} onUpdate:modelValue={(value: string) => (velocityForm.value.windowSeconds = value)} />
                     </FormField>
                     <FormField label={t("Max attempts")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
-                        <VTextField modelValue={velocityForm.value.maxAttempts} onUpdate:modelValue={(value: string) => (velocityForm.value.maxAttempts = value)} />
+                        <PgTextField modelValue={velocityForm.value.maxAttempts} onUpdate:modelValue={(value: string) => (velocityForm.value.maxAttempts = value)} />
                     </FormField>
                 </ThemedView>
                 <FormField label={t("Max amount (optional)")} sensitiveMakerChecker>
-                    <VTextField modelValue={velocityForm.value.maxAmount} onUpdate:modelValue={(value: string) => (velocityForm.value.maxAmount = value)} />
+                    <PgTextField modelValue={velocityForm.value.maxAmount} onUpdate:modelValue={(value: string) => (velocityForm.value.maxAmount = value)} />
                 </FormField>
                 <FormChecklist
                     checks={[...PRICING_CHECKS]}

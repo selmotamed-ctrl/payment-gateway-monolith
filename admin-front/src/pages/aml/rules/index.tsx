@@ -3,18 +3,18 @@ import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VProgressCircular, VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { statusTone } from "@/components/Table/statusTone";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import type { TableHeader } from "@/components/Table/types";
+import {VAlert, PgButton, PgSpinner, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {statusTone} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { useOpenQuery } from "@/composables/useOpenQuery";
 import { urlsMap } from "@/constants/urlsMap";
@@ -22,17 +22,17 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { useSafeguard } from "@/components/guide/useSafeguard";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
-import { SectionFields } from "@/components/SectionFields";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
 import { AmlParamsBuilder, AmlParamsSummary, AmlScopeSummary } from "@/components/builders/AmlParamsBuilder";
 import { StructuredValueEditor } from "@/components/builders/StructuredValueEditor";
 import {
@@ -470,9 +470,9 @@ const AmlRulesPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("AML Rules")} subtitle={t("Manage AML rule versions and thresholds through maker-checker approval.")} badge="AML-CONFIDENTIAL" badgeTone="danger">tab.value !== "rules" ? null : (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</VBtn>
-                            <VBtn color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("Draft rule")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</PgButton>
+                            <PgButton color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("Draft rule")}</PgButton>
                         </ThemedView>
                     )</PageHeader>
                 <SegmentedTabs
@@ -532,7 +532,7 @@ const AmlRulesPage = dc(() => {
                     searchValue={search.value}
                     setSearchValue={(value) => (search.value = value)}
                     headers={headers.value}
-                    rowColor={(row) => (row.pendingApproval ? "#d97706" : row.active ? undefined : "#64748b")}
+                    rowColor={(row) => (row.pendingApproval ? "var(--pg-status-warning-dot)" : row.active ? undefined : "var(--pg-ink-muted)")}
                     apiDataExtractor={(data) => {
                         const payload = data as { rules?: AmlRule[]; rows?: AmlRule[] };
                         return payload.rules ?? payload.rows ?? [];
@@ -583,13 +583,13 @@ const AmlRulesPage = dc(() => {
                 width={620}
                 v-slots={{
                     footer: () => (
-                        <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
+                        <PgButton variant="text" onClick={closeDetails}>{t("Close")}</PgButton>
                     ),
                 }}
             >
                 {detailLoading.value || !selected.value ? (
                     <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "260px", gap: "12px" }}>
-                        <VProgressCircular indeterminate size={52} color="primary" />
+                        <PgSpinner indeterminate size={52} color="primary" />
                         <ThemedText style={{ opacity: 0.65 }}>{t("Loading AML rule")}</ThemedText>
                     </ThemedView>
                 ) : (
@@ -622,7 +622,7 @@ const AmlRulesPage = dc(() => {
                                     { label: t("Rejection reason"), value: selected.value.approval?.rejectionReason || "—" },
                                 ]} />
                                 {selected.value.approvalRequestId && (
-                                    <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</VBtn>
+                                    <PgButton size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</PgButton>
                                 )}
                             </ThemedView>
                         </ThemedView>
@@ -670,24 +670,24 @@ const AmlRulesPage = dc(() => {
                 <VAlert type="info" variant="tonal">{t("The rule is created inactive and an approval request is issued. A different authorised checker must approve it.")}</VAlert>
                 <SectionFields title={t("Rule definition")}>
                     <FormField label={t("Code")} required sensitiveMakerChecker>
-                        <VTextField modelValue={form.value.code} onUpdate:modelValue={(value: string) => (form.value.code = value)} hideDetails />
+                        <PgTextField modelValue={form.value.code} onUpdate:modelValue={(value: string) => (form.value.code = value)} hideDetails />
                     </FormField>
                     <FormField label={t("Name")} required sensitiveMakerChecker>
-                        <VTextField modelValue={form.value.name} onUpdate:modelValue={(value: string) => (form.value.name = value)} hideDetails />
+                        <PgTextField modelValue={form.value.name} onUpdate:modelValue={(value: string) => (form.value.name = value)} hideDetails />
                     </FormField>
                     <FormField label={t("Rule type")} required sensitiveMakerChecker>
-                        <VSelect items={RULE_TYPES.map((value) => ({ title: value, value }))} modelValue={form.value.ruleType} onUpdate:modelValue={(value: string) => onRuleTypeChanged(value)} hideDetails />
+                        <PgAutocomplete items={RULE_TYPES.map((value) => ({ title: value, value }))} modelValue={form.value.ruleType} onUpdate:modelValue={(value: string) => onRuleTypeChanged(value)} hideDetails />
                     </FormField>
                     <FormField label={t("Action")} required sensitiveMakerChecker>
-                        <VSelect items={RULE_ACTIONS.map((value) => ({ title: value, value }))} modelValue={form.value.action} onUpdate:modelValue={(value: string) => (form.value.action = value)} hideDetails />
+                        <PgAutocomplete items={RULE_ACTIONS.map((value) => ({ title: value, value }))} modelValue={form.value.action} onUpdate:modelValue={(value: string) => (form.value.action = value)} hideDetails />
                     </FormField>
                     <FormField label={t("Severity")} required sensitiveMakerChecker>
-                        <VSelect items={SEVERITIES.map((value) => ({ title: value, value }))} modelValue={form.value.baseSeverity} onUpdate:modelValue={(value: string) => (form.value.baseSeverity = value)} hideDetails />
+                        <PgAutocomplete items={SEVERITIES.map((value) => ({ title: value, value }))} modelValue={form.value.baseSeverity} onUpdate:modelValue={(value: string) => (form.value.baseSeverity = value)} hideDetails />
                     </FormField>
                 </SectionFields>
                 <SectionFields title={t("Effective date")}>
                     <FormField label={t("Effective from (optional)")} sensitiveMakerChecker>
-                        <VTextField type="date" modelValue={form.value.effectiveFrom} onUpdate:modelValue={(value: string) => (form.value.effectiveFrom = value)} hideDetails />
+                        <PgTextField type="date" modelValue={form.value.effectiveFrom} onUpdate:modelValue={(value: string) => (form.value.effectiveFrom = value)} hideDetails />
                     </FormField>
                 </SectionFields>
                 <SectionFields title={t("Rule parameters")} subtitle={t("The fields below are the ones the selected rule type evaluates.")}>

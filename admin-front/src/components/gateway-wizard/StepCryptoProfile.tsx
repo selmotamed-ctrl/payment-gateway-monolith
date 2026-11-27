@@ -1,12 +1,12 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn, VSelect, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { FormField } from "@/components/ui/FormField";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MonoRef } from "@/components/ui/MonoRef";
+import {VAlert, PgButton, PgAutocomplete, PgTextField, PgTextarea} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
 import { normalizeArabicText } from "@/utils/arabic";
 import { WizardSection } from "./WizardSection";
 import type { WizardCryptoProfile } from "./types";
@@ -183,9 +183,9 @@ export const StepCryptoProfile = dc(
                 title={t("Crypto Profiles")}
                 v-slots={{
                     headerActions: () => (
-                        <VBtn variant="tonal" size="small" onClick={addProfile}>
+                        <PgButton variant="tonal" size="small" onClick={addProfile}>
                             {t("Add")}
-                        </VBtn>
+                        </PgButton>
                     ),
                 }}
             >
@@ -213,48 +213,48 @@ export const StepCryptoProfile = dc(
                                             toneOverride="info"
                                             showDot={false}
                                         />
-                                        <VBtn
+                                        <PgButton
                                             size="x-small"
                                             variant="text"
                                             color="error"
                                             onClick={() => removeProfile(activeIndex.value)}
                                         >
                                             ×
-                                        </VBtn>
+                                        </PgButton>
                                     </>
                                 ),
                             }}
                         >
                             <div style={gridStyle}>
                                 <FormField label={t("Signature Profile")}>
-                                    <VTextField
+                                    <PgTextField
                                         modelValue={active.value.name}
                                         onUpdate:modelValue={(v: string) => updateProfile(activeIndex.value, { name: v })}
                                     />
                                 </FormField>
                                 <FormField label={t("Type")}>
-                                    <VSelect
+                                    <PgAutocomplete
                                         items={["OUTBOUND_SIGN", "INBOUND_VERIFY"]}
                                         modelValue={active.value.direction}
                                         onUpdate:modelValue={(v: any) => updateProfile(activeIndex.value, { direction: v })}
                                     />
                                 </FormField>
                                 <FormField label={t("Algorithm")}>
-                                    <VSelect
+                                    <PgAutocomplete
                                         items={["HMAC_SHA256", "HMAC_SHA512", "RSA_SHA256"]}
                                         modelValue={active.value.algorithm}
                                         onUpdate:modelValue={(v: any) => updateProfile(activeIndex.value, { algorithm: v })}
                                     />
                                 </FormField>
                                 <FormField label={t("Key Encoding")}>
-                                    <VSelect
+                                    <PgAutocomplete
                                         items={["utf8", "hex", "base64"]}
                                         modelValue={active.value.keyEncoding}
                                         onUpdate:modelValue={(v: any) => updateProfile(activeIndex.value, { keyEncoding: v })}
                                     />
                                 </FormField>
                                 <FormField label={t("Canonicalization")}>
-                                    <VSelect
+                                    <PgAutocomplete
                                         items={[
                                             "SORTED_KEY_VALUE_AMP",
                                             "TIMESTAMP_DOT_RAW_BODY",
@@ -268,13 +268,13 @@ export const StepCryptoProfile = dc(
                                     />
                                 </FormField>
                                 <FormField label="secret_ref" sensitiveMakerChecker>
-                                    <VTextField
+                                    <PgTextField
                                         modelValue={active.value.secretRef}
                                         onUpdate:modelValue={(v: string) => updateProfile(activeIndex.value, { secretRef: v })}
                                     />
                                 </FormField>
                                 <FormField label={t("Params")}>
-                                    <VTextField
+                                    <PgTextField
                                         modelValue={(active.value.fields ?? []).join(",")}
                                         onUpdate:modelValue={(v: string) =>
                                             updateProfile(activeIndex.value, {
@@ -287,7 +287,7 @@ export const StepCryptoProfile = dc(
                                     />
                                 </FormField>
                                 <FormField label="tolerance_seconds">
-                                    <VTextField
+                                    <PgTextField
                                         type="number"
                                         modelValue={active.value.toleranceSeconds}
                                         onUpdate:modelValue={(v: any) =>
@@ -301,29 +301,29 @@ export const StepCryptoProfile = dc(
 
                     <WizardSection title={t("Test Signature")} divider>
                         <FormField label={t("Payload")}>
-                            <VTextarea
+                            <PgTextarea
                                 modelValue={samplePayload.value}
                                 onUpdate:modelValue={(v: string) => (samplePayload.value = v)}
                                 rows={4}
                             />
                         </FormField>
                         <FormField label={t("Secret")} sensitiveMakerChecker>
-                            <VTextField
+                            <PgTextField
                                 type="password"
                                 modelValue={sampleKey.value}
                                 onUpdate:modelValue={(v: string) => (sampleKey.value = v)}
                             />
                         </FormField>
                         <FormField label={t("Expected Signature")}>
-                            <VTextField
+                            <PgTextField
                                 modelValue={expectedSignature.value}
                                 onUpdate:modelValue={(v: string) => (expectedSignature.value = v)}
                             />
                         </FormField>
                         <div style={{ display: "flex", flexDirection: "row", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
-                            <VBtn color="primary" loading={computing.value} onClick={() => void compute()}>
+                            <PgButton color="primary" loading={computing.value} onClick={() => void compute()}>
                                 {t("Test Signature")}
-                            </VBtn>
+                            </PgButton>
                             {computedSignature.value && (
                                 <MonoRef value={computedSignature.value} truncate={32} />
                             )}

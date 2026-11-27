@@ -1,20 +1,20 @@
 import { computed, ref, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VAlert, VBtn, VSelect, VSwitch, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { hasOneOfAuthorities } from "@/state/user";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
-import { StateView } from "@/components/StateView";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {StateView} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import { FormField } from "@/components/ui/FormField";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import {FormField} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
 import {
     detailList,
     groupTemplatesByCode,
@@ -251,7 +251,7 @@ export const NotificationTemplatesTab = defineComponent({
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
                     <div style={{ flex: "1 1 220px" }}>
                         <FormField label={t("Search templates")}>
-                            <VTextField
+                            <PgTextField
                                 modelValue={search.value}
                                 onUpdate:modelValue={(value: string) => (search.value = value)}
                                 onKeydown={(event: KeyboardEvent) => {
@@ -266,7 +266,7 @@ export const NotificationTemplatesTab = defineComponent({
                     </div>
                     <div style={{ flex: "0 0 150px" }}>
                         <FormField label={t("Channel")}>
-                            <VSelect
+                            <PgAutocomplete
                                 modelValue={channelFilter.value}
                                 onUpdate:modelValue={(value: string | null) => {
                                     channelFilter.value = value;
@@ -281,7 +281,7 @@ export const NotificationTemplatesTab = defineComponent({
                     </div>
                     <div style={{ flex: "0 0 150px" }}>
                         <FormField label={t("Language")}>
-                            <VSelect
+                            <PgAutocomplete
                                 modelValue={langFilter.value}
                                 onUpdate:modelValue={(value: string | null) => {
                                     langFilter.value = value;
@@ -294,7 +294,7 @@ export const NotificationTemplatesTab = defineComponent({
                             />
                         </FormField>
                     </div>
-                    <VSwitch
+                    <PgSwitch
                         modelValue={includeHistory.value}
                         onUpdate:modelValue={(value: boolean | null) => {
                             includeHistory.value = value === true;
@@ -305,7 +305,7 @@ export const NotificationTemplatesTab = defineComponent({
                         density="compact"
                         hideDetails
                     />
-                    <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
+                    <PgButton variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</PgButton>
                 </div>
 
                 {loadError.value ? (
@@ -350,9 +350,9 @@ export const NotificationTemplatesTab = defineComponent({
                                             <div style={{ flex: 1 }} />
                                             <span style={{ fontSize: "11px", color: "var(--pg-ink-faint)" }}>{t("Updated")}: {formatDateTime(row.updatedAt)}</span>
                                             {canWrite.value && row.active && (
-                                                <VBtn size="small" variant="tonal" prependIcon="mdi-pencil-outline" onClick={() => void openEdit(row)}>
+                                                <PgButton size="small" variant="tonal" prependIcon="mdi-pencil-outline" onClick={() => void openEdit(row)}>
                                                     {t("Edit")}
-                                                </VBtn>
+                                                </PgButton>
                                             )}
                                         </div>
                                         {row.subjectTemplate && (
@@ -402,16 +402,16 @@ export const NotificationTemplatesTab = defineComponent({
                     )}
                     {editing.value && editing.value.channel === "EMAIL" && (
                         <FormField label={t("Subject")}>
-                            <VTextField modelValue={subject.value} onUpdate:modelValue={(value: string) => (subject.value = value)} />
+                            <PgTextField modelValue={subject.value} onUpdate:modelValue={(value: string) => (subject.value = value)} />
                         </FormField>
                     )}
                     {editing.value && editing.value.channel !== "EMAIL" && editing.value.subjectTemplate !== null && (
                         <FormField label={t("Subject")}>
-                            <VTextField modelValue={subject.value} onUpdate:modelValue={(value: string) => (subject.value = value)} />
+                            <PgTextField modelValue={subject.value} onUpdate:modelValue={(value: string) => (subject.value = value)} />
                         </FormField>
                     )}
                     <FormField label={t("Message body")} required>
-                        <VTextarea ref={bodyField as never} modelValue={body.value} onUpdate:modelValue={(value: string) => (body.value = value)} rows={6} autoGrow />
+                        <PgTextarea ref={bodyField as never} modelValue={body.value} onUpdate:modelValue={(value: string) => (body.value = value)} rows={6} autoGrow />
                     </FormField>
                     <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                         <span style={{ fontSize: "13px", fontWeight: 500 }}>{t("Insert variable")}</span>
@@ -421,13 +421,13 @@ export const NotificationTemplatesTab = defineComponent({
                         </div>
                         {unknownNow.value.length > 0 && (
                             <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center" }}>
-                                <span role="alert" style={{ fontSize: "12px", color: "var(--pg-status-danger-text)" }}>{t("Unknown placeholders")}:</span>
+                                <span style={{ fontSize: "12px", color: "var(--pg-status-danger-text)" }}>{t("Unknown placeholders")}:</span>
                                 {unknownNow.value.map((name) => chip(placeholderText(name), "danger"))}
                             </div>
                         )}
                     </div>
                     <FormField label={t("Confidentiality class")} hint={t("Internal and merchant classes may not reference anti-money-laundering variables.")}>
-                        <VSelect
+                        <PgAutocomplete
                             modelValue={confidentiality.value}
                             onUpdate:modelValue={(value: string) => (confidentiality.value = value)}
                             items={Object.keys(CLASS_LABEL).map((value) => ({ title: t(CLASS_LABEL[value]!), value }))}
@@ -442,7 +442,7 @@ export const NotificationTemplatesTab = defineComponent({
                         complete={editChecklistComplete.value}
                         incompleteMessage={t("Complete all template checklist items before saving.")}
                     />
-                    <VSwitch modelValue={showPreview.value} onUpdate:modelValue={(value: boolean | null) => (showPreview.value = value === true)} label={t("Preview with sample values")} color="primary" density="compact" hideDetails />
+                    <PgSwitch modelValue={showPreview.value} onUpdate:modelValue={(value: boolean | null) => (showPreview.value = value === true)} label={t("Preview with sample values")} color="primary" density="compact" hideDetails />
                     {showPreview.value && (
                         <div style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "10px 12px", borderRadius: "var(--pg-radius-sm)", backgroundColor: "var(--pg-bg-surface-subtle)", border: "1px solid var(--pg-border-subtle)" }}>
                             {subject.value && <strong dir="auto" style={{ fontSize: "13px" }}>{previewTemplate(subject.value, sampleValues.value)}</strong>}

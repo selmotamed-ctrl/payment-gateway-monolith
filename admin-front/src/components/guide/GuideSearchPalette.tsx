@@ -1,7 +1,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
-import { VDialog, VIcon } from "@/components/vael/VuetifyShim";
+import {PgDialog, PgIcon, PgTextField} from "@pg/ui";
 import {
     getGoldenRuleArticles,
     getGuideSearchDocument,
@@ -49,7 +49,7 @@ export const GuideSearchPalette = defineComponent({
     emits: ["update:modelValue"],
     setup(props, { emit }) {
         const router = useRouter();
-        const input = ref<HTMLInputElement | null>(null);
+        const input = ref<any>(null);
         const query = ref("");
         const loading = ref(false);
         const groups = ref<GuideSearchGroup[]>([]);
@@ -229,7 +229,7 @@ export const GuideSearchPalette = defineComponent({
         return () => {
             let runningIndex = 0;
             return (
-                <VDialog
+                <PgDialog
                     modelValue={props.modelValue}
                     onUpdate:modelValue={updateOpen}
                     maxWidth={760}
@@ -239,26 +239,22 @@ export const GuideSearchPalette = defineComponent({
                 >
                     <div class="guide-search-surface" dir={isArabic.value ? "rtl" : "ltr"} onKeydown={onKeydown}>
                         <div class="guide-search-header">
-                            <VIcon icon="mdi-book-search-outline" size={20} />
-                            <input
+                            <PgIcon icon="mdi-book-search-outline" size={20} />
+                            <PgTextField
                                 ref={input}
                                 class="guide-search-input"
-                                type="text"
+                                hideDetails
                                 role="combobox"
                                 aria-expanded={props.modelValue ? "true" : "false"}
                                 aria-controls="pg-guide-search-listbox"
-                                aria-activedescendant={
-                                    activeHit.value ? `pg-guide-search-${activeIndex.value}` : undefined
-                                }
+                                aria-activedescendant={activeHit.value ? `pg-guide-search-${activeIndex.value}` : undefined}
                                 aria-autocomplete="list"
                                 aria-label={labels.value.placeholder}
                                 placeholder={labels.value.placeholder}
                                 autocomplete="off"
                                 spellcheck={false}
-                                value={query.value}
-                                onInput={(event) =>
-                                    (query.value = (event.target as HTMLInputElement).value)
-                                }
+                                modelValue={query.value}
+                                onUpdate:modelValue={(value: string) => (query.value = value)}
                             />
                             <kbd class="pg-command-kbd">ESC</kbd>
                         </div>
@@ -293,7 +289,7 @@ export const GuideSearchPalette = defineComponent({
                             )}
                         </div>
                     </div>
-                </VDialog>
+                </PgDialog>
             );
         };
     },

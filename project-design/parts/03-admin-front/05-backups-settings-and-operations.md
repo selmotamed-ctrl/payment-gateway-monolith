@@ -20,8 +20,8 @@ code:
   - admin-front/src/pages/academy/index.tsx
   - admin-front/src/constants/urlsMap/index.ts
   - admin-front/src/utils/xlsx/**
-  - admin-front/src/components/ui/SummaryExportCard.tsx
-  - admin-front/src/components/ui/FormChecklist.tsx
+  - packages/ui/src/data/PgSummaryExportCard.tsx
+  - packages/ui/src/data/PgFormChecklist.tsx
 design_sources:
   - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md
   - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md
@@ -284,7 +284,7 @@ The UI hides write controls where it knows the authority. The backend remains au
 | Academy pages | `admin-front/src/pages/academy/*.tsx` |
 | URL map | `admin-front/src/constants/urlsMap/index.ts` |
 | XLSX pipeline | `admin-front/src/utils/xlsx/**` |
-| Summary/checklist primitives | `admin-front/src/components/ui/SummaryExportCard.tsx`, `FormChecklist.tsx` |
+| Summary/checklist primitives | `packages/ui/src/data/PgSummaryExportCard.tsx`, `FormChecklist.tsx` |
 | Deploy flags | `ADMIN_SHOW_CHECKLISTS`, `ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST`, `ADMIN_SHOW_HELP_PANELS` |
 | Backup config | deploy `FAKE_RAILS_*` is unrelated; backup daemon config is in the deploy/backup parts |
 
@@ -411,8 +411,8 @@ Lifecycle status must be honest: if nothing reads the key at runtime, mark it
 - `docs/developer/platform-settings.md`
 - `admin-front/src/pages/academy/*.tsx`
 - `admin-front/src/utils/xlsx/**`
-- `admin-front/src/components/ui/SummaryExportCard.tsx`
-- `admin-front/src/components/ui/FormChecklist.tsx`
+- `packages/ui/src/data/PgSummaryExportCard.tsx`
+- `packages/ui/src/data/PgFormChecklist.tsx`
 - `core-back/api/internal/backups.ts`
 - `core-back/api/internal/admin.ts` (settings handlers), `core-back/api/internal/academy.ts`
 - `core-back/lib/approvalQueue.ts`

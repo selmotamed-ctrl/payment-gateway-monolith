@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import { VList, VListItem, VListItemSubtitle, VListItemTitle } from "@/components/vael/VuetifyShim";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {PgList, PgListItem, PgListItemSubtitle, PgListItemTitle} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 import { streamUrl } from "@/utils/api";
 
 export interface LiveEvent {
@@ -72,21 +72,21 @@ export const LiveTransactionFeed = dc(
           ),
         }}
       >
-        <VList density="compact" style={{ maxHeight: props.compact ? "240px" : "520px", overflowY: "auto" }}>
+        <PgList density="compact" style={{ maxHeight: props.compact ? "240px" : "520px", overflowY: "auto" }}>
           {events.value.length === 0 ? (
-            <VListItem><VListItemTitle class="text-medium-emphasis">Waiting for gateway calls…</VListItemTitle></VListItem>
+            <PgListItem><PgListItemTitle class="text-medium-emphasis">Waiting for gateway calls…</PgListItemTitle></PgListItem>
           ) : null}
           {events.value.map((event, index) => (
-            <VListItem key={`${event.at}-${index}`}>
-              <VListItemTitle class="pg-mono">
+            <PgListItem key={`${event.at}-${index}`}>
+              <PgListItemTitle class="pg-mono">
                 {event.payload?.method ?? event.type} {event.payload?.path ?? event.payload?.gatewayCode ?? ""}
-              </VListItemTitle>
-              <VListItemSubtitle class="pg-mono">
+              </PgListItemTitle>
+              <PgListItemSubtitle class="pg-mono">
                 {event.payload?.gatewayCode ?? event.payload?.gateway_code ?? ""} · {event.payload?.status ?? event.payload?.state ?? ""} · {event.payload?.ourReference ?? event.payload?.transactionId ?? ""}
-              </VListItemSubtitle>
-            </VListItem>
+              </PgListItemSubtitle>
+            </PgListItem>
           ))}
-        </VList>
+        </PgList>
       </SurfaceCard>
     );
   },

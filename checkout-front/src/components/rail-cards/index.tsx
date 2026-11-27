@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VIcon } from "@/components/vael/VuetifyShim";
-import { ThemedText } from "@/components/ThemedText";
-import { MetaPill, SurfaceCard } from "@/components/ui";
+import {PgIcon} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {MetaPill, SurfaceCard} from "@pg/ui";
 import type { RailDescriptor } from "@/components/renderers/types";
 
 export type RailCardsProps = {
@@ -57,7 +57,7 @@ export const RailCards = dc(
                                     flex: "1 1 160px",
                                 }}
                             >
-                                <VIcon
+                                <PgIcon
                                     icon={collectionModeIcon(rail.collectionMode)}
                                     size={24}
                                     style={{

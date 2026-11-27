@@ -1,7 +1,7 @@
 import { nextTick, ref, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn } from "@/components/vael/VuetifyShim";
+import {PgButton} from "@pg/ui";
 import type { OrderTask as OrderTaskType } from "@/content/academy";
 import type { OrderAnswer } from "../labScoring";
 import { choiceTag, plainInline, renderInline } from "./PanelView";
@@ -72,7 +72,7 @@ export const OrderTask = defineComponent({
                                         choiceTag(right ? "good" : "bad", right ? t("Right place") : t("Wrong place"))
                                     ) : (
                                         <span class="ac-lab-order__moves">
-                                            <VBtn
+                                            <PgButton
                                                 size="small"
                                                 variant="outlined"
                                                 icon="mdi-arrow-up"
@@ -82,7 +82,7 @@ export const OrderTask = defineComponent({
                                                 data-order-dir="up"
                                                 onClick={() => move(index, -1)}
                                             />
-                                            <VBtn
+                                            <PgButton
                                                 size="small"
                                                 variant="outlined"
                                                 icon="mdi-arrow-down"

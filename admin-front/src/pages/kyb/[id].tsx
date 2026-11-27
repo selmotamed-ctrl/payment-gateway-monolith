@@ -1,22 +1,25 @@
 import { dc } from "@/utils/dc";
+import { createIf } from "@vue/runtime-vapor";
 import { computed, ref, watch } from "vue";
+
+const branch = createIf as any;
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
-import { statusTone } from "@/components/Table/statusTone";
+import {VAlert, PgButton} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import {statusTone} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { areHelpPanelsVisible } from "@/constants/env";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { xlsxUIPipeline } from "@/utils/xlsx";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {FormModal} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import {
     COLUMN_HELP,
@@ -34,11 +37,11 @@ import KybDocumentPreview from "./components/KybDocumentPreview";
 import KybReviewDialog from "./components/KybReviewDialog";
 import KybActionDialog, { type KybActionMode } from "./components/KybActionDialog";
 
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { DescriptionList, type DescriptionItem } from "@/components/ui/DescriptionList";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {DescriptionList, type DescriptionItem} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
 import { describeAuditChange } from "@/utils/auditSummary";
 const EXPORT_CHECKS = [
     { key: "KYB_SCOPE_VERIFIED", label: "KYB document scope verified" },
@@ -101,7 +104,7 @@ const KybReviewDetailPage = dc(() => {
     void load();
 
     const exportRecord = async () => {
-        const entry = document.value;
+        const entry = document.value!;
         if (!entry || exportLoading.value) return;
         if (!exportChecklistComplete.value) {
             showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
@@ -154,7 +157,7 @@ const KybReviewDetailPage = dc(() => {
     };
 
     const sections = computed(() => {
-        const entry = document.value;
+        const entry = document.value!;
         if (!entry) return [];
         const typeHelp = documentTypeHelp(entry.docType);
         const statusHelp = documentStatusHelp(entry.status);
@@ -240,21 +243,23 @@ const KybReviewDetailPage = dc(() => {
         tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
 
     return () => {
-        if (loading.value) {
-            return (
+        const entry = document.value!;
+        return branch(
+            () => loading.value,
+            () => (
                 <ScreenContainer>
                     <StateView loading onRetry={() => void load()} />
-        </ScreenContainer>
-            );
-        }
-        if (error.value || !document.value) {
-            return (
-                <ScreenContainer>
-                    <StateView error={error.value ?? "KYB document not found"} onRetry={() => void load()} />
                 </ScreenContainer>
-            );
-        }
-        const entry = document.value;
+            ),
+            () =>
+                branch(
+                    () => Boolean(error.value || !entry),
+                    () => (
+                        <ScreenContainer>
+                            <StateView error={error.value ?? "KYB document not found"} onRetry={() => void load()} />
+                        </ScreenContainer>
+                    ),
+                    () => (() => {
         const typeHelp = documentTypeHelp(entry.docType);
         const statusHelp = documentStatusHelp(entry.status);
         const avHelp = avStatusHelp(entry.avStatus);
@@ -264,38 +269,38 @@ const KybReviewDetailPage = dc(() => {
                 <ThemedView style={{ gap: "18px" }}>
                     <PageHeader title={`${typeHelp.label} · ${entry.merchantName}`} subtitle={t("Inspect document identity, scanning status, expiry evidence and duplicate-document risk.")}>(
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                                <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "KybReview" })}>
+                                <PgButton variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "KybReview" })}>
                                     {t("Queue")}
-                                </VBtn>
-                                <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>
+                                </PgButton>
+                                <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>
                                     {t("Export record")}
-                                </VBtn>
-                                <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
+                                </PgButton>
+                                <PgButton variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
                                     {t("Refresh")}
-                                </VBtn>
+                                </PgButton>
                                 {entry.joinRequestId && (
-                                    <VBtn
+                                    <PgButton
                                         variant="tonal"
                                         prependIcon="mdi-clipboard-account-outline"
                                         onClick={() => void router.push({ name: "JoinRequestDetail", params: { id: entry.joinRequestId } })}
                                     >
                                         {t("Join request")}
-                                    </VBtn>
+                                    </PgButton>
                                 )}
                                 {entry.canReview && (
                                     <>
-                                        <VBtn color="success" prependIcon="mdi-check-decagram-outline" onClick={() => openReview("ACCEPTED")}>
+                                        <PgButton color="success" prependIcon="mdi-check-decagram-outline" onClick={() => openReview("ACCEPTED")}>
                                             {t("Accept")}
-                                        </VBtn>
-                                        <VBtn color="error" variant="tonal" prependIcon="mdi-close-octagon-outline" onClick={() => openReview("REJECTED")}>
+                                        </PgButton>
+                                        <PgButton color="error" variant="tonal" prependIcon="mdi-close-octagon-outline" onClick={() => openReview("REJECTED")}>
                                             {t("Reject")}
-                                        </VBtn>
+                                        </PgButton>
                                     </>
                                 )}
                                 {(entry.canRequestReplacement || entry.canRequestRevalidation) && (
-                                    <VBtn color="warning" variant="tonal" prependIcon="mdi-file-replace-outline" onClick={openAction}>
+                                    <PgButton color="warning" variant="tonal" prependIcon="mdi-file-replace-outline" onClick={openAction}>
                                         {t(entry.canRequestReplacement ? "Request replacement" : "Request re-verification")}
-                                    </VBtn>
+                                    </PgButton>
                                 )}
                             </ThemedView>
                         )</PageHeader>
@@ -461,17 +466,17 @@ const KybReviewDetailPage = dc(() => {
                                                 <MonoRef value={match.merchantId} truncate={18} />
                                             </ThemedView>
                                             <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                                <VBtn size="x-small" variant="text" onClick={() => void router.push({ name: "KybReviewDetail", params: { id: match.id } })}>
+                                                <PgButton size="x-small" variant="text" onClick={() => void router.push({ name: "KybReviewDetail", params: { id: match.id } })}>
                                                     {t("Open duplicate document")}
-                                                </VBtn>
+                                                </PgButton>
                                                 {match.joinRequestId && (
-                                                    <VBtn
+                                                    <PgButton
                                                         size="x-small"
                                                         variant="text"
                                                         onClick={() => void router.push({ name: "JoinRequestDetail", params: { id: match.joinRequestId } })}
                                                     >
                                                         {t("Open related join request")}
-                                                    </VBtn>
+                                                    </PgButton>
                                                 )}
                                             </ThemedView>
                                         </SurfaceCardText>
@@ -505,14 +510,14 @@ const KybReviewDetailPage = dc(() => {
                                     ))}
                                 </ThemedView>
                                 {entry.joinRequestId && (
-                                    <VBtn
+                                    <PgButton
                                         size="small"
                                         variant="text"
                                         prependIcon="mdi-clipboard-check-outline"
                                         onClick={() => void router.push({ name: "JoinRequestDetail", params: { id: entry.joinRequestId } })}
                                     >
                                         {t("Open checklist and decision")}
-                                    </VBtn>
+                                    </PgButton>
                                 )}
                             </SurfaceCardText>
                         </SurfaceCard>
@@ -576,6 +581,7 @@ const KybReviewDetailPage = dc(() => {
                 </FormModal>
             </ScreenContainer>
         );
+        })()));
     };
 });
 

@@ -2,26 +2,26 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import { VAlert, VBtn, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { StatusBadge, formatHumanStatus } from "@/components/ui/StatusBadge";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {VAlert, PgButton, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {MetricStrip, type MetricItem} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {StatusBadge, formatHumanStatus} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import { ApiTable } from "@/components/Table/ApiTable";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues, type TableFilter } from "@/components/Table/filters";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
+import {ApiTable} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues, type TableFilter} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
 import { formatDateTime } from "@/components/ledger/format";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
@@ -591,9 +591,9 @@ const ObjectStoragePage = dc(() => {
               <StatusBadge status="info" label={`${summary.value?.totalObjects ?? 0} ${t("Objects")}`} toneOverride="info" showDot={false} />
               <StatusBadge status="pending" label={`${summary.value?.quarantinePendingCount ?? 0} ${t("Quarantine & AV queue")}`} toneOverride={summary.value?.quarantinePendingCount ? "warning" : "neutral"} showDot={false} />
               <StatusBadge status="legal" label={`${summary.value?.legalHoldCount ?? 0} ${t("Legal holds")}`} toneOverride={summary.value?.legalHoldCount ? "danger" : "neutral"} showDot={false} />
-              <VBtn variant="tonal" prependIcon="mdi-refresh" loading={summaryLoading.value} onClick={() => void refreshAll()}>
+              <PgButton variant="tonal" prependIcon="mdi-refresh" loading={summaryLoading.value} onClick={() => void refreshAll()}>
                 {t("Refresh")}
-              </VBtn>
+              </PgButton>
             </ThemedView>
           )</PageHeader>
         {summaryError.value && <VAlert type="error" variant="tonal">{summaryError.value}</VAlert>}
@@ -620,9 +620,9 @@ const ObjectStoragePage = dc(() => {
             )}
             <div class="d-flex flex-wrap ga-2">
               {MAINTENANCE_JOBS.map((job) => (
-                <VBtn key={job} variant="outlined" size="small" disabled={!canAdmin.value} loading={maintenanceBusy.value === job} onClick={() => requestMaintenance(job)}>
+                <PgButton key={job} variant="outlined" size="small" disabled={!canAdmin.value} loading={maintenanceBusy.value === job} onClick={() => requestMaintenance(job)}>
                   {jobLabel(job, t)}
-                </VBtn>
+                </PgButton>
               ))}
             </div>
             {maintenanceResult.value !== null && (
@@ -747,7 +747,7 @@ const ObjectStoragePage = dc(() => {
           width={720}
           v-slots={{
             footer: () => detail.value ? (
-              <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyObjectSummary()}>{t("Copy object summary")}</VBtn>
+              <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyObjectSummary()}>{t("Copy object summary")}</PgButton>
             ) : null,
           }}
         >
@@ -785,9 +785,9 @@ const ObjectStoragePage = dc(() => {
               {canLegalHold.value && (
                 <div class="d-flex ga-2">
                   {detail.value.object.legalHold ? (
-                    <VBtn color="error" variant="tonal" onClick={() => openHold(detail.value!.object, "lift")}>{t("Request legal hold lift")}</VBtn>
+                    <PgButton color="error" variant="tonal" onClick={() => openHold(detail.value!.object, "lift")}>{t("Request legal hold lift")}</PgButton>
                   ) : (
-                    <VBtn color="error" variant="tonal" onClick={() => openHold(detail.value!.object, "place")}>{t("Place legal hold")}</VBtn>
+                    <PgButton color="error" variant="tonal" onClick={() => openHold(detail.value!.object, "place")}>{t("Place legal hold")}</PgButton>
                   )}
                 </div>
               )}
@@ -796,7 +796,7 @@ const ObjectStoragePage = dc(() => {
         </SlideOverDrawer>
 
         <FormModal modelValue={Boolean(holdTarget.value)} onUpdate:modelValue={(value: boolean) => { if (!value) holdTarget.value = null; }} title={holdMode.value === "place" ? t("Place a legal hold?") : t("Request a legal-hold lift?")} subtitle={holdTarget.value?.originalFilename ?? holdTarget.value?.id ?? ""} size="sm" submitLabel={holdMode.value === "place" ? t("Place hold") : t("Submit for approval")} loading={holdSaving.value} danger={holdMode.value === "place"} errorMessage={holdError.value} onSubmit={() => void submitHold()}>
-          <VTextarea modelValue={holdReason.value} onUpdate:modelValue={(value: string) => { holdReason.value = value; holdError.value = ""; }} label={t("Hold reason (audit trail)")} rows={3} variant="outlined" autofocus />
+          <PgTextarea modelValue={holdReason.value} onUpdate:modelValue={(value: string) => { holdReason.value = value; holdError.value = ""; }} label={t("Hold reason (audit trail)")} rows={3} variant="outlined" autofocus />
           {holdMode.value === "lift" && <ThemedText class="text-medium-emphasis mt-2">{t("A different authorized checker must approve the lift.")}</ThemedText>}
           <FormChecklist
             checks={[...HOLD_CHECKS]}

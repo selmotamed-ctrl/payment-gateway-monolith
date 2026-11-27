@@ -1,16 +1,16 @@
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
-import { VBtn } from "@/components/vael/VuetifyShim";
+import {PgButton} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { StatusBadge, formatHumanStatus } from "@/components/ui/StatusBadge";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { StateView } from "@/components/StateView";
+import {SlideOverDrawer} from "@pg/ui";
+import {StatusBadge, formatHumanStatus} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {StateView} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -230,9 +230,9 @@ export const JournalEntryDrawer = defineComponent({
                         footer: () => (
                             <>
                                 {reference.value.kind === "link" && (
-                                    <VBtn variant="tonal" prependIcon="mdi-open-in-new" onClick={openReference}>{t("Open record")}</VBtn>
+                                    <PgButton variant="tonal" prependIcon="mdi-open-in-new" onClick={openReference}>{t("Open record")}</PgButton>
                                 )}
-                                <VBtn variant="text" onClick={() => emit("close")}>{t("Close")}</VBtn>
+                                <PgButton variant="text" onClick={() => emit("close")}>{t("Close")}</PgButton>
                             </>
                         ),
                     }}

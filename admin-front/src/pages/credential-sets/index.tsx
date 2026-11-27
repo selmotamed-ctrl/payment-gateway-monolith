@@ -2,29 +2,29 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VAutocomplete, VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgAutocomplete, PgButton, PgTextField} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
-import { StatusBadge, formatHumanStatus } from "@/components/ui/StatusBadge";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions, type RowActionItem } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import { createOptionsLoader } from "@/components/Table/referenceOptions";
-import type { TableHeader } from "@/components/Table/types";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import {StatusBadge, formatHumanStatus} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions, type RowActionItem} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import { createOptionsLoader } from "@/tables/referenceOptions";
+import type { TableHeader } from "@pg/ui";
 import { errorCodeOf, formatDate, formatDateTime } from "@/components/ledger/format";
 import ReasonModal from "@/pages/merchants/components/ReasonModal";
 import EntriesEditor from "./components/EntriesEditor";
@@ -546,7 +546,7 @@ const CredentialSetsPage = dc(() => {
             <>
                 {data &&
                     actions.map((action) => (
-                        <VBtn
+                        <PgButton
                             key={action}
                             variant={action === "revoke" ? "outlined" : "tonal"}
                             color={action === "revoke" ? "error" : action === "verify" ? "primary" : undefined}
@@ -555,16 +555,16 @@ const CredentialSetsPage = dc(() => {
                             onClick={() => runAction(action, data)}
                         >
                             {actionLabel(action)}
-                        </VBtn>
+                        </PgButton>
                     ))}
                 {data && (
-                    <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyCredentialSummary()}>
+                    <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyCredentialSummary()}>
                         {t("Copy summary")}
-                    </VBtn>
+                    </PgButton>
                 )}
-                <VBtn variant="text" onClick={closeDrawer}>
+                <PgButton variant="text" onClick={closeDrawer}>
                     {t("Close")}
-                </VBtn>
+                </PgButton>
             </>
         );
     };
@@ -576,13 +576,13 @@ const CredentialSetsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Credential Sets")} subtitle={t("Provider credentials held in the vault. Secrets are write-only and are never displayed.")} badge={t("Vault")} badgeTone="info">(
                         <>
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshTable}>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshTable}>
                                 {t("Refresh")}
-                            </VBtn>
+                            </PgButton>
                             {canWrite.value && (
-                                <VBtn color="primary" variant="flat" prependIcon="mdi-plus" onClick={openCreate}>
+                                <PgButton color="primary" variant="flat" prependIcon="mdi-plus" onClick={openCreate}>
                                     {t("New credential set")}
-                                </VBtn>
+                                </PgButton>
                             )}
                         </>
                     )</PageHeader>
@@ -663,7 +663,7 @@ const CredentialSetsPage = dc(() => {
                 onSubmit={() => void submitCreate()}
             >
                 <FormField label={t("Gateway")} required error={createDraftError("GATEWAY_REQUIRED")}>
-                    <VSelect
+                    <PgAutocomplete
                         items={gatewayItems.value}
                         itemTitle="title"
                         itemValue="value"
@@ -673,10 +673,10 @@ const CredentialSetsPage = dc(() => {
                 </FormField>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px" }}>
                     <FormField label={t("Environment")} required>
-                        <VSelect items={ENV_ITEMS} modelValue={createDraft.value.env} onUpdate:modelValue={(value: string | null) => void (createDraft.value.env = value ?? "SANDBOX")} />
+                        <PgAutocomplete items={ENV_ITEMS} modelValue={createDraft.value.env} onUpdate:modelValue={(value: string | null) => void (createDraft.value.env = value ?? "SANDBOX")} />
                     </FormField>
                     <FormField label={t("Owner")} required>
-                        <VSelect
+                        <PgAutocomplete
                             items={OWNER_ITEMS}
                             modelValue={createDraft.value.ownerType}
                             onUpdate:modelValue={(value: string | null) => {
@@ -687,7 +687,7 @@ const CredentialSetsPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Settlement target")} required>
-                        <VSelect
+                        <PgAutocomplete
                             items={SETTLEMENT_ITEMS}
                             modelValue={createDraft.value.settlementTarget}
                             onUpdate:modelValue={(value: string | null) => void (createDraft.value.settlementTarget = value ?? "PLATFORM_CLEARING")}
@@ -696,7 +696,7 @@ const CredentialSetsPage = dc(() => {
                 </div>
                 {createDraft.value.ownerType === "MERCHANT" && (
                     <FormField label={t("Owning merchant")} required error={createDraftError("OWNER_MERCHANT_REQUIRED")}>
-                        <VAutocomplete
+                        <PgAutocomplete
                             items={merchantItems.value}
                             itemTitle="title"
                             itemValue="value"
@@ -712,7 +712,7 @@ const CredentialSetsPage = dc(() => {
                     hint={t("The merchant identifier at the provider. Optional.")}
                     error={createDraftError("EXTERNAL_ID_LENGTH")}
                 >
-                    <VTextField
+                    <PgTextField
                         modelValue={createDraft.value.externalMerchantId}
                         onUpdate:modelValue={(value: string) => (createDraft.value.externalMerchantId = value)}
                         {...{ autocomplete: "off" }}

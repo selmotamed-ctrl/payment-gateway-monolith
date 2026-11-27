@@ -1,25 +1,25 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn, VFileInput, VSelect, VTextField, VTextarea, VTimeline, VTimelineItem } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
+import {VAlert, PgButton, PgFileUpload, PgAutocomplete, PgTextField, PgTextarea, PgTimeline, PgTimelineItem} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { toDecimal } from "@/utils/money";
 
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { FormField } from "@/components/ui/FormField";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { DescriptionList, type DescriptionItem } from "@/components/ui/DescriptionList";
-import { EmptyState } from "@/components/ui/EmptyState";
+import {SurfaceCard} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {DescriptionList, type DescriptionItem} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
 type BusinessProfile = {
     legalName: string;
     tradeName: string;
@@ -376,7 +376,7 @@ const OnboardingPage = dc(() => {
                                 )}
                                 <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap", alignItems: "flex-end" }}>
                                     <FormField label={t("Replacement file")} style={{ minWidth: "260px" }}>
-                                        <VFileInput
+                                        <PgFileUpload
                                             modelValue={revalidationFiles.value[request.id] ?? null}
                                             onUpdate:modelValue={(value: File | File[] | null) => {
                                                 revalidationFiles.value[request.id] = Array.isArray(value) ? (value[0] ?? null) : value;
@@ -386,14 +386,14 @@ const OnboardingPage = dc(() => {
                                         />
                                     </FormField>
                                     <FormField label={t("Expiry date")} style={{ minWidth: "180px" }}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={revalidationExpiry.value[request.id] ?? ""}
                                             onUpdate:modelValue={(value: string) => (revalidationExpiry.value[request.id] = value)}
                                             density="compact"
                                             hideDetails
                                         />
                                     </FormField>
-                                    <VBtn
+                                    <PgButton
                                         size="small"
                                         variant="flat"
                                         color="warning"
@@ -401,7 +401,7 @@ const OnboardingPage = dc(() => {
                                         onClick={() => void uploadRevalidation(request)}
                                     >
                                         {t("Upload replacement")}
-                                    </VBtn>
+                                    </PgButton>
                                 </ThemedView>
                             </ThemedView>
                         ))}
@@ -415,9 +415,9 @@ const OnboardingPage = dc(() => {
                 ) : (
                     <>
                         <SurfaceCard>
-                            <VTimeline density="compact" side="end" align="start">
+                            <PgTimeline density="compact" side="end" align="start">
                                 {STEPS.map((item, index) => (
-                                    <VTimelineItem key={item.key} size="small">
+                                    <PgTimelineItem key={item.key} size="small">
                                         <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
                                             <ThemedText
                                                 style={{
@@ -431,44 +431,44 @@ const OnboardingPage = dc(() => {
                                                 <StatusBadge status="APPROVED" label={t("Approved")} />
                                             )}
                                         </div>
-                                    </VTimelineItem>
+                                    </PgTimelineItem>
                                 ))}
-                            </VTimeline>
+                            </PgTimeline>
                         </SurfaceCard>
 
                         {step.value === 1 && (
                             <SurfaceCard title={t("Business Profile")} bodyGap="12px">
                                 <ThemedView style={{ flexDirection: "row", gap: "14px", flexWrap: "wrap" }}>
                                     <FormField label={t("Legal Name")} required style={{ minWidth: "240px", flex: "1 1 240px" }}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={profile.value.legalName}
                                             onUpdate:modelValue={(v: string) => (profile.value.legalName = v)}
                                             hideDetails
                                         />
                                     </FormField>
                                     <FormField label={t("Trade Name")} required style={{ minWidth: "240px", flex: "1 1 240px" }}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={profile.value.tradeName}
                                             onUpdate:modelValue={(v: string) => (profile.value.tradeName = v)}
                                             hideDetails
                                         />
                                     </FormField>
                                     <FormField label={t("Registration Number")} required style={{ minWidth: "220px", flex: "1 1 220px" }}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={profile.value.registrationNumber}
                                             onUpdate:modelValue={(v: string) => (profile.value.registrationNumber = v)}
                                             hideDetails
                                         />
                                     </FormField>
                                     <FormField label={t("Tax ID")} required style={{ minWidth: "200px", flex: "1 1 200px" }}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={profile.value.taxId}
                                             onUpdate:modelValue={(v: string) => (profile.value.taxId = v)}
                                             hideDetails
                                         />
                                     </FormField>
                                     <FormField label={t("Business Category")} required style={{ minWidth: "220px", flex: "1 1 220px" }}>
-                                        <VSelect
+                                        <PgAutocomplete
                                             items={CATEGORIES}
                                             modelValue={profile.value.businessCategory}
                                             onUpdate:modelValue={(v: string) => (profile.value.businessCategory = v)}
@@ -476,35 +476,35 @@ const OnboardingPage = dc(() => {
                                         />
                                     </FormField>
                                     <FormField label={t("Phone")} style={{ minWidth: "180px", flex: "1 1 180px" }}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={profile.value.contactPhone}
                                             onUpdate:modelValue={(v: string) => (profile.value.contactPhone = v)}
                                             hideDetails
                                         />
                                     </FormField>
                                     <FormField label={t("Email")} style={{ minWidth: "220px", flex: "1 1 220px" }}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={profile.value.contactEmail}
                                             onUpdate:modelValue={(v: string) => (profile.value.contactEmail = v)}
                                             hideDetails
                                         />
                                     </FormField>
                                     <FormField label={t("Expected Monthly Volume")} style={{ minWidth: "220px", flex: "1 1 220px" }}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={profile.value.expectedMonthlyVolume}
                                             onUpdate:modelValue={(v: string) => (profile.value.expectedMonthlyVolume = v)}
                                             hideDetails
                                         />
                                     </FormField>
                                     <FormField label={t("Currency")} style={{ minWidth: "130px", flex: "0 1 130px" }}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={profile.value.currency}
                                             onUpdate:modelValue={(v: string) => (profile.value.currency = v.toUpperCase())}
                                             hideDetails
                                         />
                                     </FormField>
                                     <FormField label={t("Website")} style={{ minWidth: "220px", flex: "1 1 220px" }}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={profile.value.website}
                                             onUpdate:modelValue={(v: string) => (profile.value.website = v)}
                                             hideDetails
@@ -512,23 +512,23 @@ const OnboardingPage = dc(() => {
                                     </FormField>
                                 </ThemedView>
                                 <FormField label={t("Registered Address")}>
-                                    <VTextField
+                                    <PgTextField
                                         modelValue={profile.value.registeredAddress}
                                         onUpdate:modelValue={(v: string) => (profile.value.registeredAddress = v)}
                                         hideDetails
                                     />
                                 </FormField>
                                 <FormField label={t("Sales Channel Description")}>
-                                    <VTextarea
+                                    <PgTextarea
                                         modelValue={profile.value.businessUseDescription}
                                         onUpdate:modelValue={(v: string) => (profile.value.businessUseDescription = v)}
                                         rows={3}
                                         hideDetails
                                     />
                                 </FormField>
-                                <VBtn variant="tonal" loading={saving.value} onClick={() => void saveProfile()}>
+                                <PgButton variant="tonal" loading={saving.value} onClick={() => void saveProfile()}>
                                     {t("Save")}
-                                </VBtn>
+                                </PgButton>
                             </SurfaceCard>
                         )}
 
@@ -538,9 +538,9 @@ const OnboardingPage = dc(() => {
                                 bodyGap="12px"
                                 v-slots={{
                                     headerActions: () => (
-                                        <VBtn variant="tonal" size="small" onClick={addOwner}>
+                                        <PgButton variant="tonal" size="small" onClick={addOwner}>
                                             {t("Add")}
-                                        </VBtn>
+                                        </PgButton>
                                     ),
                                 }}
                             >
@@ -556,14 +556,14 @@ const OnboardingPage = dc(() => {
                                             style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap", alignItems: "flex-end" }}
                                         >
                                             <FormField label={t("Full Name")} required style={{ minWidth: "200px", flex: "1 1 200px" }}>
-                                                <VTextField
+                                                <PgTextField
                                                     modelValue={owner.fullName}
                                                     onUpdate:modelValue={(v: string) => (owners.value[index]!.fullName = v)}
                                                     hideDetails
                                                 />
                                             </FormField>
                                             <FormField label={t("Ownership Percent")} required style={{ minWidth: "160px", flex: "0 1 160px" }}>
-                                                <VTextField
+                                                <PgTextField
                                                     modelValue={owner.ownershipPercent}
                                                     onUpdate:modelValue={(v: string) =>
                                                         (owners.value[index]!.ownershipPercent = v)
@@ -572,14 +572,14 @@ const OnboardingPage = dc(() => {
                                                 />
                                             </FormField>
                                             <FormField label={t("National ID")} style={{ minWidth: "180px", flex: "1 1 180px" }}>
-                                                <VTextField
+                                                <PgTextField
                                                     modelValue={owner.nationalId}
                                                     onUpdate:modelValue={(v: string) => (owners.value[index]!.nationalId = v)}
                                                     hideDetails
                                                 />
                                             </FormField>
                                             <FormField label={t("Date Of Birth")} style={{ minWidth: "170px", flex: "0 1 170px" }}>
-                                                <VTextField
+                                                <PgTextField
                                                     modelValue={owner.dateOfBirth}
                                                     onUpdate:modelValue={(v: string) =>
                                                         (owners.value[index]!.dateOfBirth = v)
@@ -588,20 +588,20 @@ const OnboardingPage = dc(() => {
                                                 />
                                             </FormField>
                                             <FormField label={t("Nationality")} style={{ minWidth: "150px", flex: "0 1 150px" }}>
-                                                <VTextField
+                                                <PgTextField
                                                     modelValue={owner.nationality}
                                                     onUpdate:modelValue={(v: string) => (owners.value[index]!.nationality = v)}
                                                     hideDetails
                                                 />
                                             </FormField>
-                                            <VBtn
+                                            <PgButton
                                                 size="x-small"
                                                 variant="text"
                                                 color="error"
                                                 onClick={() => (owners.value = owners.value.filter((_, i) => i !== index))}
                                             >
                                                 {t("Remove")}
-                                            </VBtn>
+                                            </PgButton>
                                         </ThemedView>
                                     ))
                                 )}
@@ -609,9 +609,9 @@ const OnboardingPage = dc(() => {
                                 <ThemedText style={{ fontSize: "13px", color: "var(--pg-ink-muted)" }}>
                                     {t("Ownership Percent")}: {totalOwnership.value.toString()}%
                                 </ThemedText>
-                                <VBtn variant="tonal" loading={saving.value} onClick={() => void saveOwners()}>
+                                <PgButton variant="tonal" loading={saving.value} onClick={() => void saveOwners()}>
                                     {t("Save")}
-                                </VBtn>
+                                </PgButton>
                             </SurfaceCard>
                         )}
 
@@ -621,9 +621,9 @@ const OnboardingPage = dc(() => {
                                 bodyGap="12px"
                                 v-slots={{
                                     headerActions: () => (
-                                        <VBtn variant="tonal" size="small" onClick={addDocument}>
+                                        <PgButton variant="tonal" size="small" onClick={addDocument}>
                                             {t("Add")}
-                                        </VBtn>
+                                        </PgButton>
                                     ),
                                 }}
                             >
@@ -639,7 +639,7 @@ const OnboardingPage = dc(() => {
                                             style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap", alignItems: "flex-end" }}
                                         >
                                             <FormField label={t("Document Type")} style={{ minWidth: "220px", flex: "1 1 220px" }}>
-                                                <VSelect
+                                                <PgAutocomplete
                                                     items={DOCUMENT_TYPES}
                                                     itemTitle="title"
                                                     itemValue="value"
@@ -649,7 +649,7 @@ const OnboardingPage = dc(() => {
                                                 />
                                             </FormField>
                                             <FormField label={t("Uploaded File")} style={{ minWidth: "260px", flex: "1 1 260px" }}>
-                                                <VFileInput
+                                                <PgFileUpload
                                                     modelValue={document.file}
                                                     onUpdate:modelValue={(v: File | File[] | null) => {
                                                         documents.value[index]!.file = Array.isArray(v) ? (v[0] ?? null) : v;
@@ -658,20 +658,20 @@ const OnboardingPage = dc(() => {
                                                 />
                                             </FormField>
                                             <FormField label={t("Expiry Date")} style={{ minWidth: "170px", flex: "0 1 170px" }}>
-                                                <VTextField
+                                                <PgTextField
                                                     modelValue={document.expiresOn}
                                                     onUpdate:modelValue={(v: string) => (documents.value[index]!.expiresOn = v)}
                                                     hideDetails
                                                 />
                                             </FormField>
-                                            <VBtn
+                                            <PgButton
                                                 size="small"
                                                 variant="tonal"
                                                 loading={saving.value}
                                                 onClick={() => void uploadDocument(document)}
                                             >
                                                 {t("Upload")}
-                                            </VBtn>
+                                            </PgButton>
                                         </ThemedView>
                                     ))
                                 )}
@@ -682,35 +682,35 @@ const OnboardingPage = dc(() => {
                             <SurfaceCard title={t("Bank Details")} bodyGap="12px">
                                 <ThemedView style={{ flexDirection: "row", gap: "14px", flexWrap: "wrap" }}>
                                     <FormField label={t("Bank")} style={{ minWidth: "220px", flex: "1 1 220px" }}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={payout.value.bankName}
                                             onUpdate:modelValue={(v: string) => (payout.value.bankName = v)}
                                             hideDetails
                                         />
                                     </FormField>
                                     <FormField label={t("Account Holder")} style={{ minWidth: "220px", flex: "1 1 220px" }}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={payout.value.accountHolder}
                                             onUpdate:modelValue={(v: string) => (payout.value.accountHolder = v)}
                                             hideDetails
                                         />
                                     </FormField>
                                     <FormField label={t("IBAN")} style={{ minWidth: "220px", flex: "1 1 220px" }}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={payout.value.iban}
                                             onUpdate:modelValue={(v: string) => (payout.value.iban = v.toUpperCase())}
                                             hideDetails
                                         />
                                     </FormField>
                                     <FormField label={t("Account Number")} style={{ minWidth: "200px", flex: "1 1 200px" }}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={payout.value.accountNumber}
                                             onUpdate:modelValue={(v: string) => (payout.value.accountNumber = v)}
                                             hideDetails
                                         />
                                     </FormField>
                                     <FormField label={t("SWIFT")} style={{ minWidth: "170px", flex: "0 1 170px" }}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={payout.value.swift}
                                             onUpdate:modelValue={(v: string) => (payout.value.swift = v.toUpperCase())}
                                             hideDetails
@@ -724,30 +724,30 @@ const OnboardingPage = dc(() => {
                             <SurfaceCard title={t("Submit Application")} bodyGap="12px">
                                 <DescriptionList items={reviewItems.value} columns={2} />
                                 <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                                    <VBtn color="primary" loading={saving.value} onClick={() => void submit()}>
+                                    <PgButton color="primary" loading={saving.value} onClick={() => void submit()}>
                                         {t("Submit Application")}
-                                    </VBtn>
+                                    </PgButton>
                                     {joinStatus.value && !["DRAFT", "APPROVED", "REJECTED", "WITHDRAWN"].includes(joinStatus.value) && (
-                                        <VBtn variant="tonal" color="warning" loading={saving.value} onClick={() => void withdraw()}>
+                                        <PgButton variant="tonal" color="warning" loading={saving.value} onClick={() => void withdraw()}>
                                             {t("Withdraw application")}
-                                        </VBtn>
+                                        </PgButton>
                                     )}
                                 </div>
                             </SurfaceCard>
                         )}
 
                         <ThemedView style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                            <VBtn variant="tonal" disabled={step.value <= 1} onClick={() => (step.value -= 1)}>
+                            <PgButton variant="tonal" disabled={step.value <= 1} onClick={() => (step.value -= 1)}>
                                 {t("Back")}
-                            </VBtn>
+                            </PgButton>
                             {step.value < STEPS.length ? (
-                                <VBtn
+                                <PgButton
                                     color="primary"
                                     disabled={!stepValid(step.value)}
                                     onClick={() => (step.value += 1)}
                                 >
                                     {t("Continue")}
-                                </VBtn>
+                                </PgButton>
                             ) : (
                                 <span />
                             )}

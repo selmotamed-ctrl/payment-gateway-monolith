@@ -3,18 +3,18 @@ import { computed, onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VAutocomplete, VBtn, VProgressCircular, VSelect, VSwitch, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { statusTone } from "@/components/Table/statusTone";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import type { TableHeader } from "@/components/Table/types";
+import {VAlert, PgAutocomplete, PgButton, PgSpinner, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {statusTone} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { useOpenQuery } from "@/composables/useOpenQuery";
 import { urlsMap } from "@/constants/urlsMap";
@@ -23,18 +23,18 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { useSafeguard } from "@/components/guide/useSafeguard";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
-import { SectionFields } from "@/components/SectionFields";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { JournalEntryDrawer } from "@/components/ledger/JournalEntryDrawer";
 import { LedgerRefLink } from "@/components/ledger/LedgerRefLink";
 type Adjustment = {
@@ -617,9 +617,9 @@ const AdjustmentsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Adjustments")} subtitle={t("Draft and review adjustments under maker-checker governance. Every adjustment requires independent finance approval before execution.")} badge={t("Four-Eyes Required")} badgeTone="warning">(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
-                            <VBtn color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("Propose")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</PgButton>
+                            <PgButton color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("Propose")}</PgButton>
                         </ThemedView>
                     )</PageHeader>
 
@@ -677,7 +677,7 @@ const AdjustmentsPage = dc(() => {
                     searchValue={search.value}
                     setSearchValue={(value) => (search.value = value)}
                     headers={headers.value}
-                    rowColor={(row) => (row.state === "PENDING_REVIEW" ? "#d97706" : row.state === "EXECUTING" ? "#2563eb" : row.state === "REJECTED" ? "#dc2626" : undefined)}
+                    rowColor={(row) => (row.state === "PENDING_REVIEW" ? "var(--pg-status-warning-dot)" : row.state === "EXECUTING" ? "var(--pg-status-info-dot)" : row.state === "REJECTED" ? "var(--pg-status-danger-dot)" : undefined)}
                     apiDataExtractor={(data) => {
                         const payload = data as { adjustments?: Adjustment[]; rows?: Adjustment[] };
                         return payload.adjustments ?? payload.rows ?? [];
@@ -728,15 +728,15 @@ const AdjustmentsPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <>
-                            {selected.value && <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyAdjustmentSummary()}>{t("Copy summary")}</VBtn>}
-                            <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
+                            {selected.value && <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyAdjustmentSummary()}>{t("Copy summary")}</PgButton>}
+                            <PgButton variant="text" onClick={closeDetails}>{t("Close")}</PgButton>
                         </>
                     ),
                 }}
             >
                 {detailLoading.value || !selected.value ? (
                     <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "280px", gap: "12px" }}>
-                        <VProgressCircular indeterminate size={52} color="primary" />
+                        <PgSpinner indeterminate size={52} color="primary" />
                         <ThemedText style={{ opacity: 0.65 }}>{t("Loading adjustment")}</ThemedText>
                     </ThemedView>
                 ) : (
@@ -767,7 +767,7 @@ const AdjustmentsPage = dc(() => {
                                     { label: t("Executed"), value: formatDateTime(selected.value.executedAt) },
                                 ]} />
                                 {selected.value.merchantId && (
-                                    <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "MerchantDetail", params: { id: selected.value?.merchantId ?? "" } })}>{t("Open merchant")}</VBtn>
+                                    <PgButton size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "MerchantDetail", params: { id: selected.value?.merchantId ?? "" } })}>{t("Open merchant")}</PgButton>
                                 )}
                             </ThemedView>
 
@@ -785,7 +785,7 @@ const AdjustmentsPage = dc(() => {
                                     { label: t("Provider refund ref"), value: <MonoRef value={selected.value.providerRefundRef ?? ""} /> },
                                 ]} />
                                 {selected.value.approvalRequestId && (
-                                    <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</VBtn>
+                                    <PgButton size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</PgButton>
                                 )}
                             </ThemedView>
                         </ThemedView>
@@ -829,7 +829,7 @@ const AdjustmentsPage = dc(() => {
                 </VAlert>
                 <SectionFields title={t("Adjustment details")}>
                     <FormField label={t("Adjustment type")} required sensitiveMakerChecker>
-                        <VSelect
+                        <PgAutocomplete
                             items={ADJUSTMENT_TYPES.map((value) => ({ title: value, value }))}
                             modelValue={form.value.type}
                             onUpdate:modelValue={(value: string) => (form.value.type = value)}
@@ -837,7 +837,7 @@ const AdjustmentsPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Amount")} required sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.amount}
                             onUpdate:modelValue={(value: string) => (form.value.amount = value)}
                             placeholder="0.0000"
@@ -845,7 +845,7 @@ const AdjustmentsPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Merchant")} required sensitiveMakerChecker>
-                        <VAutocomplete
+                        <PgAutocomplete
                             items={merchantOptions.value}
                             itemTitle="title"
                             itemValue="value"
@@ -860,7 +860,7 @@ const AdjustmentsPage = dc(() => {
                         required
                         sensitiveMakerChecker
                     >
-                        <VAutocomplete
+                        <PgAutocomplete
                             items={glAccountOptions.value}
                             itemTitle="title"
                             itemValue="value"
@@ -871,7 +871,7 @@ const AdjustmentsPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Reason")} required sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.reason}
                             onUpdate:modelValue={(value: string) => (form.value.reason = value)}
                             hideDetails
@@ -880,21 +880,21 @@ const AdjustmentsPage = dc(() => {
                 </SectionFields>
                 <SectionFields title={t("Source references")}>
                     <FormField label={t("Source attempt ID (optional)")} sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.sourceAttemptId}
                             onUpdate:modelValue={(value: string) => (form.value.sourceAttemptId = value)}
                             hideDetails
                         />
                     </FormField>
                     <FormField label={t("Dispute ID (optional)")} sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.disputeId}
                             onUpdate:modelValue={(value: string) => (form.value.disputeId = value)}
                             hideDetails
                         />
                     </FormField>
                     <FormField label={t("External dispute reference (optional)")} sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.externalDisputeRef}
                             onUpdate:modelValue={(value: string) => (form.value.externalDisputeRef = value)}
                             hideDetails
@@ -911,7 +911,7 @@ const AdjustmentsPage = dc(() => {
                     incompleteMessage={t("Complete all proposal checklist items before drafting")}
                 />
                 <FormField label={t("Reverse commission")} sensitiveMakerChecker>
-                    <VSwitch
+                    <PgSwitch
                         modelValue={form.value.reverseCommission}
                         onUpdate:modelValue={(value: unknown) => (form.value.reverseCommission = Boolean(value))}
                         hideDetails

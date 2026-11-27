@@ -3,10 +3,10 @@ import "./landing.css";
 import { computed, h, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Component } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn, VIcon } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgIcon} from "@pg/ui";
 import LogoSvg from "@/assets/images/logo.svg";
 import { setLocale } from "@/plugins/localization";
-import ThemeMenu from "@/components/ThemeMenu";
+import {PgThemeMenu as ThemeMenu} from "@pg/ui";
 import { HeroDemo } from "./HeroDemo";
 import { DeveloperSection } from "./DeveloperSection";
 import { FeePreview } from "./FeePreview";
@@ -265,9 +265,9 @@ const LandingPage = defineComponent({
                                     <svg class="pgl-underline" viewBox="0 0 200 12" preserveAspectRatio="none" aria-hidden="true">
                                         <defs>
                                             <linearGradient id="pgl-underline-grad" x1="0" x2="1" y1="0" y2="0">
-                                                <stop offset="0" stop-color="#3a63ff" />
-                                                <stop offset="0.55" stop-color="#7a55ff" />
-                                                <stop offset="1" stop-color="#0fb5a3" />
+                                                <stop offset="0" stop-color="var(--pg-accent-brand)" />
+                                                <stop offset="0.55" stop-color="var(--pg-accent-brand-hover)" />
+                                                <stop offset="1" stop-color="var(--pg-status-success-dot)" />
                                             </linearGradient>
                                         </defs>
                                         <path d="M3 8 C 40 2, 90 12, 130 6 S 185 4, 197 7" pathLength="300" />
@@ -335,12 +335,12 @@ const LandingPage = defineComponent({
                                 </button>
                             </div>
                             <ThemeMenu buttonClass="pgl-icon-btn" iconSize={17} />
-                            <VBtn to={{ name: "Login" }} variant="text" class="pgl-header__login">
+                            <PgButton to={{ name: "Login" }} variant="text" class="pgl-header__login">
                                 {t("Login")}
-                            </VBtn>
-                            <VBtn to={{ name: "Register" }} color="primary" class="pgl-header__cta">
+                            </PgButton>
+                            <PgButton to={{ name: "Register" }} color="primary" class="pgl-header__cta">
                                 {t("Get started")}
-                            </VBtn>
+                            </PgButton>
                         </div>
                     </div>
                 </header>
@@ -376,17 +376,17 @@ const LandingPage = defineComponent({
                                     )}
                                 </p>
                                 <div class="pgl-cta-row">
-                                    <VBtn to={{ name: "Register" }} color="primary" size="large" class="pgl-btn-primary" appendIcon={isRtl.value ? "mdi-arrow-left" : "mdi-arrow-right"}>
+                                    <PgButton to={{ name: "Register" }} color="primary" size="large" class="pgl-btn-primary" appendIcon={isRtl.value ? "mdi-arrow-left" : "mdi-arrow-right"}>
                                         {t("Create a merchant account")}
-                                    </VBtn>
-                                    <VBtn to={{ name: "Login" }} variant="outlined" size="large" class="pgl-btn-secondary">
+                                    </PgButton>
+                                    <PgButton to={{ name: "Login" }} variant="outlined" size="large" class="pgl-btn-secondary">
                                         {t("Sign in to the portal")}
-                                    </VBtn>
+                                    </PgButton>
                                 </div>
                                 <ul class="pgl-hero__proof">
                                     {["Bilingual hosted checkout", "KYB-verified before live money", "Ledger-derived balances"].map((item) => (
                                         <li key={item}>
-                                            <VIcon icon="mdi-check-circle" size={16} aria-hidden="true" />
+                                            <PgIcon icon="mdi-check-circle" size={16} aria-hidden="true" />
                                             {t(item)}
                                         </li>
                                     ))}
@@ -395,11 +395,11 @@ const LandingPage = defineComponent({
                             <div ref={heroStage} class="pgl-hero__demo">
                                 <span class="pgl-stage-glow" aria-hidden="true" />
                                 <span class="pgl-float pgl-float--a" aria-hidden="true">
-                                    <VIcon icon="mdi-shield-check-outline" size={16} />
+                                    <PgIcon icon="mdi-shield-check-outline" size={16} />
                                     {t("Trusted confirmation")}
                                 </span>
                                 <span class="pgl-float pgl-float--b" aria-hidden="true">
-                                    <VIcon icon="mdi-scale-balance" size={16} />
+                                    <PgIcon icon="mdi-scale-balance" size={16} />
                                     {/* dir on an inner span: `dir` on the positioned element would flip its own inset-inline-end. */}
                                     <span class="pgl-mono" dir="ltr">
                                         Σ Dr = Σ Cr
@@ -418,7 +418,7 @@ const LandingPage = defineComponent({
                                     <ul key={copy} class="pgl-marquee__group" aria-hidden={copy === 1 ? "true" : undefined}>
                                         {MARQUEE.map((item) => (
                                             <li key={item.label} class="pgl-marquee__item">
-                                                <VIcon icon={item.icon} size={18} aria-hidden="true" />
+                                                <PgIcon icon={item.icon} size={18} aria-hidden="true" />
                                                 {t(item.label)}
                                             </li>
                                         ))}
@@ -433,7 +433,7 @@ const LandingPage = defineComponent({
                             aria-label={marqueePaused.value ? t("Play ticker") : t("Pause ticker")}
                             onClick={() => (marqueePaused.value = !marqueePaused.value)}
                         >
-                            <VIcon icon={marqueePaused.value ? "mdi-play" : "mdi-pause"} size={16} aria-hidden="true" />
+                            <PgIcon icon={marqueePaused.value ? "mdi-play" : "mdi-pause"} size={16} aria-hidden="true" />
                         </button>
                     </div>
 
@@ -454,7 +454,7 @@ const LandingPage = defineComponent({
                                 {FLOW.map((node, index) => (
                                     <li key={node.title} class="pgl-flow__node" style={{ "--pgl-i": index }}>
                                         <span class="pgl-flow__icon" aria-hidden="true">
-                                            <VIcon icon={node.icon} size={20} />
+                                            <PgIcon icon={node.icon} size={20} />
                                         </span>
                                         <h3 class="pgl-h4">{t(node.title)}</h3>
                                         <p>{t(node.text)}</p>
@@ -491,7 +491,7 @@ const LandingPage = defineComponent({
                                     </div>
                                     <div class="pgl-mini-link" aria-hidden="true">
                                         <div class="pgl-mini-link__qr">
-                                            <VIcon icon="mdi-qrcode" size={64} />
+                                            <PgIcon icon="mdi-qrcode" size={64} />
                                         </div>
                                         <div class="pgl-mini-link__meta">
                                             <span class="pgl-mono" dir="ltr">
@@ -501,7 +501,7 @@ const LandingPage = defineComponent({
                                                 250.000 LYD
                                             </b>
                                             <span class="pgl-mini-link__lock">
-                                                <VIcon icon="mdi-lock" size={12} />
+                                                <PgIcon icon="mdi-lock" size={12} />
                                                 {t("Server-priced")}
                                             </span>
                                         </div>
@@ -576,7 +576,7 @@ const LandingPage = defineComponent({
                                 {/* Disputes */}
                                 <article data-spot="" class="pgl-cell pgl-cell--small" data-reveal style={{ "--pgl-i": 5 }}>
                                     <span class="pgl-icon-tile" aria-hidden="true">
-                                        <VIcon icon="mdi-timer-sand" size={18} />
+                                        <PgIcon icon="mdi-timer-sand" size={18} />
                                     </span>
                                     <h3 class="pgl-h3">{t("Disputes with deadlines")}</h3>
                                     <p>{t("See every chargeback, its evidence deadline, and upload your evidence in time.")}</p>
@@ -585,7 +585,7 @@ const LandingPage = defineComponent({
                                 {/* Team */}
                                 <article data-spot="" class="pgl-cell pgl-cell--small" data-reveal style={{ "--pgl-i": 6 }}>
                                     <span class="pgl-icon-tile" aria-hidden="true">
-                                        <VIcon icon="mdi-account-group-outline" size={18} />
+                                        <PgIcon icon="mdi-account-group-outline" size={18} />
                                     </span>
                                     <h3 class="pgl-h3">{t("Roles for your team")}</h3>
                                     <p>{t("Invite owners, accountants, cashiers and developers with scoped authorities.")}</p>
@@ -594,7 +594,7 @@ const LandingPage = defineComponent({
                                 {/* Merchant direct */}
                                 <article data-spot="" class="pgl-cell pgl-cell--small" data-reveal style={{ "--pgl-i": 7 }}>
                                     <span class="pgl-icon-tile" aria-hidden="true">
-                                        <VIcon icon="mdi-bank-outline" size={18} />
+                                        <PgIcon icon="mdi-bank-outline" size={18} />
                                     </span>
                                     <h3 class="pgl-h3">{t("Bring your own gateway")}</h3>
                                     <p>{t("Use your own gateway credentials and settle directly; the platform records only its commission.")}</p>
@@ -641,7 +641,7 @@ const LandingPage = defineComponent({
                                     {SECURITY.map((item, index) => (
                                         <li key={item.title} data-reveal style={{ "--pgl-i": index }}>
                                             <span class="pgl-icon-tile" aria-hidden="true">
-                                                <VIcon icon={item.icon} size={18} />
+                                                <PgIcon icon={item.icon} size={18} />
                                             </span>
                                             <div>
                                                 <h3 class="pgl-h4">{t(item.title)}</h3>
@@ -687,7 +687,7 @@ const LandingPage = defineComponent({
                                     <details key={item.q} class="pgl-faq__item">
                                         <summary>
                                             <span>{t(item.q)}</span>
-                                            <VIcon icon="mdi-plus" size={18} aria-hidden="true" class="pgl-faq__icon" />
+                                            <PgIcon icon="mdi-plus" size={18} aria-hidden="true" class="pgl-faq__icon" />
                                         </summary>
                                         <p>{t(item.a)}</p>
                                     </details>
@@ -704,17 +704,17 @@ const LandingPage = defineComponent({
                             </h2>
                             <p class="pgl-lede">{t("Create your account now and finish onboarding at your own pace.")}</p>
                             <div class="pgl-cta-row pgl-cta-row--center">
-                                <VBtn to={{ name: "Register" }} color="primary" size="large" class="pgl-btn-primary">
+                                <PgButton to={{ name: "Register" }} color="primary" size="large" class="pgl-btn-primary">
                                     {t("Create a merchant account")}
-                                </VBtn>
-                                <VBtn to={{ name: "Login" }} variant="outlined" size="large" class="pgl-btn-secondary">
+                                </PgButton>
+                                <PgButton to={{ name: "Login" }} variant="outlined" size="large" class="pgl-btn-secondary">
                                     {t("Sign in to the portal")}
-                                </VBtn>
+                                </PgButton>
                             </div>
                             <ul class="pgl-final__proof">
                                 {["Bilingual hosted checkout", "KYB-verified before live money", "Ledger-derived balances"].map((item) => (
                                     <li key={item}>
-                                        <VIcon icon="mdi-check-circle" size={16} aria-hidden="true" />
+                                        <PgIcon icon="mdi-check-circle" size={16} aria-hidden="true" />
                                         {t(item)}
                                     </li>
                                 ))}
@@ -728,18 +728,18 @@ const LandingPage = defineComponent({
                     <div class="pgl-container pgl-footer__inner">
                         {brand()}
                         <nav aria-label={t("Footer")} class="pgl-footer__links">
-                            <VBtn to={{ name: "Register" }} variant="text" size="small">
+                            <PgButton to={{ name: "Register" }} variant="text" size="small">
                                 {t("Create account")}
-                            </VBtn>
-                            <VBtn to={{ name: "Login" }} variant="text" size="small">
+                            </PgButton>
+                            <PgButton to={{ name: "Login" }} variant="text" size="small">
                                 {t("Login")}
-                            </VBtn>
-                            <VBtn to={{ name: "MerchantGuide" }} variant="text" size="small">
+                            </PgButton>
+                            <PgButton to={{ name: "MerchantGuide" }} variant="text" size="small">
                                 {t("Merchant guide")}
-                            </VBtn>
-                            <VBtn to={{ name: "MerchantDeveloperGuide" }} variant="text" size="small">
+                            </PgButton>
+                            <PgButton to={{ name: "MerchantDeveloperGuide" }} variant="text" size="small">
                                 {t("Developer guide")}
-                            </VBtn>
+                            </PgButton>
                         </nav>
                         <span class="pgl-footer__copy">
                             © <span class="pgl-tabular">{year}</span> {t("Payment Gateway")}

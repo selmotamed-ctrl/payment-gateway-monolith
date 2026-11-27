@@ -15,7 +15,7 @@ code:
   - merchant-front/src/state/**
   - merchant-front/src/utils/theme/index.ts
   - merchant-front/src/state/theme.ts
-  - merchant-front/src/components/ThemeMenu/index.tsx
+  - packages/ui/src/patterns/PgThemeControls.tsx
   - merchant-front/src/content/landing/landingModel.ts
   - merchant-front/src/constants/landingCatalogue.ts
 design_sources:
@@ -470,3 +470,14 @@ authorization-code + PKCE flow: the button receives `authorizationUrl`, the edge
 callback redirects to `/auth/google/finish?ticket=...`, and the page exchanges
 the one-time ticket for the normal session. All new pages are EN/AR and follow
 the existing AuthLayout/SurfaceCard/FormField system.
+
+## 2026 Fintech Vapor design system (`@pg/ui`)
+
+The portal no longer owns UI primitives. `PgProvider` + `@pg/ui` supply the app shell, buttons, fields,
+autocomplete, date input, checkbox, alerts, toasts, dialogs/drawers, metric strip, money/ref components and the
+table toolbar. `src/uiConfig.tsx` supplies the API client, error extractor, XLSX exporter, confirm dialog, router
+and clipboard to the package. The old `components/vael/VuetifyShim`, `components/ui/*`, `TextField`, `Card`,
+`AlertView`, `SnackBar`, `ThemeMenu` copies and `styles/{fintech-minimal,vael-shim,vael-theme}.css` are deleted.
+Feature-only `InputFields`/`FiltersContainer`/`DataTable`/`EChart`/`Printables` moved to `src/forms`,
+`src/tables`, `src/charts` and `src/printables`; no primitive is duplicated. Tokens are imported once in
+`main.ts` (`@pg/ui/tokens/index.css`). The UI gate (`bun run ui:audit`) passes with zero violations.

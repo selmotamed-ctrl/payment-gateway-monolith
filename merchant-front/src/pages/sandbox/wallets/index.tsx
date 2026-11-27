@@ -2,23 +2,23 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { StateView } from "@/components/StateView";
-import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
-import SandboxResourceTable from "@/components/sandbox/SandboxResourceTable";
-import { walletFilters, WALLET_STATUS } from "@/components/sandbox/sandboxFilters";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { SectionFields } from "@/components/SectionFields";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
+import {VAlert, PgButton, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { SandboxBanner } from "@/features/sandbox/SandboxBanner";
+import { SandboxResourceTable } from "@/features/sandbox/SandboxResourceTable";
+import { walletFilters, WALLET_STATUS } from "@/features/sandbox/sandboxFilters";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
 import { sandboxGet, sandboxPost, sandboxPatch, type SandboxSummaryResponse, type SandboxWalletRow } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -176,9 +176,9 @@ const SandboxWalletsPage = dc(() => {
         <ScreenContainer>
             <PageHeader title={t("Sandbox Wallets")} subtitle={t("Balances, ledger checkpoints and test controls for sandbox-only wallets.")} badge="SANDBOX" badgeTone="warning">(
                     <div class="d-flex flex-wrap ga-2">
-                        <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => { refresh.value?.(); void loadSummary(); }}>{t("Refresh")}</VBtn>
-                        <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                        <VBtn color="primary" prependIcon="mdi-plus" onClick={() => { formError.value = ""; createOpen.value = true; }}>{t("Create wallet")}</VBtn>
+                        <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => { refresh.value?.(); void loadSummary(); }}>{t("Refresh")}</PgButton>
+                        <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</PgButton>
+                        <PgButton color="primary" prependIcon="mdi-plus" onClick={() => { formError.value = ""; createOpen.value = true; }}>{t("Create wallet")}</PgButton>
                     </div>
                 )</PageHeader>
             <SandboxBanner subtitle={t("Wallet balance changes post real double-entry journal entries in the sandbox ledger.")} />
@@ -202,10 +202,10 @@ const SandboxWalletsPage = dc(() => {
             <FormModal modelValue={createOpen.value} onUpdate:modelValue={(v: any) => (createOpen.value = v)} title={t("Create sandbox wallet")} size="sm" loading={creating.value} errorMessage={formError.value} submitLabel={t("Create")} onSubmit={() => void create()}>
                 <SectionFields title={t("Wallet details")}>
                     <FormField label={t("Wallet name")} required>
-                        <VTextField modelValue={createForm.value.name} onUpdate:modelValue={(v: string) => (createForm.value.name = v)} hideDetails />
+                        <PgTextField modelValue={createForm.value.name} onUpdate:modelValue={(v: string) => (createForm.value.name = v)} hideDetails />
                     </FormField>
                     <FormField label={t("Currency")} required>
-                        <VTextField modelValue={createForm.value.currency} onUpdate:modelValue={(v: string) => (createForm.value.currency = v.toUpperCase())} hideDetails />
+                        <PgTextField modelValue={createForm.value.currency} onUpdate:modelValue={(v: string) => (createForm.value.currency = v.toUpperCase())} hideDetails />
                     </FormField>
                 </SectionFields>
             </FormModal>
@@ -222,11 +222,11 @@ const SandboxWalletsPage = dc(() => {
                 <SectionFields title={t("Action")}>
                     {target.value && !["FREEZE", "UNFREEZE"].includes(target.value.mode) ? (
                         <FormField label={t("Amount LYD")} required>
-                            <VTextField type="number" modelValue={actionAmount.value} onUpdate:modelValue={(v: string) => (actionAmount.value = v)} hideDetails />
+                            <PgTextField type="number" modelValue={actionAmount.value} onUpdate:modelValue={(v: string) => (actionAmount.value = v)} hideDetails />
                         </FormField>
                     ) : null}
                     <FormField label={t("Reason")}>
-                        <VTextField modelValue={actionReason.value} onUpdate:modelValue={(v: string) => (actionReason.value = v)} hideDetails />
+                        <PgTextField modelValue={actionReason.value} onUpdate:modelValue={(v: string) => (actionReason.value = v)} hideDetails />
                     </FormField>
                     <div class="text-caption text-medium-emphasis">{t("Current available")}: {target.value?.wallet.availableBalance} {target.value?.wallet.currency}</div>
                 </SectionFields>

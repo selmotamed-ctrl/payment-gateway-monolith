@@ -2,22 +2,22 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
-import { statusTone } from "@/components/Table/statusTone";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
-import { DescriptionList, type DescriptionItem } from "@/components/ui/DescriptionList";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {VAlert, PgButton} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import {statusTone} from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
+import {DescriptionList, type DescriptionItem} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import { JournalEntryDrawer } from "@/components/ledger/JournalEntryDrawer";
 import { LedgerRefLink } from "@/components/ledger/LedgerRefLink";
@@ -280,7 +280,7 @@ const MerchantTransactionDialog = dc(
                                 <ThemedText style={{ fontSize: "12px" }}>
                                     {operatorCase.kind} · {formatDateTime(operatorCase.slaDueAt)}
                                 </ThemedText>
-                                <VBtn
+                                <PgButton
                                     size="x-small"
                                     variant="text"
                                     onClick={() => {
@@ -289,7 +289,7 @@ const MerchantTransactionDialog = dc(
                                     }}
                                 >
                                     {t("Open case")}
-                                </VBtn>
+                                </PgButton>
                             </ThemedView>
                         ))}
                     </ThemedView>
@@ -304,9 +304,9 @@ const MerchantTransactionDialog = dc(
                                 <ThemedText style={{ fontSize: "12px" }}>
                                     {dispute.reasonCode ?? "—"} · {formatDateTime(dispute.createdAt)}
                                 </ThemedText>
-                                <VBtn size="x-small" variant="text" onClick={() => goTo({ name: "Disputes", query: { open: dispute.id } })}>
+                                <PgButton size="x-small" variant="text" onClick={() => goTo({ name: "Disputes", query: { open: dispute.id } })}>
                                     {t("Open dispute")}
-                                </VBtn>
+                                </PgButton>
                             </ThemedView>
                         ))}
                     </ThemedView>
@@ -320,9 +320,9 @@ const MerchantTransactionDialog = dc(
                                 <StatusBadge status={adjustment.state} label={adjustment.state} toneOverride={badgeTone(statusTone(adjustment.state))} />
                                 {redacted("amounts") ? restricted() : <MoneyDisplay amount={adjustment.amount} currency={currency} size="sm" />}
                                 {adjustment.journalEntryId && <LedgerRefLink value={adjustment.journalEntryId} truncate={12} label={t("Open journal entry")} onOpen={(id: string) => (journalEntryId.value = id)} />}
-                                <VBtn size="x-small" variant="text" onClick={() => goTo({ name: "Adjustments", query: { open: adjustment.id } })}>
+                                <PgButton size="x-small" variant="text" onClick={() => goTo({ name: "Adjustments", query: { open: adjustment.id } })}>
                                     {t("Open adjustment")}
-                                </VBtn>
+                                </PgButton>
                             </ThemedView>
                         ))}
                     </ThemedView>
@@ -492,9 +492,9 @@ const MerchantTransactionDialog = dc(
                     <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             {!isRoot.value && rootId() && (
-                                <VBtn size="x-small" variant="text" prependIcon="mdi-arrow-left" onClick={() => rootId() && switchAttempt(rootId()!)}>
+                                <PgButton size="x-small" variant="text" prependIcon="mdi-arrow-left" onClick={() => rootId() && switchAttempt(rootId()!)}>
                                     {t("Back to original attempt")}
-                                </VBtn>
+                                </PgButton>
                             )}
                             <ThemedText style={{ fontSize: "12px", opacity: 0.65, direction: "ltr" }}>{attempt.reference}</ThemedText>
                         </ThemedView>
@@ -536,29 +536,29 @@ const MerchantTransactionDialog = dc(
                             footer: () => (
                                 <>
                                     {footerActions.value.includes("inquire") && (
-                                        <VBtn variant="tonal" prependIcon="mdi-radar" loading={inquiring.value} onClick={openInquiry}>
+                                        <PgButton variant="tonal" prependIcon="mdi-radar" loading={inquiring.value} onClick={openInquiry}>
                                             {t("Schedule inquiry")}
-                                        </VBtn>
+                                        </PgButton>
                                     )}
                                     {footerActions.value.includes("adjustment") && detail.value && (
-                                        <VBtn
+                                        <PgButton
                                             variant="tonal"
                                             prependIcon="mdi-cash-refund"
                                             onClick={() => goTo({ name: "Adjustments", query: { attemptId: detail.value!.attempt.id, merchantId: detail.value!.merchant.id } })}
                                         >
                                             {t("Create refund / adjustment")}
-                                        </VBtn>
+                                        </PgButton>
                                     )}
                                     {footerActions.value.includes("dispute") && detail.value && (
-                                        <VBtn
+                                        <PgButton
                                             variant="tonal"
                                             prependIcon="mdi-gavel"
                                             onClick={() => goTo({ name: "Disputes", query: { attemptId: detail.value!.attempt.id, merchantId: detail.value!.merchant.id } })}
                                         >
                                             {t("Record dispute")}
-                                        </VBtn>
+                                        </PgButton>
                                     )}
-                                    <VBtn variant="text" onClick={close}>{t("Close")}</VBtn>
+                                    <PgButton variant="text" onClick={close}>{t("Close")}</PgButton>
                                 </>
                             ),
                         }}

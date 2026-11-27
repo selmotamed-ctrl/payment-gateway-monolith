@@ -1,4 +1,4 @@
-import type { StatusTone } from "@/components/StatusChip";
+import type { StatusTone } from "@pg/ui";
 
 export const COLUMN_HELP = {
     merchant: "The merchant that uploaded or owns this document.",

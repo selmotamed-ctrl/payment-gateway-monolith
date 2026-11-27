@@ -1,5 +1,5 @@
 import { dc } from "@/utils/dc";
-import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { ref } from "vue";
 import { useRoute } from "vue-router";
@@ -10,7 +10,7 @@ import { setUserState, type UserState } from "@/state/user";
 import { tokenFromLoginPayload } from "@/utils/security/sessionToken";
 import router from "@/router";
 import AuthLayout from "@/layouts/auth";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {SurfaceCard} from "@pg/ui";
 
 const GoogleFinishPage = dc(() => {
     const { t } = useLocale();
@@ -63,7 +63,7 @@ const GoogleFinishPage = dc(() => {
                     {error.value ? (
                         <>
                             <VAlert type="error" variant="tonal" density="compact">{error.value}</VAlert>
-                            <VBtn onClick={() => void router.push({ name: "Login" })}>{t("Back to sign in")}</VBtn>
+                            <PgButton onClick={() => void router.push({ name: "Login" })}>{t("Back to sign in")}</PgButton>
                         </>
                     ) : (
                         <VAlert type="info" variant="tonal" density="compact">{t("Completing sign-in…")}</VAlert>

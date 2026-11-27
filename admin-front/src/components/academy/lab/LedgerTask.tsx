@@ -2,7 +2,7 @@ import { type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
 import Decimal from "decimal.js";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {PgTextField, StatusBadge} from "@pg/ui";
 import type { LedgerTask as LedgerTaskType } from "@/content/academy";
 import { ledgerTotals, parseDecimal, type LedgerAnswer } from "../labScoring";
 
@@ -18,12 +18,8 @@ export const LedgerTask = defineComponent({
     },
     setup(props) {
         const { t } = useLocale();
-        const setCell = (account: string, side: "DR" | "CR", value: string, input: HTMLInputElement, previous: string) => {
-            if (!ALLOWED.test(value)) {
-                // Reject anything that is not a plain decimal: restore the previous text.
-                input.value = previous;
-                return;
-            }
+        const setCell = (account: string, side: "DR" | "CR", value: string) => {
+            if (value !== "" && !ALLOWED.test(value)) return;
             const cells = { ...(props.answer?.cells ?? {}) };
             cells[account] = { ...(cells[account] ?? {}), [side]: value };
             props.onChange({ ...(props.answer ?? {}), cells });
@@ -70,20 +66,16 @@ export const LedgerTask = defineComponent({
                                                 const invalid = raw !== "" && parseDecimal(raw) === null;
                                                 return (
                                                     <td class="ac-lab-num" key={side}>
-                                                        <input
+                                                        <PgTextField
                                                             class="ac-lab-input ac-lab-input--cell"
-                                                            type="text"
+                                                            density="compact"
+                                                            hideDetails
                                                             inputmode="decimal"
                                                             autocomplete="off"
                                                             dir="ltr"
-                                                            value={raw}
+                                                            modelValue={raw}
                                                             disabled={props.locked}
-                                                            aria-label={`${account} - ${side === "DR" ? t("Debit") : t("Credit")}`}
-                                                            aria-invalid={invalid ? "true" : undefined}
-                                                            onInput={(event: Event) => {
-                                                                const input = event.target as HTMLInputElement;
-                                                                setCell(account, side, input.value, input, raw);
-                                                            }}
+                                                            onUpdate:modelValue={(value: string) => setCell(account, side, value)}
                                                         />
                                                     </td>
                                                 );

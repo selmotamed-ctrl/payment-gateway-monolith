@@ -1,24 +1,24 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
-import { StatusBadge, formatHumanStatus, statusToTone } from "@/components/ui/StatusBadge";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { DataTable } from "@/components/Table/DataTable";
-import type { TableHeader } from "@/components/Table/types";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import {StatusBadge, formatHumanStatus, statusToTone} from "@pg/ui";
+import {MetricStrip, type MetricItem} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
@@ -597,36 +597,36 @@ const SystemBackupsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Backup management")} subtitle={t("Monitor WAL archiving, storage target health, backups, and restore drills.")} badge={t("Disaster recovery")} badgeTone="info">(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                            <VBtn
+                            <PgButton
                                 variant="tonal"
                                 prependIcon="mdi-refresh"
                                 loading={loading.value}
                                 onClick={() => void load()}
                             >
                                 {t("Refresh")}
-                            </VBtn>
+                            </PgButton>
                             {canWrite.value && (
-                                <VBtn
+                                <PgButton
                                     disabled={!actionsReady.value}
                                     variant="tonal"
                                     prependIcon="mdi-database-plus-outline"
                                     onClick={openTrigger}
                                 >
                                     {t("Run backup now")}
-                                </VBtn>
+                                </PgButton>
                             )}
                             {canWrite.value && (
-                                <VBtn
+                                <PgButton
                                     disabled={!actionsReady.value}
                                     variant="tonal"
                                     prependIcon="mdi-restore"
                                     onClick={openDrill}
                                 >
                                     {t("Run restore drill")}
-                                </VBtn>
+                                </PgButton>
                             )}
                             {canWrite.value && (
-                                <VBtn
+                                <PgButton
                                     disabled={!actionsReady.value}
                                     color="primary"
                                     variant="flat"
@@ -634,7 +634,7 @@ const SystemBackupsPage = dc(() => {
                                     onClick={openPolicy}
                                 >
                                     {t("Edit policy")}
-                                </VBtn>
+                                </PgButton>
                             )}
                         </ThemedView>
                     )</PageHeader>
@@ -965,7 +965,7 @@ const SystemBackupsPage = dc(() => {
                 onSubmit={() => void submitTrigger()}
             >
                 <FormField label={t("Backup target")} required>
-                    <VSelect
+                    <PgAutocomplete
                         items={targetOptions.value}
                         itemTitle="title"
                         itemValue="value"
@@ -974,7 +974,7 @@ const SystemBackupsPage = dc(() => {
                     />
                 </FormField>
                 <FormField label={t("Backup kind")} required>
-                    <VSelect
+                    <PgAutocomplete
                         items={kindOptions.value}
                         itemTitle="title"
                         itemValue="value"
@@ -1032,25 +1032,25 @@ const SystemBackupsPage = dc(() => {
                 onSubmit={() => void submitPolicy()}
             >
                 <FormField label={t("Full cron")} required>
-                    <VTextField
+                    <PgTextField
                         modelValue={policyForm.value.fullCron}
                         onUpdate:modelValue={(value: string) => (policyForm.value.fullCron = value)}
                     />
                 </FormField>
                 <FormField label={t("Delta cron")} required>
-                    <VTextField
+                    <PgTextField
                         modelValue={policyForm.value.deltaCron}
                         onUpdate:modelValue={(value: string) => (policyForm.value.deltaCron = value)}
                     />
                 </FormField>
                 <FormField label={t("Drill cron")} required>
-                    <VTextField
+                    <PgTextField
                         modelValue={policyForm.value.drillCron}
                         onUpdate:modelValue={(value: string) => (policyForm.value.drillCron = value)}
                     />
                 </FormField>
                 <FormField label={t("Full retention days")} required>
-                    <VTextField
+                    <PgTextField
                         type="number"
                         modelValue={policyForm.value.fullRetentionDays}
                         onUpdate:modelValue={(value: string) =>
@@ -1059,7 +1059,7 @@ const SystemBackupsPage = dc(() => {
                     />
                 </FormField>
                 <FormField label={t("WAL retention days")} required>
-                    <VTextField
+                    <PgTextField
                         type="number"
                         modelValue={policyForm.value.walRetentionDays}
                         onUpdate:modelValue={(value: string) =>
@@ -1077,7 +1077,7 @@ const SystemBackupsPage = dc(() => {
                     incompleteMessage={t("Complete all policy checklist items before submitting.")}
                 />
                 <FormField label={t("Alert lag threshold")} required>
-                    <VTextField
+                    <PgTextField
                         type="number"
                         modelValue={policyForm.value.alertLagSeconds}
                         onUpdate:modelValue={(value: string) =>

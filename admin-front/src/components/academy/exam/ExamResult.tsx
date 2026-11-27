@@ -2,14 +2,14 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { RouterLink } from "vue-router/experimental/vapor";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { MetricStrip } from "@/components/ui/MetricStrip";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {PgButton, PgIcon} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {MetricStrip} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
 import { showSnackBar } from "@/utils/snackBar";
 import type { ExamResult as ExamResultPayload, ExamResultItem } from "@/content/academy/apiTypes";
 import { fmtDate, fmtDateTime } from "../format";
@@ -80,7 +80,7 @@ export const ExamResult = dc((props: Props) => {
                     <div class="ac-stack ac-stack--sm">
                         <div class="ac-row ac-row--wrap ac-exam-rev__head">
                             <span class={["ac-exam-rev__verdict", `ac-exam-rev__verdict--${verdict}`]}>
-                                <VIcon icon={verdictIcon} size={18} />
+                                <PgIcon icon={verdictIcon} size={18} />
                                 {verdictWord}
                             </span>
                             {item.critical && (
@@ -100,7 +100,7 @@ export const ExamResult = dc((props: Props) => {
                                     const tone = o.correct ? "good" : o.selected ? "bad" : "";
                                     return (
                                         <li key={o.oid} class={["ac-choice", "ac-choice--locked", tone ? `ac-choice--${tone}` : ""]}>
-                                            <VIcon class="ac-exam-rev__mark" icon={o.correct ? "mdi-check-circle-outline" : o.selected ? "mdi-close-circle-outline" : "mdi-circle-small"} size={18} />
+                                            <PgIcon class="ac-exam-rev__mark" icon={o.correct ? "mdi-check-circle-outline" : o.selected ? "mdi-close-circle-outline" : "mdi-circle-small"} size={18} />
                                             <div class="ac-choice__label">
                                                 <span dir="auto">{o.text}</span>
                                                 {(o.selected || o.correct) && (
@@ -193,7 +193,7 @@ export const ExamResult = dc((props: Props) => {
         return (
             <div class="ac-exam-result">
                 <div class={["ac-exam-verdict", `ac-exam-verdict--${tone}`]} role="status" aria-live="polite">
-                    <VIcon class="ac-exam-verdict__icon" icon={r.passed ? "mdi-check-circle" : "mdi-close-circle"} size={32} />
+                    <PgIcon class="ac-exam-verdict__icon" icon={r.passed ? "mdi-check-circle" : "mdi-close-circle"} size={32} />
                     <div class="ac-exam-verdict__body">
                         <p class="ac-exam-verdict__title">{`${r.passed ? t("You passed") : t("Not passed this time")} — ${r.scorePercent}%`}</p>
                         <p class="ac-exam-verdict__sub">
@@ -204,9 +204,9 @@ export const ExamResult = dc((props: Props) => {
                             <p class="ac-exam-verdict__sub">{t("Your percentage was high enough, but a critical question was missed.")}</p>
                         )}
                         {!r.passed && <p class="ac-exam-verdict__sub">{t("This is part of learning. Review the topics below and try again when you are ready.")}</p>}
-                        <VBtn size="small" variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyExamResult()}>
+                        <PgButton size="small" variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyExamResult()}>
                             {t("Copy exam result")}
-                        </VBtn>
+                        </PgButton>
                     </div>
                 </div>
 
@@ -268,9 +268,9 @@ export const ExamResult = dc((props: Props) => {
                                             { label: t("Valid until"), value: fmtDate(r.badge.expiresAt) },
                                         ]}
                                     />
-                                    <VBtn color="primary" block prependIcon="mdi-certificate-outline" to={{ name: "AdminAcademyCertificate", params: { badgeId: r.badge.id } }}>
+                                    <PgButton color="primary" block prependIcon="mdi-certificate-outline" to={{ name: "AdminAcademyCertificate", params: { badgeId: r.badge.id } }}>
                                         {t("View certificate")}
-                                    </VBtn>
+                                    </PgButton>
                                 </div>
                             </SurfaceCard>
                         )}

@@ -1,7 +1,7 @@
 import { type PropType, type VNode } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VIcon } from "@/components/vael/VuetifyShim";
+import {PgIcon} from "@pg/ui";
 import type { Panel } from "@/content/academy";
 
 /** Safe inline renderer: turns `**bold**` into <strong>; everything else stays plain text (no v-html). */
@@ -37,7 +37,7 @@ const TAG_ICON: Record<ChoiceTagTone, string> = {
 /** Locked-state tag at the end of an answer row: MDI icon + the state in words (never colour alone). */
 export const choiceTag = (tone: ChoiceTagTone, text: string): VNode => (
     <span class="ac-choice__tag">
-        <VIcon icon={TAG_ICON[tone]} size={16} aria-hidden="true" />
+        <PgIcon icon={TAG_ICON[tone]} size={16} aria-hidden="true" />
         {text}
     </span>
 );
@@ -100,7 +100,7 @@ export const PanelView = defineComponent({
                                 <li class="ac-lab-timeline__item">
                                     <span class="ac-lab-timeline__time ac-ltr">{entry.t}</span>
                                     <span class={["ac-state", flag ? `ac-state--${flag.state}` : ""]} aria-hidden="true">
-                                        <VIcon icon={flag ? flag.icon : "mdi-circle-small"} size={16} />
+                                        <PgIcon icon={flag ? flag.icon : "mdi-circle-small"} size={16} />
                                     </span>
                                     <span dir="auto">
                                         {flag ? <strong>{t(flag.label)}: </strong> : null}

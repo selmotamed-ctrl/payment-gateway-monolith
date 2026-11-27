@@ -18,7 +18,7 @@ code:
   - core-back/scripts/backfillOperatorCases.ts
   - core-back/scripts/seedOperatorCaseShowcase.ts
   - admin-front/src/pages/operator-cases/**
-  - admin-front/src/components/Table/tableRegistry.ts
+  - admin-front/src/tables/tableRegistry.ts
 design_sources:
   - design/10-fixes/_0001_operator_cases.md
   - design/11-automation/background_automation_and_workers_plan.md

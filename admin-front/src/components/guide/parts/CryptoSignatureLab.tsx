@@ -1,9 +1,9 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { VAlert, VBtn, VCard, VCardText, VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
+import {VAlert, PgButton, PgCard, PgCardText, PgAutocomplete, PgTextField} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StatusChip} from "@pg/ui";
 
 
 type KvRow = { id: number; key: string; value: string };
@@ -137,9 +137,9 @@ export const CryptoSignatureLab = dc(() => {
     };
 
     return () => (
-        <VCard variant="outlined">
-            <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                <VSelect
+        <PgCard variant="outlined">
+            <PgCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <PgAutocomplete
                     modelValue={mode.value}
                     onUpdate:modelValue={(value: string | null) => (mode.value = value ?? "SORTED_KEY_VALUE_AMP")}
                     items={MODES}
@@ -148,40 +148,40 @@ export const CryptoSignatureLab = dc(() => {
                 <ThemedView style={{ gap: "8px" }}>
                     {rows.value.map((row) => (
                         <ThemedView key={row.id} style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                            <VTextField
+                            <PgTextField
                                 modelValue={row.key}
                                 onUpdate:modelValue={(value: string) => update(row.id, "key", value ?? "")}
                                 label="Key"
                                 style={{ flex: "1 1 160px" }}
                             />
-                            <VTextField
+                            <PgTextField
                                 modelValue={row.value}
                                 onUpdate:modelValue={(value: string) => update(row.id, "value", value ?? "")}
                                 label="Value"
                                 style={{ flex: "2 1 220px" }}
                             />
-                            <VBtn icon="mdi-delete-outline" variant="text" color="error" onClick={() => remove(row.id)} />
+                            <PgButton icon="mdi-delete-outline" variant="text" color="error" onClick={() => remove(row.id)} />
                         </ThemedView>
                     ))}
-                    <VBtn size="small" variant="tonal" prependIcon="mdi-plus" onClick={add} style={{ alignSelf: "flex-start" }}>
+                    <PgButton size="small" variant="tonal" prependIcon="mdi-plus" onClick={add} style={{ alignSelf: "flex-start" }}>
                         Add row
-                    </VBtn>
+                    </PgButton>
                 </ThemedView>
                 <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                    <VTextField
+                    <PgTextField
                         modelValue={timestamp.value}
                         onUpdate:modelValue={(value: string) => (timestamp.value = value ?? "")}
                         label="Timestamp"
                         style={{ flex: "1 1 160px" }}
                     />
-                    <VTextField
+                    <PgTextField
                         modelValue={secret.value}
                         onUpdate:modelValue={(value: string) => (secret.value = value ?? "")}
                         label="Secret (demo only)"
                         type="password"
                         style={{ flex: "1 1 220px" }}
                     />
-                    <VSelect
+                    <PgAutocomplete
                         modelValue={encoding.value}
                         onUpdate:modelValue={(value: string | null) => (encoding.value = value ?? "UTF8")}
                         items={ENCODINGS}
@@ -190,7 +190,7 @@ export const CryptoSignatureLab = dc(() => {
                     />
                 </ThemedView>
                 {mode.value === "TEMPLATE_STRING" ? (
-                    <VTextField
+                    <PgTextField
                         modelValue={template.value}
                         onUpdate:modelValue={(value: string) => (template.value = value ?? "")}
                         label="Template pattern"
@@ -203,9 +203,9 @@ export const CryptoSignatureLab = dc(() => {
                     </pre>
                 </ThemedView>
                 <ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-                    <VBtn prependIcon="mdi-fingerprint" onClick={() => void compute()}>
+                    <PgButton prependIcon="mdi-fingerprint" onClick={() => void compute()}>
                         Compute HMAC-SHA256
-                    </VBtn>
+                    </PgButton>
                     <StatusChip label={encoding.value === "HEX" ? "Moamalat-safe HEX key" : "UTF-8 key"} tone={encoding.value === "HEX" ? "success" : "warning"} size="x-small" />
                 </ThemedView>
                 {error.value ? (
@@ -219,8 +219,8 @@ export const CryptoSignatureLab = dc(() => {
                         <pre style={MONO}>{signature.value}</pre>
                     </VAlert>
                 ) : null}
-            </VCardText>
-        </VCard>
+            </PgCardText>
+        </PgCard>
     );
 });
 

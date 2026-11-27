@@ -3,19 +3,19 @@ import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VFileInput, VProgressCircular, VSelect, VSwitch, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
-import { statusTone } from "@/components/Table/statusTone";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import { DataTable } from "@/components/Table/DataTable";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues, type TableFilter } from "@/components/Table/filters";
-import type { TableHeader } from "@/components/Table/types";
+import {VAlert, PgButton, PgFileUpload, PgSpinner, PgAutocomplete, PgSwitch, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import {statusTone} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues, type TableFilter} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { useOpenQuery } from "@/composables/useOpenQuery";
 import { urlsMap } from "@/constants/urlsMap";
@@ -25,19 +25,19 @@ import { showSnackBar } from "@/utils/snackBar";
 import { useSafeguard } from "@/components/guide/useSafeguard";
 import { formatPlainNumber } from "@/utils/money";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
-import { SectionFields } from "@/components/SectionFields";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MetricStrip, type MetricItem} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { ColumnMappingBadges, ParserConfigBuilder, firstParserError } from "@/components/builders/ParserConfigBuilder";
 import {
     isParserConfigUnchanged,
@@ -751,14 +751,14 @@ const ReconciliationPage = dc(() => {
             Value: ({ row }: { row: ReconciliationItem }) =>
                 row.operatorCaseId ? (
                     <ThemedView style={{ gap: "2px" }}>
-                        <VBtn
+                        <PgButton
                             size="x-small"
                             variant="text"
                             prependIcon="mdi-lifebuoy"
                             onClick={() => void router.push({ name: "OperatorCaseDetail", params: { id: row.operatorCaseId ?? "" } })}
                         >
                             {row.operatorCase?.state ?? t("Open case")}
-                        </VBtn>
+                        </PgButton>
                         <MonoRef value={row.operatorCaseId} />
                     </ThemedView>
                 ) : (
@@ -777,7 +777,7 @@ const ReconciliationPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Reconciliation")} subtitle={t("Upload statements, monitor reconciliation runs, and resolve mismatches between gateway and ledger records.")} badge={t("Daily control")} badgeTone="info">(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => { void load(); runRefreshHook.value?.refreshAsIs(); }}>{t("Refresh")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => { void load(); runRefreshHook.value?.refreshAsIs(); }}>{t("Refresh")}</PgButton>
                         </ThemedView>
                     )</PageHeader>
 
@@ -828,7 +828,7 @@ const ReconciliationPage = dc(() => {
                                     <ThemedText type="defaultSemiBold">{t("Upload a statement")}</ThemedText>
                                     <SectionFields title={t("Statement upload")}>
                                         <FormField label={t("Statement source")} required>
-                                            <VSelect
+                                            <PgAutocomplete
                                                 items={sources.value.map((source) => ({ title: source.name, value: source.id }))}
                                                 modelValue={selectedSourceId.value}
                                                 onUpdate:modelValue={(value: string | null) => {
@@ -839,13 +839,13 @@ const ReconciliationPage = dc(() => {
                                             />
                                         </FormField>
                                         <FormField label={t("Period start")} required>
-                                            <VTextField type="date" modelValue={periodStart.value} onUpdate:modelValue={(value: string) => (periodStart.value = value)} hideDetails />
+                                            <PgTextField type="date" modelValue={periodStart.value} onUpdate:modelValue={(value: string) => (periodStart.value = value)} hideDetails />
                                         </FormField>
                                         <FormField label={t("Period end")} required>
-                                            <VTextField type="date" modelValue={periodEnd.value} onUpdate:modelValue={(value: string) => (periodEnd.value = value)} hideDetails />
+                                            <PgTextField type="date" modelValue={periodEnd.value} onUpdate:modelValue={(value: string) => (periodEnd.value = value)} hideDetails />
                                         </FormField>
                                         <FormField label={t("Currency")} hint={t("Three-letter ISO code; leave blank to use the source/attempt currency.")}>
-                                            <VTextField
+                                            <PgTextField
                                                 modelValue={uploadCurrency.value}
                                                 onUpdate:modelValue={(value: string) => { uploadCurrency.value = value.toUpperCase(); }}
                                                 placeholder="LYD"
@@ -853,7 +853,7 @@ const ReconciliationPage = dc(() => {
                                             />
                                         </FormField>
                                         <FormField label={t("Automatic")}>
-                                            <VSwitch
+                                            <PgSwitch
                                                 modelValue={uploadAutoPost.value}
                                                 onUpdate:modelValue={(value: boolean | null) => (uploadAutoPost.value = !!value)}
                                                 color="primary"
@@ -861,7 +861,7 @@ const ReconciliationPage = dc(() => {
                                             />
                                         </FormField>
                                         <FormField label={t("Statement file")} required>
-                                            <VFileInput modelValue={file.value} onUpdate:modelValue={(value: File | File[] | null) => void onFileChanged(value)} hideDetails />
+                                            <PgFileUpload modelValue={file.value} onUpdate:modelValue={(value: File | File[] | null) => void onFileChanged(value)} hideDetails />
                                         </FormField>
                                     </SectionFields>
                                     <FormChecklist
@@ -873,7 +873,7 @@ const ReconciliationPage = dc(() => {
                                         complete={uploadChecklistComplete.value}
                                         incompleteMessage={t("Complete all upload checklist items before uploading")}
                                     />
-                                    <VBtn color="primary" loading={uploadLoading.value} disabled={!selectedSourceId.value || !file.value || !uploadChecklistComplete.value} onClick={() => void upload()}>{t("Upload")}</VBtn>
+                                    <PgButton color="primary" loading={uploadLoading.value} disabled={!selectedSourceId.value || !file.value || !uploadChecklistComplete.value} onClick={() => void upload()}>{t("Upload")}</PgButton>
                                 </SurfaceCardText>
                             </SurfaceCard>
 
@@ -1012,7 +1012,7 @@ const ReconciliationPage = dc(() => {
                 <ThemedText style={{ fontSize: "13px" }}>{editingSource.value?.name}</ThemedText>
                 <SectionFields title={t("Source configuration")}>
                     <FormField label={t("Active")}>
-                        <VSwitch
+                        <PgSwitch
                             modelValue={sourceForm.value.active}
                             onUpdate:modelValue={(value: boolean | null) => (sourceForm.value.active = !!value)}
                             color="primary"
@@ -1020,13 +1020,13 @@ const ReconciliationPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Schedule cron")}>
-                        <VTextField modelValue={sourceForm.value.scheduleCron} onUpdate:modelValue={(value: string) => (sourceForm.value.scheduleCron = value)} hideDetails />
+                        <PgTextField modelValue={sourceForm.value.scheduleCron} onUpdate:modelValue={(value: string) => (sourceForm.value.scheduleCron = value)} hideDetails />
                     </FormField>
                     <FormField label={t("Settlement lag days")}>
-                        <VTextField type="number" modelValue={sourceForm.value.settlementLagDays} onUpdate:modelValue={(value: string) => (sourceForm.value.settlementLagDays = value)} hideDetails />
+                        <PgTextField type="number" modelValue={sourceForm.value.settlementLagDays} onUpdate:modelValue={(value: string) => (sourceForm.value.settlementLagDays = value)} hideDetails />
                     </FormField>
                     <FormField label={t("Dedupe key template")}>
-                        <VTextField modelValue={sourceForm.value.dedupeKeyTemplate} onUpdate:modelValue={(value: string) => (sourceForm.value.dedupeKeyTemplate = value)} hideDetails />
+                        <PgTextField modelValue={sourceForm.value.dedupeKeyTemplate} onUpdate:modelValue={(value: string) => (sourceForm.value.dedupeKeyTemplate = value)} hideDetails />
                     </FormField>
                 </SectionFields>
                 <SectionFields title={t("Statement parser")} subtitle={t("How uploaded statement files of this source are read.")}>
@@ -1057,17 +1057,17 @@ const ReconciliationPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" prependIcon="mdi-file-download-outline" disabled={!selectedRun.value?.storageObjectId} onClick={() => void downloadStatement()}>{t("Download statement")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!selectedRun.value} onClick={() => void copyRunSummary()}>{t("Copy summary")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export items")}</VBtn>
-                            <VBtn variant="text" onClick={closeRunDetails}>{t("Close")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-file-download-outline" disabled={!selectedRun.value?.storageObjectId} onClick={() => void downloadStatement()}>{t("Download statement")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-content-copy" disabled={!selectedRun.value} onClick={() => void copyRunSummary()}>{t("Copy summary")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export items")}</PgButton>
+                            <PgButton variant="text" onClick={closeRunDetails}>{t("Close")}</PgButton>
                         </ThemedView>
                     ),
                 }}
             >
                 {detailLoading.value || !selectedRun.value ? (
                     <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "280px", gap: "12px" }}>
-                        <VProgressCircular indeterminate size={52} color="primary" />
+                        <PgSpinner indeterminate size={52} color="primary" />
                         <ThemedText style={{ opacity: 0.65 }}>{t("Loading reconciliation run")}</ThemedText>
                     </ThemedView>
                 ) : (
@@ -1101,7 +1101,7 @@ const ReconciliationPage = dc(() => {
 
                         <ThemedView style={{ flexDirection: "row", alignItems: "flex-end", gap: "10px", flexWrap: "wrap" }}>
                             <FormField label={t("Filter by result")}>
-                                <VSelect
+                                <PgAutocomplete
                                     items={[
                                         { title: t("All results"), value: "ALL" },
                                         ...Object.entries(selectedRun.value.itemResultCounts ?? {}).map(([result, count]) => ({

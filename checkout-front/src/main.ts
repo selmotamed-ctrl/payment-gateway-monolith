@@ -11,9 +11,7 @@ import { i18n } from "@/plugins/i18n";
 import App from "./App";
 
 import "@/assets/fonts/fonts.css";
-import "@/styles/fintech-minimal.css";
-import "@/styles/vael-theme.css";
-import "@/styles/vael-shim.css";
+import "@pg/ui/tokens/index.css";
 
 const app = createVaporApp(App);
 app.use(formPlugin, {

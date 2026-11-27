@@ -30,21 +30,13 @@ type ComponentOptionsLike = {
 const invokeRender = (render: any): any => (typeof render === "function" ? render() : render);
 
 /**
- * A render function with a top-level reactive early return cannot be evaluated
- * once. Use a Vapor DynamicFragment + renderEffect for those components so the
- * branch is re-evaluated and the old DOM branch is replaced. Pure components
- * keep the normal fine-grained Vapor path.
+ * Vapor components normally rely on fine-grained updates. A top-level reactive
+ * early return opts into a DynamicFragment re-render (`rerender: true`);
+ * everything else stays on the normal Vapor path, where `currentInstance` is
+ * set while DOM props are patched.
  */
-const hasEarlyReturn = (render: any): boolean => {
-    try {
-        return true;
-    } catch {
-        return false;
-    }
-};
-
 const wrapRender = (render: any, force = false): (() => any) => {
-    if (!force && !hasEarlyReturn(render)) return () => invokeRender(render);
+    if (typeof render !== "function" || !force) return () => invokeRender(render);
     return () => {
         const fragment = new DynamicFragment(0);
         const block = computed(() => invokeRender(render));
@@ -55,7 +47,6 @@ const wrapRender = (render: any, force = false): (() => any) => {
         return fragment;
     };
 };
-
 
 
 const renderSetup = (setup: any, props: any, ctx: any, dcMode: boolean, force = false): any => {

@@ -1,15 +1,9 @@
 import { computed, onMounted, reactive, watch, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import {
-  VAutocomplete,
-  VChip,
-  VSelect,
-  VSwitch,
-  VTextField,
-} from "@/components/vael/VuetifyShim";
-import { FormField } from "@/components/ui/FormField";
-import DateInput from "@/components/DateInput";
+import {PgAutocomplete, PgChip, PgSwitch, PgTextField} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {PgDateInput as DateInput} from "@pg/ui";
 import type { ReportDescriptorSpec, ReportInputFieldSpec } from "../types/reportSpec";
 import { resolvePreset } from "../utils/inputDefaults";
 import { groupReportInputs } from "../utils/inputSections";
@@ -256,7 +250,7 @@ export const ReportInputForm = defineComponent({
     const renderPresetChips = (field: ReportInputFieldSpec, presets: Array<{ value: string; label: string }>) => (
       <div class="d-flex flex-wrap ga-1">
         {presets.map((preset) => (
-          <VChip
+          <PgChip
             key={preset.value}
             size="small"
             color="primary"
@@ -264,7 +258,7 @@ export const ReportInputForm = defineComponent({
             onClick={() => applyPreset(field, preset.value)}
           >
             {preset.label}
-          </VChip>
+          </PgChip>
         ))}
       </div>
     );
@@ -316,7 +310,7 @@ export const ReportInputForm = defineComponent({
             id={`report-input-${field.key}`}
           >
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              <VTextField
+              <PgTextField
                 {...inputProps}
                 type={field.type === "date" ? "date" : "datetime-local"}
                 modelValue={
@@ -354,7 +348,7 @@ export const ReportInputForm = defineComponent({
             required={field.required}
             id={`report-input-${field.key}`}
           >
-            <VAutocomplete
+            <PgAutocomplete
               {...inputProps}
               multiple={multiple}
               chips={multiple}
@@ -383,7 +377,7 @@ export const ReportInputForm = defineComponent({
             required={field.required}
             id={`report-input-${field.key}`}
           >
-            <VSelect
+            <PgAutocomplete
               {...inputProps}
               multiple={multiple}
               clearable
@@ -407,7 +401,7 @@ export const ReportInputForm = defineComponent({
             required={field.required}
             id={`report-input-${field.key}`}
           >
-            <VSwitch
+            <PgSwitch
               color="primary"
               density="compact"
               hideDetails="auto"
@@ -432,7 +426,7 @@ export const ReportInputForm = defineComponent({
           required={field.required}
           id={`report-input-${field.key}`}
         >
-          <VTextField
+          <PgTextField
             {...inputProps}
             type={inputType}
             modelValue={value === undefined || value === null ? "" : String(value)}

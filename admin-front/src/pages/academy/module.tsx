@@ -2,16 +2,16 @@ import { computed, onMounted, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
+import {PgButton, PgIcon} from "@pg/ui";
 import { AcademyShell, Skeleton, useAcademyData, userRole } from "@/components/academy/AcademyShell";
 import { ModuleList } from "@/components/academy/ModuleList";
 import { nextStep, pickActiveTrack } from "@/components/academy/nextStep";
 import { Callout } from "@/components/academy/ui/Callout";
 import { useAcademyProgress } from "@/components/academy/useAcademyProgress";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { PageHeader } from "@/components/ui/PageHeader";
+import {EmptyState} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
 import { showSnackBar } from "@/utils/snackBar";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {SurfaceCard} from "@pg/ui";
 import { roleTrackFor } from "@/content/academy";
 
 export const AdminAcademyModulePage = defineComponent({
@@ -106,24 +106,24 @@ export const AdminAcademyModulePage = defineComponent({
                         {(prev || next) && (
                             <nav class="ac-learner-pager" aria-label={t("Module navigation")}>
                                 {prev ? (
-                                    <VBtn class="ac-learner-pager__btn" variant="outlined" height="auto" to={{ name: "AdminAcademyModule", params: { moduleId: prev.id } }}>
-                                        <VIcon start class="ac-flip" icon="mdi-arrow-left" size={18} aria-hidden="true" />
+                                    <PgButton class="ac-learner-pager__btn" variant="outlined" height="auto" to={{ name: "AdminAcademyModule", params: { moduleId: prev.id } }}>
+                                        <PgIcon start class="ac-flip" icon="mdi-arrow-left" size={18} aria-hidden="true" />
                                         <span class="ac-learner-pager__text">
                                             <span class="ac-learner-pager__dir">{t("Previous module")}</span>
                                             <span class="ac-learner-pager__title">{prev.title}</span>
                                         </span>
-                                    </VBtn>
+                                    </PgButton>
                                 ) : (
                                     <span />
                                 )}
                                 {next && (
-                                    <VBtn class="ac-learner-pager__btn ac-learner-pager__btn--next" variant="outlined" height="auto" to={{ name: "AdminAcademyModule", params: { moduleId: next.id } }}>
+                                    <PgButton class="ac-learner-pager__btn ac-learner-pager__btn--next" variant="outlined" height="auto" to={{ name: "AdminAcademyModule", params: { moduleId: next.id } }}>
                                         <span class="ac-learner-pager__text">
                                             <span class="ac-learner-pager__dir">{t("Next module")}</span>
                                             <span class="ac-learner-pager__title">{next.title}</span>
                                         </span>
-                                        <VIcon end class="ac-flip" icon="mdi-arrow-right" size={18} aria-hidden="true" />
-                                    </VBtn>
+                                        <PgIcon end class="ac-flip" icon="mdi-arrow-right" size={18} aria-hidden="true" />
+                                    </PgButton>
                                 )}
                             </nav>
                         )}
@@ -144,9 +144,9 @@ export const AdminAcademyModulePage = defineComponent({
                                           { label: m?.title ?? t("Module") },
                                       ]
                             }>(
-                                <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyModuleSummary()}>
+                                <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyModuleSummary()}>
                                     {t("Copy module summary")}
-                                </VBtn>
+                                </PgButton>
                             )</PageHeader>
                     )}
                 >

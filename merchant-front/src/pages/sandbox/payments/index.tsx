@@ -2,20 +2,20 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { StateView } from "@/components/StateView";
-import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
-import SandboxResourceTable from "@/components/sandbox/SandboxResourceTable";
-import { paymentFilters } from "@/components/sandbox/sandboxFilters";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
+import {VAlert, PgButton} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { SandboxBanner } from "@/features/sandbox/SandboxBanner";
+import { SandboxResourceTable } from "@/features/sandbox/SandboxResourceTable";
+import { paymentFilters } from "@/features/sandbox/sandboxFilters";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
 import { sandboxGet, sandboxPost, type SandboxPaymentRow, type SandboxSummaryResponse } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -126,7 +126,7 @@ const SandboxPaymentsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={t("Sandbox Payments & Ledger")} subtitle={t("Payment attempts, partner references and settlement amounts in the sandbox plane.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => { refresh.value?.(); void loadSummary(); }}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn></div></PageHeader>
+            <PageHeader title={t("Sandbox Payments & Ledger")} subtitle={t("Payment attempts, partner references and settlement amounts in the sandbox plane.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => { refresh.value?.(); void loadSummary(); }}>{t("Refresh")}</PgButton><PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</PgButton></div></PageHeader>
             <SandboxBanner />
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             <StateView loading={loading.value && !summary.value} minHeight="180px">

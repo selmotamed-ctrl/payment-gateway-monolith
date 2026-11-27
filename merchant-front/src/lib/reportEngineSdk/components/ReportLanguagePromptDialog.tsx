@@ -1,8 +1,8 @@
 import { ref, watch, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VRadio, VRadioGroup } from "@/components/vael/VuetifyShim";
+import {PgRadio, PgRadioGroup} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
-import { FormModal } from "@/components/ui";
+import {FormModal} from "@pg/ui";
 import { buildLocaleOptions } from "../utils/localeMeta";
 
 export const ReportLanguagePromptDialog = defineComponent({
@@ -45,13 +45,13 @@ export const ReportLanguagePromptDialog = defineComponent({
         onSubmit={confirm}
         onUpdate:modelValue={(value: boolean) => emit("update:modelValue", value)}
       >
-        <VRadioGroup
+        <PgRadioGroup
           modelValue={chosen.value}
           onUpdate:modelValue={(value: string | null) => (chosen.value = value ?? initial())}
           hideDetails
         >
           {buildLocaleOptions(props.availableLocales, props.reportTitleMap).map((option) => (
-            <VRadio
+            <PgRadio
               key={option.locale}
               value={option.locale}
               label={`${option.nativeName} [${option.locale.toUpperCase()} — ${option.direction}]${
@@ -60,7 +60,7 @@ export const ReportLanguagePromptDialog = defineComponent({
               class="mb-2"
             />
           ))}
-        </VRadioGroup>
+        </PgRadioGroup>
       </FormModal>
     );
   },

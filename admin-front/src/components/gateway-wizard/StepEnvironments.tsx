@@ -2,11 +2,11 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VSelect, VSwitch, VTextField } from "@/components/vael/VuetifyShim";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {VAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -122,13 +122,13 @@ export const StepEnvironments = dc(
                         >
                             <div style={gridStyle}>
                                 <FormField label={t("Base URL")}>
-                                    <VTextField
+                                    <PgTextField
                                         modelValue={environment.baseUrl}
                                         onUpdate:modelValue={(v: string) => updateEnvironment(index, { baseUrl: v })}
                                     />
                                 </FormField>
                                 <FormField label={t("Allowed Hosts")}>
-                                    <VTextField
+                                    <PgTextField
                                         modelValue={listToString(environment.allowedHosts)}
                                         onUpdate:modelValue={(v: string) =>
                                             updateEnvironment(index, { allowedHosts: stringToList(v) })
@@ -136,7 +136,7 @@ export const StepEnvironments = dc(
                                     />
                                 </FormField>
                                 <FormField label={t("Inbound IP Allowlist")}>
-                                    <VTextField
+                                    <PgTextField
                                         modelValue={listToString(environment.inboundIpAllowlist)}
                                         onUpdate:modelValue={(v: string) =>
                                             updateEnvironment(index, { inboundIpAllowlist: stringToList(v) })
@@ -144,7 +144,7 @@ export const StepEnvironments = dc(
                                     />
                                 </FormField>
                                 <FormField label={t("Enabled")}>
-                                    <VSwitch
+                                    <PgSwitch
                                         modelValue={environment.enabled}
                                         onUpdate:modelValue={(v: boolean | null) => updateEnvironment(index, { enabled: !!v })}
                                         density="compact"
@@ -158,7 +158,7 @@ export const StepEnvironments = dc(
                     <WizardSection title={t("Auth Method")} divider>
                         <div style={gridStyle}>
                             <FormField label={t("Auth Method")}>
-                                <VSelect
+                                <PgAutocomplete
                                     items={[
                                         "NONE",
                                         "API_KEY",
@@ -176,31 +176,31 @@ export const StepEnvironments = dc(
                                 />
                             </FormField>
                             <FormField label="username">
-                                <VTextField
+                                <PgTextField
                                     modelValue={props.model.auth.username}
                                     onUpdate:modelValue={(v: string) => updateAuth({ username: v })}
                                 />
                             </FormField>
                             <FormField label="key_ref" sensitiveMakerChecker>
-                                <VTextField
+                                <PgTextField
                                     modelValue={props.model.auth.keyRef}
                                     onUpdate:modelValue={(v: string) => updateAuth({ keyRef: v })}
                                 />
                             </FormField>
                             <FormField label="token_url">
-                                <VTextField
+                                <PgTextField
                                     modelValue={props.model.auth.tokenUrl}
                                     onUpdate:modelValue={(v: string) => updateAuth({ tokenUrl: v })}
                                 />
                             </FormField>
                             <FormField label="client_id_ref">
-                                <VTextField
+                                <PgTextField
                                     modelValue={props.model.auth.clientIdRef}
                                     onUpdate:modelValue={(v: string) => updateAuth({ clientIdRef: v })}
                                 />
                             </FormField>
                             <FormField label="client_secret_ref" sensitiveMakerChecker>
-                                <VTextField
+                                <PgTextField
                                     modelValue={props.model.auth.clientSecretRef}
                                     onUpdate:modelValue={(v: string) => updateAuth({ clientSecretRef: v })}
                                 />
@@ -213,9 +213,9 @@ export const StepEnvironments = dc(
                         divider
                         v-slots={{
                             actions: () => (
-                                <VBtn variant="tonal" size="small" onClick={addCredential}>
+                                <PgButton variant="tonal" size="small" onClick={addCredential}>
                                     {t("Add")}
-                                </VBtn>
+                                </PgButton>
                             ),
                         }}
                     >
@@ -235,41 +235,41 @@ export const StepEnvironments = dc(
                             >
                                 <div style={gridStyle}>
                                     <FormField label={t("Token Name")}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={credential.label}
                                             onUpdate:modelValue={(v: string) => updateCredential(index, { label: v })}
                                         />
                                     </FormField>
                                     <FormField label={t("Owner")}>
-                                        <VSelect
+                                        <PgAutocomplete
                                             items={["PLATFORM", "MERCHANT"]}
                                             modelValue={credential.ownerType}
                                             onUpdate:modelValue={(v: any) => updateCredential(index, { ownerType: v })}
                                         />
                                     </FormField>
                                     <FormField label={t("Settlement Target")}>
-                                        <VSelect
+                                        <PgAutocomplete
                                             items={["PLATFORM_CLEARING", "MERCHANT_DIRECT", "PROVIDER_HELD"]}
                                             modelValue={credential.settlementTarget}
                                             onUpdate:modelValue={(v: any) => updateCredential(index, { settlementTarget: v })}
                                         />
                                     </FormField>
                                     <FormField label={t("Environment")}>
-                                        <VSelect
+                                        <PgAutocomplete
                                             items={["SANDBOX", "LIVE"]}
                                             modelValue={credential.env}
                                             onUpdate:modelValue={(v: any) => updateCredential(index, { env: v })}
                                         />
                                     </FormField>
                                     <FormField label={t("Secret")} sensitiveMakerChecker>
-                                        <VTextField
+                                        <PgTextField
                                             type="password"
                                             modelValue={credential.secret}
                                             onUpdate:modelValue={(v: string) => updateCredential(index, { secret: v })}
                                         />
                                     </FormField>
                                     <FormField label="secret_ref" sensitiveMakerChecker>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={credential.secretRef}
                                             onUpdate:modelValue={(v: string) => updateCredential(index, { secretRef: v })}
                                         />
@@ -289,9 +289,9 @@ export const StepEnvironments = dc(
                         />
 
                         <div style={{ display: "flex", flexDirection: "row", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
-                            <VBtn color="primary" loading={checking.value} disabled={!credentialChecklistComplete.value} onClick={() => void runCredentialCheck()}>
+                            <PgButton color="primary" loading={checking.value} disabled={!credentialChecklistComplete.value} onClick={() => void runCredentialCheck()}>
                                 {t("Credential Check")}
-                            </VBtn>
+                            </PgButton>
                             {checkResult.value && (
                                 <VAlert type="success" variant="tonal" density="compact" style={{ flex: 1, minWidth: "220px" }}>
                                     {checkResult.value}

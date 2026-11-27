@@ -1,7 +1,7 @@
 import { type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn } from "@/components/vael/VuetifyShim";
+import {PgButton} from "@pg/ui";
 import { showSnackBar } from "@/utils/snackBar";
 
 export const GuideCodeBlock = defineComponent({
@@ -27,9 +27,9 @@ export const GuideCodeBlock = defineComponent({
             <div style={{ display: "flex", flexDirection: "column", gap: "8px", minWidth: 0 }}>
                 {props.copyable && (
                     <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                        <VBtn size="small" variant="tonal" onClick={() => void copy()}>
+                        <PgButton size="small" variant="tonal" onClick={() => void copy()}>
                             {t("Copy")}
-                        </VBtn>
+                        </PgButton>
                     </div>
                 )}
                 <pre

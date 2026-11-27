@@ -3,21 +3,21 @@ import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VAutocomplete, VBtn, VCheckbox, VDivider, VSelect, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgAutocomplete, PgButton, PgCheckbox, PgDivider, PgTextField} from "@pg/ui";
 import { useRouter } from "vue-router";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { createOptionsLoader } from "@/components/Table/referenceOptions";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import { statusTone } from "@/components/Table/statusTone";
-import type { TableHeader } from "@/components/Table/types";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { createOptionsLoader } from "@/tables/referenceOptions";
+import { tableRegistry } from "@/tables/tableRegistry";
+import {statusTone} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
@@ -35,16 +35,16 @@ import {
 import type { BulkInquiryResult, OperatorCaseSummary } from "./types";
 import { caseTypeMeta } from "./caseTypes";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { FormField } from "@/components/ui/FormField";
-import { SectionFields } from "@/components/SectionFields";
+import {FormModal} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 type AssigneeOption = { title: string; value: string };
 
 type OperatorCasesSummary = {
@@ -596,7 +596,7 @@ const OperatorCasesPage = dc(() => {
                         justifyContent: "center",
                     }}
                 >
-                    <VCheckbox
+                    <PgCheckbox
                         modelValue={allVisibleSelected.value}
                         indeterminate={someVisibleSelected.value}
                         onUpdate:modelValue={(value: boolean | null) => toggleVisible(value)}
@@ -616,7 +616,7 @@ const OperatorCasesPage = dc(() => {
                         justifyContent: "center",
                     }}
                 >
-                    <VCheckbox
+                    <PgCheckbox
                         modelValue={Boolean(selected.value[row.id])}
                         onUpdate:modelValue={(value: boolean | null) => toggleRow(row, value)}
                         density="compact"
@@ -634,7 +634,7 @@ const OperatorCasesPage = dc(() => {
             headerTooltip: COLUMN_HELP.caseRef,
             value: (row) => row.caseRef,
             Value: ({ row }: { row: OperatorCaseSummary }) => (
-                <VBtn
+                <PgButton
                     variant="text"
                     color="primary"
                     size="small"
@@ -653,7 +653,7 @@ const OperatorCasesPage = dc(() => {
                         <span>{row.caseReference || row.caseRef}</span>
                         <span style={{ fontSize: "10px", fontWeight: 500, opacity: 0.6 }}>{row.title || caseTypeMeta(row.caseType).label}</span>
                     </span>
-                </VBtn>
+                </PgButton>
             ),
         },
         {
@@ -806,9 +806,9 @@ const OperatorCasesPage = dc(() => {
                         <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
                             <StatusBadge status="cases" label={`${total.value} ${t("cases")}`} toneOverride="info" showDot={false} />
                             <StatusBadge status="selected" label={`${selectedCount.value} ${t("selected")}`} toneOverride={selectedCount.value > 0 ? "info" : "neutral"} showDot={false} />
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-radar" onClick={() => void router.push({ name: "GatewayInquirySchedules" })}>{t("Inquiry Schedule")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-radar" onClick={() => void router.push({ name: "GatewayInquirySchedules" })}>{t("Inquiry Schedule")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</PgButton>
                         </ThemedView>
                     )</PageHeader>
 
@@ -919,15 +919,15 @@ const OperatorCasesPage = dc(() => {
                                     )}
                                 </ThemedText>
                                 <div style={{ flex: 1 }} />
-                                <VBtn
+                                <PgButton
                                     size="small"
                                     variant="text"
                                     disabled={selectedCount.value === 0 || bulkLoading.value}
                                     onClick={clearSelection}
                                 >
                                     {t("Clear selection")}
-                                </VBtn>
-                                <VBtn
+                                </PgButton>
+                                <PgButton
                                     size="small"
                                     variant="tonal"
                                     prependIcon="mdi-account-arrow-right-outline"
@@ -935,8 +935,8 @@ const OperatorCasesPage = dc(() => {
                                     onClick={() => void openAssign()}
                                 >
                                     {t("Assign selected")}
-                                </VBtn>
-                                <VBtn
+                                </PgButton>
+                                <PgButton
                                     size="small"
                                     variant="tonal"
                                     prependIcon="mdi-progress-clock"
@@ -944,8 +944,8 @@ const OperatorCasesPage = dc(() => {
                                     onClick={openState}
                                 >
                                     {t("Set state")}
-                                </VBtn>
-                                <VBtn
+                                </PgButton>
+                                <PgButton
                                     size="small"
                                     color="primary"
                                     variant="flat"
@@ -955,9 +955,9 @@ const OperatorCasesPage = dc(() => {
                                     onClick={() => openInquiry(Object.keys(selected.value))}
                                 >
                                     {t("Inquire selected")} ({selectedCount.value})
-                                </VBtn>
+                                </PgButton>
                             </ThemedView>
-                            <VDivider />
+                            <PgDivider />
                         </ThemedView>
                     )}
                 />
@@ -995,8 +995,8 @@ const OperatorCasesPage = dc(() => {
                             ]}
                         />
                         <ThemedView style={{ flexDirection: "row", gap: "8px", justifyContent: "flex-end", flexWrap: "wrap" }}>
-                            <VBtn variant="text" onClick={() => (inspectionOpen.value = false)}>{t("Close")}</VBtn>
-                            <VBtn
+                            <PgButton variant="text" onClick={() => (inspectionOpen.value = false)}>{t("Close")}</PgButton>
+                            <PgButton
                                 variant="tonal"
                                 color="primary"
                                 disabled={!inspectionCase.value.inquiryEligibility?.eligible || !canInquire.value}
@@ -1007,8 +1007,8 @@ const OperatorCasesPage = dc(() => {
                                 }}
                             >
                                 {t("Inquire")}
-                            </VBtn>
-                            <VBtn
+                            </PgButton>
+                            <PgButton
                                 color="primary"
                                 prependIcon="mdi-open-in-new"
                                 onClick={() => {
@@ -1018,7 +1018,7 @@ const OperatorCasesPage = dc(() => {
                                 }}
                             >
                                 {t("Open")}
-                            </VBtn>
+                            </PgButton>
                         </ThemedView>
                     </ThemedView>
                 )}
@@ -1063,7 +1063,7 @@ const OperatorCasesPage = dc(() => {
                     <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                         <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Inquiry checklist")}</ThemedText>
                         {INQUIRY_CHECKS.map((check) => (
-                            <VCheckbox
+                            <PgCheckbox
                                 key={check.key}
                                 modelValue={inquiryChecklist.value[check.key] === true}
                                 onUpdate:modelValue={(value: unknown) => (inquiryChecklist.value = { ...inquiryChecklist.value, [check.key]: Boolean(value) })}
@@ -1097,7 +1097,7 @@ const OperatorCasesPage = dc(() => {
                         label={t("Assignee")}
                         hint={t("Leave empty to unassign the selected cases.")}
                     >
-                        <VAutocomplete
+                        <PgAutocomplete
                             items={assignOptions.value}
                             itemTitle="title"
                             itemValue="value"
@@ -1109,7 +1109,7 @@ const OperatorCasesPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Reason (optional)")}>
-                        <VTextField
+                        <PgTextField
                             modelValue={assignReason.value}
                             onUpdate:modelValue={(value: string) => (assignReason.value = value)}
                         />
@@ -1119,7 +1119,7 @@ const OperatorCasesPage = dc(() => {
                     <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                         <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Assignment checklist")}</ThemedText>
                         {ASSIGN_CHECKS.map((check) => (
-                            <VCheckbox
+                            <PgCheckbox
                                 key={check.key}
                                 modelValue={assignChecklist.value[check.key] === true}
                                 onUpdate:modelValue={(value: unknown) => (assignChecklist.value = { ...assignChecklist.value, [check.key]: Boolean(value) })}
@@ -1150,14 +1150,14 @@ const OperatorCasesPage = dc(() => {
                 </ThemedText>
                 <SectionFields title={t("State change")}>
                     <FormField label={t("State")} required>
-                        <VSelect
+                        <PgAutocomplete
                             items={["OPEN", "IN_PROGRESS"]}
                             modelValue={bulkState.value}
                             onUpdate:modelValue={(value: string | null) => (bulkState.value = value === "OPEN" ? "OPEN" : "IN_PROGRESS")}
                         />
                     </FormField>
                     <FormField label={t("Reason (optional)")}>
-                        <VTextField
+                        <PgTextField
                             modelValue={stateReason.value}
                             onUpdate:modelValue={(value: string) => (stateReason.value = value)}
                         />
@@ -1167,7 +1167,7 @@ const OperatorCasesPage = dc(() => {
                     <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                         <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("State change checklist")}</ThemedText>
                         {STATE_CHANGE_CHECKS.map((check) => (
-                            <VCheckbox
+                            <PgCheckbox
                                 key={check.key}
                                 modelValue={stateChangeChecklist.value[check.key] === true}
                                 onUpdate:modelValue={(value: unknown) => (stateChangeChecklist.value = { ...stateChangeChecklist.value, [check.key]: Boolean(value) })}
@@ -1190,9 +1190,9 @@ const OperatorCasesPage = dc(() => {
                 size="lg"
                 v-slots={{
                     footer: () => (
-                        <VBtn variant="tonal" onClick={() => (resultOpen.value = false)}>
+                        <PgButton variant="tonal" onClick={() => (resultOpen.value = false)}>
                             {t("Close")}
-                        </VBtn>
+                        </PgButton>
                     ),
                 }}
             >

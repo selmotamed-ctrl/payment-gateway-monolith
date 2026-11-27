@@ -3,46 +3,70 @@ id: admin-ui.system
 title: Admin UI System
 status: partial
 confidence: high
-last_verified: 2026-11-26
-verified_against: da23ed8e+working-tree
+last_verified: 2026-11-27
+verified_against: working-tree
 code:
-  - admin-front/src/styles/**
-  - admin-front/src/assets/fonts/**
+  - packages/ui/src/**
+  - packages/ui/src/tokens/**
+  - packages/ui/test/**
+  - packages/ui/CATALOG.md
+  - package.json
+  - AGENTS.md
+  - scripts/ui-full-sweep-audit.ts
+  - scripts/generate-ui-icons.ts
+  - scripts/migrate-to-pg-ui.ts
+  - admin-front/vite.config.ts
+  - admin-front/tsconfig.app.json
+  - admin-front/src/main.ts
+  - admin-front/src/App.tsx
+  - admin-front/src/uiConfig.tsx
   - admin-front/src/layouts/**
-  - admin-front/src/components/ui/**
-  - admin-front/src/components/Table/**
-  - admin-front/src/components/vael/**
-  - admin-front/src/components/AppIcon/**
-  - admin-front/src/components/EChart/**
-  - admin-front/src/utils/vael-compat.ts
-  - admin-front/src/styles/vael-theme.css
-  - admin-front/src/styles/vael-shim.css
-  - scripts/generate-frontend-icons.ts
-  - admin-front/src/utils/theme/index.ts
-  - admin-front/src/state/theme.ts
-  - admin-front/src/components/ThemeMenu/index.tsx
-  - merchant-front/src/layouts/**
-  - checkout-front/src/layouts/**
-  - fake-rails-front/src/styles/**
-  - fake-rails-front/src/components/ui/**
-  - admin-front/src/utils/dc/index.ts
-  - admin-front/src/components/ui/PageHeader.tsx
-  - admin-front/src/utils/devLog.ts
-  - admin-front/src/components/ui/jsonDiffModel.ts
-  - admin-front/src/components/ui/JsonDiffViewer.tsx
-  - admin-front/src/components/ui/JsonValueCell.tsx
-  - admin-front/src/components/ui/JsonValueList.tsx
-  - admin-front/src/components/builders/**
-  - admin-front/src/components/ledger/**
+  - admin-front/src/features/**
+  - admin-front/src/forms/**
+  - admin-front/src/tables/**
+  - admin-front/src/charts/**
+  - admin-front/src/printables/**
+  - admin-front/src/components/**
+  - admin-front/src/utils/**
+  - admin-front/src/state/**
   - admin-front/src/components/AuditChangeChips.tsx
-  - admin-front/src/utils/auditSummary.ts
-  - admin-front/src/constants/i18n/**
+  - admin-front/src/components/CollapsibleSection/**
+  - merchant-front/src/main.ts
+  - merchant-front/src/App.tsx
+  - merchant-front/src/uiConfig.tsx
+  - merchant-front/src/layouts/**
+  - merchant-front/src/features/**
+  - merchant-front/src/forms/**
+  - merchant-front/src/tables/**
+  - merchant-front/src/charts/**
+  - merchant-front/src/components/**
+  - checkout-front/src/main.ts
+  - checkout-front/src/App.tsx
+  - checkout-front/src/uiConfig.tsx
+  - checkout-front/src/layouts/**
+  - checkout-front/src/features/**
+  - checkout-front/src/tables/**
+  - checkout-front/src/charts/**
+  - checkout-front/src/components/**
+  - fake-rails-front/src/main.ts
+  - fake-rails-front/src/App.tsx
+  - fake-rails-front/src/uiConfig.tsx
+  - fake-rails-front/src/layouts/**
+  - fake-rails-front/src/tables/**
+  - fake-rails-front/src/components/**
+  - merchant-front/src/components/**
+  - checkout-front/src/components/**
+  - fake-rails-front/src/components/**
 design_sources:
   - design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md
   - design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md
   - design/06-ui/portal_ui_implementation_plan.md
+  - design/06-ui/fintech_2026_vapor_ui_architecture_and_remediation_plan.md
 tests:
-  - admin-front/src/components/ui/__tests__/ui-abstraction-compliance.test.ts
+  - packages/ui/test/core.test.ts
+  - packages/ui/test/toastStore.test.ts
+  - packages/ui/test/governanceAudit.test.ts
+  - scripts/ui-full-sweep-audit.ts
   - tests/e2e/admin/shell.spec.ts
   - tests/e2e/admin/table-and-padding-geometry.spec.ts
   - tests/e2e/admin/table-row-context-menu.spec.ts
@@ -52,17 +76,12 @@ tests:
   - tests/unit/frontend-security-admin.test.ts
   - tests/unit/json-diff-model.test.ts
   - tests/unit/audit-summary.test.ts
-  - tests/unit/builders-route-models.test.ts
-  - tests/unit/builders-settings-parser.test.ts
-  - tests/unit/builders-aml-templates.test.ts
-  - tests/unit/builders-api-error-i18n.test.ts
-  - tests/unit/commerce-i18n.test.ts
+  - tests/unit/dark-overlay-colors.test.ts
+  - tests/unit/report-ui-styles.test.ts
 gaps:
-  - Fake Rails receives only a partial shared-UI rollout; it has separate portal/hosted shells and is not covered by the admin compliance test.
-  - GAP-2026-11-26-UI-01: the remaining page/modal forms still use the compatibility inputs and their existing rules maps; only login is fully on vael-form `useForm`/`Field`.
-  - GAP-2026-11-26-UI-02: shim tags keep Vuetify names, native select/checkbox/date fallbacks replace some vael-ui controls, and a Vapor `hasFallthrough` console warning appears on some pages.
-  - Shared primitives are copied per workspace rather than published as one package, so drift is possible.
-  - "Residual (GAP-019): the admin session token lives in client storage unless the edge runs `SESSION_COOKIE_MODE=true`."
+  - GAP-084: PgAutocomplete/PgDateInput/PgMenu/PgTooltip/PgDialog/PgDrawer use fixed-position inline panels instead of Vue Teleport because Vue 3.6.0-rc.16 Teleport does not mount inside the Vapor dc render path; revisit when the runtime fixes it.
+  - GAP-085: DataTable/DataPage/InputFields/FiltersContainer/AuthoritiesPicker/ApiImage/CordsInputMap/Printables/Stats* remain per-portal feature composites under src/{tables,forms,features,charts,printables}; they are not UI primitives but still share code by copy.
+  - GAP-086: @pg/ui is consumed through Vite/TS aliases and each portal keeps its own Bun lockfile, not a hoisted root workspace; this was chosen to avoid disturbing the four independent frontend installs.
 ---
 
 # Admin UI System
@@ -148,7 +167,7 @@ Theme mode is `system | light | dark`. `utils/theme` resolves the persisted mode
 
 ### 3.4 Primitives and extras
 
-`admin-front/src/components/ui/index.ts` is the primitive barrel. The compliance test requires these 13 named exports:
+`packages/ui/src/index.ts` is the primitive barrel. The compliance test requires these 13 named exports:
 
 | Primitive | Responsibility |
 | :--- | :--- |
@@ -240,15 +259,15 @@ However, the stale files are still physically present:
 
 | Surface | Location |
 | :--- | :--- |
-| vael-ui provider | `admin-front/src/components/vael/VaelProvider.tsx`, `merchant-front/src/components/vael/VaelProvider.tsx`, `checkout-front/src/components/vael/VaelProvider.tsx` |
+| vael-ui provider | `packages/ui/src/provider/PgProvider.tsx`, `packages/ui/src/provider/PgProvider.tsx`, `packages/ui/src/provider/PgProvider.tsx` |
 | Tokens | `*/src/styles/fintech-minimal.css` |
 | Global styles | `*/src/styles/globals/app.scss`, `admin-front/src/styles/command-palette.css` |
 | Fonts | `*/src/assets/fonts/fonts.css` and the adjacent font files |
-| Primitives | `*/src/components/ui/**` |
+| Primitives | `packages/ui/src/**` |
 | Tables | `*/src/components/Table/**` |
 | Shells | `admin-front/src/layouts/default.tsx`, `merchant-front/src/layouts/default.tsx`, `checkout-front/src/layouts/checkout.tsx` |
 | Auth layout | `admin-front/src/layouts/auth.tsx` |
-| Compliance test | `admin-front/src/components/ui/__tests__/ui-abstraction-compliance.test.ts` |
+| Compliance test | `packages/ui/test/governanceAudit.test.ts` |
 | Deploy flags | `ADMIN_SHOW_CHECKLISTS`, `ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST`, `ADMIN_SHOW_HELP_PANELS`, `FAKE_RAILS_ENABLED`, `FAKE_RAILS_ALLOW_IN_PRODUCTION` |
 
 ## 6. Operational usage
@@ -315,18 +334,18 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 ### Code paths
 
-- `admin-front/src/components/vael/VaelProvider.tsx`
+- `packages/ui/src/provider/PgProvider.tsx`
 - `admin-front/src/styles/fintech-minimal.css`
 - `admin-front/src/styles/globals/app.scss`
 - `admin-front/src/assets/fonts/fonts.css`
 - `admin-front/src/layouts/default.tsx`
 - `admin-front/src/layouts/auth.tsx`
 - `admin-front/src/layouts/sections.tsx`
-- `admin-front/src/components/ui/index.ts`
-- `admin-front/src/components/ui/__tests__/ui-abstraction-compliance.test.ts`
+- `packages/ui/src/index.ts`
+- `packages/ui/test/governanceAudit.test.ts`
 - `admin-front/src/constants/env/index.ts`
 - `deploy/deploy.ts`
-- `fake-rails-front/src/components/ui/**`
+- `packages/ui/src/**`
 
 ### Generated appendices
 
@@ -409,5 +428,107 @@ Known residuals: the shim tag names still read as Vuetify in JSX; all forms are 
 - **Shim `VTextField`:** now uses `inheritAttrs: false`, binds only real input attributes, keeps an explicit `aria-label` (falling back to `label`) so field names remain accessible, and renders a visible label/hint/error shell (`.pg-text-field`, `.pg-field-label`, `.pg-field-hint`) when those props are present. This restores labels on the new settings workspace and auth pages while `FormField` keeps owning labels in existing forms. The shim `VSwitch` keeps vael-ui's `role="switch"`; Playwright tests target `getByRole("switch")`.
 - **Shim link resolution:** `VBtn`/`VListItem` resolve `to` through `useRouter()`, falling back to the app router on the current instance when the component is created inside a drawer slot. Before this fix, a `VBtn to=…` rendered inside `SlideOverDrawer`'s `v-slots` silently dropped its link (a `TypeError` was swallowed by the slot render).
 - **Theme bridge:** `styles/vael-theme.css` now also defines the Vuetify-style RGB triplets (`--v-theme-primary`, `--v-theme-on-surface`, `--v-theme-background`, …) inherited styles still reference (`rgb(var(--v-theme-primary))`), in light and dark. Native `<option>` elements from the shim `VSelect` are visible to `getByText`, so tests scope environment text to the table.
-- **ECharts lazy chunk:** `merchant-front/src/components/EChart/lazy.tsx` was added (the merchant cards imported `@/components/EChart/lazy` without the module).
+- **ECharts lazy chunk:** `merchant-front/src/charts/EChart/lazy.tsx` was added (the merchant cards imported `@/components/EChart/lazy` without the module).
 - **Icons:** the generator now emits 244 admin icons (the new settings/section/auth `mdi-*` names) while merchant/checkout/Fake Rails stay at 138/52/35.
+
+## 19. 2026 Fintech Vapor design system (`@pg/ui`) — 2026-11-27
+
+The plan `design/06-ui/fintech_2026_vapor_ui_architecture_and_remediation_plan.md` was implemented as a shared
+package plus a migration sweep. The previous `vael-ui-migration` branch kept four copies of a compatibility shim and
+still rendered native `<select>`, `<input type="date">`, `<input type="checkbox">`, raw text fields and a dead
+snackbar. That is now replaced by one source of truth.
+
+### 19.1 Architecture
+
+- **Package:** `packages/ui` (`@pg/ui`), a 100% Vue 3.6 Vapor TSX package. It is consumed through the
+  `@pg/ui` Vite alias (`../packages/ui/src`) and the matching `tsconfig` paths in all four portals, so every
+  portal compiles the same source with `vueJsx({ vapor: true })`; there is no duplicate build artifact.
+- **Provider:** `PgProvider` supplies `PgUiConfig` (API client, error extractor, XLSX exporter, confirm dialog,
+  router resolve/navigate, clipboard, admin contextual-help button) and mounts the one `PgToaster`. It wraps
+  vael-ui's `ConfigProvider` only for the checkbox/switch/radio/file controls that remain vael-based; vael-ui is
+  never imported by page code.
+- **Tokens:** `tokens/fintech-2026.css` (the exact "Calm Precision" palette: neutral obsidian focus ring, 40 px
+  controls, 2026 radii/shadows/status tokens, dark theme, `--ui-*` bridge), `tokens/layout-policy.css`
+  (28/36 px desktop and 20/16 px mobile page padding, 1480 px max width, 28 px section rhythm, 24 px card body,
+  20/24 header, 16/24 footer, 48 px table rows, 42 px sticky header, seamless metric grid) and
+  `tokens/components.css` (all primitives plus the inherited pre-migration layout classes).
+- **Primitives:** `PgPage`, `PgSection`, `PgCard`, `PgPageHeader`, `PgButton`, `PgIcon`, `PgTextField`,
+  `PgTextarea`, `PgSearchInput`, `PgAutocomplete`, `PgApiAutocomplete`, `PgDateInput`, `PgDateRangeInput`,
+  `PgCheckbox`, `PgChoice`, `PgSwitch`, `PgRadioGroup`, `PgFileUpload`, `PgOtpInput`, `PgCodeEditor`,
+  `PgAlert`, `PgToast`, `PgStatusBadge`, `PgEmptyState`, `PgStateView`, `PgDialog`, `PgDrawer`,
+  `PgFormModal`, `PgConfirmDialog`, `PgDetailsDialog`, `PgCommandPalette`, `PgMenu`, `PgTooltip`,
+  `PgMetricStrip`, `PgMoneyText`, `PgMonoRef`, `PgDescriptionList`, `PgField`, `PgFieldsSection`,
+  `PgTable`, `PgApiTable`, `PgTableFilters`, `PgTableRowActions`, `PgTableHeader`, `PgTableFooter`,
+  `PgFormChecklist`, `PgSummaryExportCard`, `PgThemeMenu`, `PgThemeLanguageControls`, `PgSegmentedTabs`
+  and the JSON diff/viewer set. `packages/ui/CATALOG.md` lists props and usage.
+- **Icons:** `scripts/generate-ui-icons.ts` scans the package and all four portals for `mdi-*` names and writes
+  one `actions/icons.generated.ts`. The old per-portal `AppIcon` directories are deleted.
+
+### 19.2 Defect fixes from the plan
+
+1. **Dropdowns/autocomplete:** `PgAutocomplete` is a WAI-ARIA combobox with single/multi select, removable chips,
+   `+N` overflow, `creatable`, full keyboard navigation, fixed-position viewport-flipping panel and no native
+   `<select>` anywhere. `VSelect`, `VAutocomplete` and `VCombobox` are aliases of the same component.
+2. **Date input:** `PgDateInput` has a typed `YYYY-MM-DD` field, calendar grid, month/year jump, today ring,
+   min/max, clear, and a range mode with `Today`, `Last 7 Days`, `Last 30 Days`, `This Month`, `Last Month` and
+   `Year to Date` presets.
+3. **Checkbox:** `PgCheckbox` uses the shared animated control with `indeterminate` and a `variant="card"`
+   safeguard row; `PgChoice` wraps the native radio/checkbox for exam/lab/safeguard cards, so no page writes a
+   raw checkbox input.
+4. **Text fields/table search:** `PgTextField`/`PgSearchInput` restore label, hint, error, icons, prefix/suffix,
+   clear, password reveal, max-length counter and rules. Focus is the neutral `#0f172a` border plus a soft neutral
+   halo; the blue glow is gone. `PgSearchInput` is the table/toolbar search.
+5. **Snackbar:** the broken shim snackbar is deleted. `showToast` has a guaranteed 4.5 s / 6.5 s timer, a 2 px
+   countdown bar, pause-on-hover/focus, a four-toast stack cap, an action button and a close button.
+6. **Alerts:** one `PgAlert` with `tone` mapped 1:1 to `--pg-status-*` replaces `SandboxBanner`, `AlertView`,
+   `VAlert` and every hand-styled `role="alert"` banner.
+7. **KPI strips:** `PgMetricStrip` uses `gap: 0` with inset hairlines and negative tile margins, so wrapping rows
+   never expose a gray dead cell; `PageStats`/`MiniStats` are aliases of the same strip and the transparent-text
+   hack is gone.
+8. **Dialogs and command palette:** `PgDialog` uses a strict three-row header/body/footer; the close button is a
+   flex-end header item, never absolute, so it cannot overlap a title, input or badge. `PgCommandPalette` has a
+   bare 56 px search header and padded results.
+9. **Duplication:** the four `VuetifyShim`/`VaelProvider` copies, the 48 duplicated primitive directories and the
+   four drifted `fintech-minimal.css`/`vael-shim.css`/`vael-theme.css` sets are deleted. Feature-only composites
+   moved to `src/features`, `src/forms`, `src/tables`, `src/charts` and `src/printables`.
+
+### 19.3 Migration and governance
+
+- `scripts/migrate-to-pg-ui.ts` rewrote 461 files: shim imports and `V*` tags became `Pg*`, pure local component
+  imports became `@pg/ui`, and the feature folders moved out of `src/components`.
+- The four apps import `@pg/ui/tokens/index.css` once in `main.ts`; `App.tsx` mounts `PgProvider` with a small
+  `src/uiConfig.tsx` host object. `utils/vael-compat.ts`, `utils/vuetify-compat.ts` and `state/theme.ts` are
+  re-exports of the package services, so existing page imports keep working.
+- **Gate:** `scripts/ui-full-sweep-audit.ts` runs the pure rules in
+  `packages/ui/src/testing/governanceAudit.ts`: UI-01 raw `<select>`, UI-02 date inputs, UI-03 raw checkbox,
+  UI-04 raw input/textarea, UI-05 VuetifyShim/vael-ui imports, UI-06 hardcoded page hex, UI-07 container padding
+  (only `PgPage`/`PgCard`/`PgDialog`/`PgDrawer`/`PgSection`/`SurfaceCard`/`PgFormModal`), UI-08 hand-styled
+  `role="alert"`, UI-09 transparent text fill, UI-10 duplicated primitive directories and UI-11 legacy
+  stylesheets. The current tree passes with **0 violations**. The UI-07 scope is the plan's stated policy: table
+  cells, chips and compact rows keep their own metric; pages may not override a layout container's padding.
+- `bun run ui:audit`, `bun run ui:test`, `bun run ui:typecheck` and `bun run ui:icons:check` are the frontend
+  gates; the policy is appended to the root `AGENTS.md`.
+
+### 19.4 Verification and deviations
+
+- All four portals type-check and build (`admin-front`, `merchant-front`, `checkout-front` via `bun run build`;
+  `fake-rails-front` via `bun run build`); `packages/ui` type-checks and its 25 unit tests pass; the root Vitest
+  suite is 546 passing.
+- Browser smoke (cached Chromium against `vite preview`/`vite dev` with mocked APIs): admin login, dashboard,
+  sidebar, KPI strip, checklist, currency autocomplete (open/select), user menu and toast; no page errors and no
+  console errors. The login page renders `PgTextField`/`PgButton`/`PgOtpInput` with zero native selects.
+- **Deviation — Teleport:** Vue `Teleport` does not mount inside the `dc` Vapor render path on this rc, so
+  `PgAutocomplete`, `PgDateInput`, `PgMenu`, `PgTooltip`, `PgDialog`, `PgDrawer` and `PgCommandPalette` use
+  `position: fixed` panels with viewport flip/clamping. They are not clipped by `overflow: hidden` because no
+  ancestor establishes a containing block; revisit when the runtime supports Teleport here (GAP-084).
+- **Deviation — dc re-render:** the package `dc` only wraps a render in a `DynamicFragment` when the component
+  opts into `rerender: true` (top-level reactive branches). This avoids the rc's `currentInstance` null crash on
+  DOM prop patches in ordinary components; package components that branch on `modelValue` (dialogs, drawers,
+  state view, money/mono refs) opt in.
+- **Deviation — workspace:** `@pg/ui` is consumed by Vite/TS aliases rather than a hoisted Bun workspace so the
+  four independent portal lockfiles and installs are untouched (GAP-086). The single-source guarantee is the
+  alias, the package barrel and the governance gate, not a root install.
+- **Residual:** feature-level `DataTable`, `DataPage`, `InputFields`, `FiltersContainer`, `AuthoritiesPicker`,
+  `ApiImage`, `CordsInputMap`, `Printables` and the stats cards remain per-portal composites under
+  `src/{tables,forms,features,charts,printables}`. They are data-connected feature code, not duplicated
+  primitives, but they still copy some logic (GAP-085).

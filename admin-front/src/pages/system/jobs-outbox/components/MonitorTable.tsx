@@ -1,9 +1,9 @@
 import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
-import { ApiTable } from "@/components/Table/ApiTable";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues, type TableFilter } from "@/components/Table/filters";
-import type { TableHeader } from "@/components/Table/types";
+import {ApiTable} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues, type TableFilter} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
 
 type TableHook = {
     reset: () => void;

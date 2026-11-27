@@ -1,9 +1,9 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
-import { ThemedText } from "@/components/ThemedText";
-import { ThemedView } from "@/components/ThemedView";
-import { MetaPill } from "@/components/ui";
+import {PgButton, PgIcon} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
 import type { RailDescriptor } from "@/components/renderers/types";
 
 export type PerRailInstructionsBannerProps = {
@@ -90,7 +90,7 @@ export const PerRailInstructionsBanner = dc(
                     }}
                 >
                     <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px" }}>
-                        <VIcon
+                        <PgIcon
                             icon="mdi-lightbulb-on-outline"
                             size={22}
                             style={{ color: "var(--pg-accent-interactive)" }}
@@ -101,7 +101,7 @@ export const PerRailInstructionsBanner = dc(
                         >
                             {title}
                         </ThemedText>
-                        <VBtn
+                        <PgButton
                             icon
                             variant="text"
                             size="small"
@@ -109,20 +109,20 @@ export const PerRailInstructionsBanner = dc(
                             aria-expanded={expanded.value ? "true" : "false"}
                             onClick={() => (expanded.value = !expanded.value)}
                         >
-                            <VIcon icon={expanded.value ? "mdi-chevron-up" : "mdi-chevron-down"} />
-                        </VBtn>
-                        <VBtn
+                            <PgIcon icon={expanded.value ? "mdi-chevron-up" : "mdi-chevron-down"} />
+                        </PgButton>
+                        <PgButton
                             icon
                             variant="text"
                             size="small"
                             aria-label={helpLabel}
                             onClick={() => props.onOpenHelp?.()}
                         >
-                            <VIcon
+                            <PgIcon
                                 icon="mdi-help-circle-outline"
                                 style={{ color: "var(--pg-accent-interactive)" }}
                             />
-                        </VBtn>
+                        </PgButton>
                     </ThemedView>
 
                     {expanded.value && (

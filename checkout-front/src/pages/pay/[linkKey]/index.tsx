@@ -2,9 +2,9 @@ import { dc } from "@/utils/dc";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import { VAlert, VBtn, VIcon, VProgressCircular } from "@/components/vael/VuetifyShim";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
+import {VAlert, PgButton, PgIcon, PgSpinner} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
 import CheckoutLayout from "@/layouts/checkout";
 import { RailCards } from "@/components/rail-cards";
 import { RailFieldForm } from "@/components/rail-fields";
@@ -15,8 +15,8 @@ import { QrOrCodeRenderer } from "@/components/renderers/QrOrCodeRenderer";
 import { PushOrTransferRenderer } from "@/components/renderers/PushOrTransferRenderer";
 import { PerRailInstructionsBanner } from "@/components/help/PerRailInstructionsBanner";
 import { CheckoutHelpDrawer } from "@/components/help/CheckoutHelpDrawer";
-import { SandboxCheckoutInspector } from "@/components/sandbox/SandboxCheckoutInspector";
-import ThemeMenu from "@/components/ThemeMenu";
+import { SandboxCheckoutInspector } from "@/features/sandbox/SandboxCheckoutInspector";
+import {PgThemeMenu as ThemeMenu} from "@pg/ui";
 import type {
     AttemptSnapshot,
     AttemptStatus,
@@ -42,15 +42,7 @@ import { isTerminalStatus, startStatusPolling } from "@/utils/security/statusPol
 import { buildRailFormSchema, normalizeFormValues } from "@/utils/zReady";
 import { adaptedLocale } from "@/plugins/localization";
 
-import {
-    DescriptionList,
-    EmptyState,
-    MoneyDisplay,
-    MonoRef,
-    StatusBadge,
-    SurfaceCard,
-    type DescriptionItem,
-} from "@/components/ui";
+import {DescriptionList, EmptyState, MoneyDisplay, MonoRef, StatusBadge, SurfaceCard, type DescriptionItem} from "@pg/ui";
 type Phase = "SUMMARY" | "FORM" | "ACTION" | "CONFIRMING" | "RECEIPT" | "ERROR";
 
 
@@ -612,16 +604,16 @@ const PayPage = dc(() => {
                     </span>
                     <div style={{ display: "flex", alignItems: "center", gap: "2px", flexShrink: 0 }}>
                         <ThemeMenu />
-                        <VBtn
+                        <PgButton
                             icon
                             variant="text"
                             size="small"
                             aria-label={t("Help & Support")}
                             onClick={() => (helpOpen.value = true)}
                         >
-                            <VIcon icon="mdi-help-circle-outline" size={18} />
-                        </VBtn>
-                        <VBtn
+                            <PgIcon icon="mdi-help-circle-outline" size={18} />
+                        </PgButton>
+                        <PgButton
                             variant="text"
                             size="small"
                             onClick={() => {
@@ -631,7 +623,7 @@ const PayPage = dc(() => {
                             }}
                         >
                             {adaptedLocale.current.value === "ar" ? "English" : "العربية"}
-                        </VBtn>
+                        </PgButton>
                     </div>
                 </div>
 
@@ -753,7 +745,7 @@ const PayPage = dc(() => {
                                         </VAlert>
                                     )}
 
-                                    <VBtn
+                                    <PgButton
                                         color="primary"
                                         size="large"
                                         block
@@ -762,7 +754,7 @@ const PayPage = dc(() => {
                                         onClick={() => void initiate()}
                                     >
                                         {t("Pay Now")}
-                                    </VBtn>
+                                    </PgButton>
                                 </div>
                             </SurfaceCard>
                         )}
@@ -792,7 +784,7 @@ const PayPage = dc(() => {
                                         minWidth: 0,
                                     }}
                                 >
-                                    <VProgressCircular indeterminate size={48} color="primary" width={4} />
+                                    <PgSpinner indeterminate size={48} color="primary" width={4} />
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
                                         {t("Confirming your payment")}
                                     </ThemedText>
@@ -813,9 +805,9 @@ const PayPage = dc(() => {
                                         <StatusBadge status={attemptStatus.value} />
                                     </div>
                                     {renderReference()}
-                                    <VBtn variant="tonal" onClick={() => void cancelAttempt()}>
+                                    <PgButton variant="tonal" onClick={() => void cancelAttempt()}>
                                         {t("Cancel")}
-                                    </VBtn>
+                                    </PgButton>
                                 </div>
                             </SurfaceCard>
                         )}
@@ -842,12 +834,12 @@ const PayPage = dc(() => {
                                     />
                                     {renderReference()}
                                     {summary.value?.redirectUrl && isAllowedRedirect(summary.value.redirectUrl, summary.value.allowlistedRedirectHosts) && (
-                                        <VBtn
+                                        <PgButton
                                             color="primary"
                                             onClick={() => window.location.assign(summary.value!.redirectUrl!)}
                                         >
                                             {t("Return To Merchant")}
-                                        </VBtn>
+                                        </PgButton>
                                     )}
                                 </div>
                             </SurfaceCard>
@@ -883,9 +875,9 @@ const PayPage = dc(() => {
                                         </span>
                                         <StatusBadge status={attemptStatus.value} />
                                     </div>
-                                    <VBtn variant="tonal" onClick={() => (phase.value = "FORM")}>
+                                    <PgButton variant="tonal" onClick={() => (phase.value = "FORM")}>
                                         {t("Try Another Method")}
-                                    </VBtn>
+                                    </PgButton>
                                 </div>
                             </SurfaceCard>
                         )}

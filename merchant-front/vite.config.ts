@@ -12,8 +12,10 @@ export default ({ mode }: any) => {
         optimizeDeps: { exclude: ["vue-router"] },
         define: { "process.env": {} },
         resolve: {
+            dedupe: ["vue", "@vue/runtime-vapor", "@vue/runtime-dom", "vue-router", "vue-i18n"],
             alias: {
                 "@": fileURLToPath(new URL("./src", import.meta.url)),
+                "@pg/ui": fileURLToPath(new URL("../packages/ui/src", import.meta.url)),
                 "pagedjs-polyfill": fileURLToPath(
                     new URL("./node_modules/pagedjs/dist/paged.polyfill.min.js", import.meta.url),
                 ),

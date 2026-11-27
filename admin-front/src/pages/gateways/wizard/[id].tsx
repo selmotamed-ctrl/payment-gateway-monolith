@@ -2,14 +2,14 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { ThemedView } from "@/components/ThemedView";
-import { StateView } from "@/components/StateView";
+import {VAlert, PgButton} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {StateView} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -26,7 +26,7 @@ import { StepClientAction } from "@/components/gateway-wizard/StepClientAction";
 import { StepStatusRules } from "@/components/gateway-wizard/StepStatusRules";
 import { StepSimulator } from "@/components/gateway-wizard/StepSimulator";
 
-import { MetaPill } from "@/components/ui/MetaPill";
+import {MetaPill} from "@pg/ui";
 const STEPS = [
     { key: "identity", title: "Identity & Basics" },
     { key: "environments", title: "Environments & Auth" },
@@ -501,11 +501,11 @@ const GatewayWizardPage = dc(() => {
                         )}
 
                         <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "12px" }}>
-                            <VBtn variant="tonal" disabled={step.value <= 1 || saving.value} onClick={() => void goBack()}>
+                            <PgButton variant="tonal" disabled={step.value <= 1 || saving.value} onClick={() => void goBack()}>
                                 {t("Back")}
-                            </VBtn>
+                            </PgButton>
                             <ThemedView style={{ flexDirection: "row", gap: "10px" }}>
-                                <VBtn
+                                <PgButton
                                     variant="text"
                                     loading={saving.value}
                                     onClick={async () => {
@@ -516,16 +516,16 @@ const GatewayWizardPage = dc(() => {
                                     }}
                                 >
                                     {t("Save")}
-                                </VBtn>
+                                </PgButton>
                                 {step.value < STEPS.length && (
-                                    <VBtn color="primary" loading={saving.value} onClick={() => void goNext()}>
+                                    <PgButton color="primary" loading={saving.value} onClick={() => void goNext()}>
                                         {t("Continue")}
-                                    </VBtn>
+                                    </PgButton>
                                 )}
                                 {step.value === STEPS.length && (
-                                    <VBtn variant="text" onClick={() => void router.push({ name: "Gateways" })}>
+                                    <PgButton variant="text" onClick={() => void router.push({ name: "Gateways" })}>
                                         {t("Close")}
-                                    </VBtn>
+                                    </PgButton>
                                 )}
                             </ThemedView>
                         </ThemedView>

@@ -2,24 +2,24 @@ import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import { VAutocomplete, VBtn, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { StateView } from "@/components/StateView";
-import { DataTable } from "@/components/Table/DataTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { SectionFields } from "@/components/SectionFields";
+import {PgAutocomplete, PgButton, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
 type Wallet = {
     id: string;
     name: string;
@@ -165,7 +165,7 @@ const WalletsPage = dc(() => {
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Wallets")} subtitle={t("Available, pending, and reserved balances by wallet.")}>(
-                        <VBtn
+                        <PgButton
                             variant="tonal"
                             onClick={() => {
                                 form.value = { name: "", currency: "LYD", applicationId: "" };
@@ -175,7 +175,7 @@ const WalletsPage = dc(() => {
                             }}
                         >
                             {t("Create")}
-                        </VBtn>
+                        </PgButton>
                     )</PageHeader>
 
                 {error.value ? (
@@ -207,7 +207,7 @@ const WalletsPage = dc(() => {
             >
                 <SectionFields title={t("Details")}>
                     <FormField label={t("Application")} required>
-                        <VAutocomplete
+                        <PgAutocomplete
                             items={applicationOptions.value}
                             itemTitle="title"
                             itemValue="value"
@@ -217,14 +217,14 @@ const WalletsPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Wallet Name")} required>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.name}
                             onUpdate:modelValue={(v: string) => (form.value.name = v)}
                             hideDetails
                         />
                     </FormField>
                     <FormField label={t("Currency")} required>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.currency}
                             onUpdate:modelValue={(v: string) => (form.value.currency = v.toUpperCase())}
                             hideDetails

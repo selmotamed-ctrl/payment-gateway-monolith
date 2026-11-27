@@ -1,6 +1,6 @@
 import { defineComponent } from "@/utils/dc";
 import { useId, type PropType, type VNodeChild } from "vue";
-import { VIcon } from "@/components/vael/VuetifyShim";
+import {PgIcon} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { SETTING_SECTIONS, type SettingSectionCount, type SettingsViewId } from "@/components/builders/model";
 
@@ -74,7 +74,7 @@ export const SettingsSectionNav = defineComponent({
                             onKeydown={(event: KeyboardEvent) => onKeydown(event, index)}
                         >
                             <span class="pg-settings-rail__icon" aria-hidden="true">
-                                <VIcon icon={item.icon} size={17} />
+                                <PgIcon icon={item.icon} size={17} />
                             </span>
                             <span class="pg-settings-rail__body">
                                 <span class="pg-settings-rail__title">{item.title}</span>

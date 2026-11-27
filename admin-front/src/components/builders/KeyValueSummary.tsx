@@ -1,7 +1,7 @@
 import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {StatusBadge} from "@pg/ui";
 import { summarizeValue, type SummaryRow } from "./model/jsonTree";
 
 export type KeyValueItem = {

@@ -1,6 +1,6 @@
 import { computed, ref, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
@@ -9,14 +9,14 @@ import { urlsMap } from "@/constants/urlsMap";
 import { hasOneOfAuthorities } from "@/state/user";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
-import { StateView } from "@/components/StateView";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import {StateView} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
 import { KeyValueSummary, type KeyValueItem } from "@/components/builders/KeyValueSummary";
 import { durationText } from "@/components/builders/AmlParamsBuilder";
 import { readApiErrorInfo, summarizeReportingConditions, windowSecondsLabel } from "@/components/builders/model";
@@ -152,7 +152,7 @@ export const ReportingRulesTab = defineComponent({
                         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
                             <span>{t("Promotion submitted for four-eyes approval.")}</span>
                             {submittedApproval.value && <MonoRef value={submittedApproval.value} />}
-                            <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</VBtn>
+                            <PgButton size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</PgButton>
                         </div>
                     </VAlert>
                 )}
@@ -214,9 +214,9 @@ export const ReportingRulesTab = defineComponent({
                                                 </td>
                                                 <td style={cell}>
                                                     {!confirmed && canPromote.value && (
-                                                        <VBtn size="small" variant="tonal" prependIcon="mdi-arrow-up-bold-circle-outline" onClick={() => openPromote(rule)}>
+                                                        <PgButton size="small" variant="tonal" prependIcon="mdi-arrow-up-bold-circle-outline" onClick={() => openPromote(rule)}>
                                                             {t("Promote to confirmed")}
-                                                        </VBtn>
+                                                        </PgButton>
                                                     )}
                                                 </td>
                                             </tr>

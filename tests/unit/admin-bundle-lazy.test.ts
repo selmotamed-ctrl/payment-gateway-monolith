@@ -39,10 +39,10 @@ describe("heavy libraries are loaded on first use, not with the page", () => {
 
   test("no page or component imports the chart component statically (use the lazy wrapper)", () => {
     const offenders = files
-      .filter((file) => file.rel !== "components/EChart/lazy.tsx" && file.rel !== "components/EChart/index.tsx")
-      .filter((file) => staticImports(file.text).some((spec) => /^@\/components\/EChart(\/index)?$/.test(spec)));
+      .filter((file) => file.rel !== "charts/EChart/lazy.tsx" && file.rel !== "charts/EChart/index.tsx")
+      .filter((file) => staticImports(file.text).some((spec) => /^@\/charts\/EChart(\/index)?$/.test(spec)));
     expect(offenders.map((file) => file.rel)).toEqual([]);
-    const lazy = files.find((file) => file.rel === "components/EChart/lazy.tsx")!;
+    const lazy = files.find((file) => file.rel === "charts/EChart/lazy.tsx")!;
     expect(lazy.text).toContain('import("./index")');
   });
 

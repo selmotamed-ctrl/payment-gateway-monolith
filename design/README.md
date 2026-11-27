@@ -29,6 +29,7 @@ Every file here is mapped in [`../project-design/appendices/design-source-map.md
 | `05-testing/` | `master_exhaustive_test_plan_for_opencode.md`: exhaustive test plan (assertion counts aspirational) | REFERENCE | `parts/08-testing/00..03` |
 | | `multi_machine_topology_and_stress_test_plan.md`: JSON-configured N-machine topology and stress lab | ACTIVE | `parts/08-testing/04-multi-machine-matrix.md` |
 | `06-ui/` | `portal_ui_abstraction_and_modern_fintech_redesign_2.md`: portal design system v2 | ACTIVE | `parts/03-admin-front/00,02` |
+| `06-ui/` | `fintech_2026_vapor_ui_architecture_and_remediation_plan.md`: shared `@pg/ui` 2026 Fintech Vapor design system and four-portal remediation (implemented 2026-11-27) | IMPLEMENTED | `parts/03-admin-front/00-ui-system.md`, `parts/04-merchant-front/00`, `parts/05-checkout-front/00`, `parts/06-fake-rails/02`, `parts/08-testing/01` |
 | | `pg_companion_offline_android_app.md`: approved offline Android Guide + Academy companion blueprint | ACTIVE | `parts/10-companion/00-offline-companion.md` |
 | | `portal_ui_implementation_plan.md`: as-built execution record for the UI redesign | REFERENCE | `parts/03-admin-front/**` |
 | | `admin_front_complete_feature_and_missing_pages_plan.md`: admin-front completion plan (implemented 2026-11-06) | REFERENCE | `parts/03-admin-front/00,01,02` |

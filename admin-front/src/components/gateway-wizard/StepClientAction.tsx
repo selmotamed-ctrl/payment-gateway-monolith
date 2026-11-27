@@ -1,10 +1,10 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn, VSelect, VSwitch, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { FormField } from "@/components/ui/FormField";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {VAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 import { WizardSection } from "./WizardSection";
 import type { WizardClientAction, WizardConfirmationChannel, WizardPollPolicy } from "./types";
 import type { WizardStepProps } from "./StepIdentity";
@@ -124,9 +124,9 @@ export const StepClientAction = dc(
                 title={t("Client Action & Channels")}
                 v-slots={{
                     headerActions: () => (
-                        <VBtn variant="tonal" size="small" onClick={addAction}>
+                        <PgButton variant="tonal" size="small" onClick={addAction}>
                             {t("Add")}
-                        </VBtn>
+                        </PgButton>
                     ),
                 }}
             >
@@ -145,7 +145,7 @@ export const StepClientAction = dc(
                             >
                                 <div style={gridStyle}>
                                     <FormField label={t("Client Action")}>
-                                        <VSelect
+                                        <PgAutocomplete
                                             items={[
                                                 "SHOW_OTP_FORM",
                                                 "HTTP_REDIRECT",
@@ -158,7 +158,7 @@ export const StepClientAction = dc(
                                         />
                                     </FormField>
                                     <FormField label={t("Merchant Name")}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={action.name}
                                             onUpdate:modelValue={(v: string) => updateAction(index, { name: v })}
                                         />
@@ -168,14 +168,14 @@ export const StepClientAction = dc(
                                 {action.kind === "SHOW_OTP_FORM" && (
                                     <div style={gridStyle}>
                                         <FormField label="otp_length">
-                                            <VTextField
+                                            <PgTextField
                                                 type="number"
                                                 modelValue={action.otpLength}
                                                 onUpdate:modelValue={(v: any) => updateAction(index, { otpLength: Number(v) })}
                                             />
                                         </FormField>
                                         <FormField label="max_attempts">
-                                            <VTextField
+                                            <PgTextField
                                                 type="number"
                                                 modelValue={action.maxOtpAttempts}
                                                 onUpdate:modelValue={(v: any) =>
@@ -184,7 +184,7 @@ export const StepClientAction = dc(
                                             />
                                         </FormField>
                                         <FormField label="resend_cooldown_seconds">
-                                            <VTextField
+                                            <PgTextField
                                                 type="number"
                                                 modelValue={action.resendCooldownSeconds}
                                                 onUpdate:modelValue={(v: any) =>
@@ -198,14 +198,14 @@ export const StepClientAction = dc(
                                 {action.kind === "HTTP_REDIRECT" && (
                                     <div style={gridStyle}>
                                         <FormField label="method">
-                                            <VSelect
+                                            <PgAutocomplete
                                                 items={["GET", "POST_FORM"]}
                                                 modelValue={action.redirectMethod}
                                                 onUpdate:modelValue={(v: any) => updateAction(index, { redirectMethod: v })}
                                             />
                                         </FormField>
                                         <FormField label={t("Redirect URL")}>
-                                            <VTextField
+                                            <PgTextField
                                                 modelValue={action.redirectUrl}
                                                 onUpdate:modelValue={(v: string) => updateAction(index, { redirectUrl: v })}
                                             />
@@ -216,13 +216,13 @@ export const StepClientAction = dc(
                                 {action.kind === "RENDER_EMBEDDED" && (
                                     <div style={gridStyle}>
                                         <FormField label="script_urls">
-                                            <VTextField
+                                            <PgTextField
                                                 modelValue={listToString(action.scriptUrls)}
                                                 onUpdate:modelValue={(v: string) => updateAction(index, { scriptUrls: stringToList(v) })}
                                             />
                                         </FormField>
                                         <FormField label="script_sri_hashes">
-                                            <VTextField
+                                            <PgTextField
                                                 modelValue={listToString(action.scriptSriHashes)}
                                                 onUpdate:modelValue={(v: string) =>
                                                     updateAction(index, { scriptSriHashes: stringToList(v) })
@@ -230,7 +230,7 @@ export const StepClientAction = dc(
                                             />
                                         </FormField>
                                         <FormField label="allowed_origins">
-                                            <VTextField
+                                            <PgTextField
                                                 modelValue={listToString(action.allowedOrigins)}
                                                 onUpdate:modelValue={(v: string) =>
                                                     updateAction(index, { allowedOrigins: stringToList(v) })
@@ -238,7 +238,7 @@ export const StepClientAction = dc(
                                             />
                                         </FormField>
                                         <FormField label="iframe_sandbox">
-                                            <VTextField
+                                            <PgTextField
                                                 modelValue={action.iframeSandbox}
                                                 onUpdate:modelValue={(v: string) => updateAction(index, { iframeSandbox: v })}
                                             />
@@ -249,32 +249,32 @@ export const StepClientAction = dc(
                                 {action.kind === "SHOW_QR_OR_CODE" && (
                                     <div style={gridStyle}>
                                         <FormField label="qr_payload">
-                                            <VTextField
+                                            <PgTextField
                                                 modelValue={action.qrPayload}
                                                 onUpdate:modelValue={(v: string) => updateAction(index, { qrPayload: v })}
                                             />
                                         </FormField>
                                         <FormField label="pay_code">
-                                            <VTextField
+                                            <PgTextField
                                                 modelValue={action.payCode}
                                                 onUpdate:modelValue={(v: string) => updateAction(index, { payCode: v })}
                                             />
                                         </FormField>
                                         <FormField label="deep_link_url">
-                                            <VTextField
+                                            <PgTextField
                                                 modelValue={action.deepLinkUrl}
                                                 onUpdate:modelValue={(v: string) => updateAction(index, { deepLinkUrl: v })}
                                             />
                                         </FormField>
                                         <FormField label="instructions_ar">
-                                            <VTextarea
+                                            <PgTextarea
                                                 modelValue={action.instructionsAr}
                                                 onUpdate:modelValue={(v: string) => updateAction(index, { instructionsAr: v })}
                                                 rows={2}
                                             />
                                         </FormField>
                                         <FormField label="instructions_en">
-                                            <VTextarea
+                                            <PgTextarea
                                                 modelValue={action.instructionsEn}
                                                 onUpdate:modelValue={(v: string) => updateAction(index, { instructionsEn: v })}
                                                 rows={2}
@@ -286,13 +286,13 @@ export const StepClientAction = dc(
                                 {action.kind === "SHOW_PUSH_OR_TRANSFER" && (
                                     <div style={gridStyle}>
                                         <FormField label="wallet_hint">
-                                            <VTextField
+                                            <PgTextField
                                                 modelValue={action.walletHint}
                                                 onUpdate:modelValue={(v: string) => updateAction(index, { walletHint: v })}
                                             />
                                         </FormField>
                                         <FormField label="destination_account">
-                                            <VTextField
+                                            <PgTextField
                                                 modelValue={action.destinationAccount}
                                                 onUpdate:modelValue={(v: string) =>
                                                     updateAction(index, { destinationAccount: v })
@@ -300,14 +300,14 @@ export const StepClientAction = dc(
                                             />
                                         </FormField>
                                         <FormField label="instructions_ar">
-                                            <VTextarea
+                                            <PgTextarea
                                                 modelValue={action.instructionsAr}
                                                 onUpdate:modelValue={(v: string) => updateAction(index, { instructionsAr: v })}
                                                 rows={2}
                                             />
                                         </FormField>
                                         <FormField label="instructions_en">
-                                            <VTextarea
+                                            <PgTextarea
                                                 modelValue={action.instructionsEn}
                                                 onUpdate:modelValue={(v: string) => updateAction(index, { instructionsEn: v })}
                                                 rows={2}
@@ -325,12 +325,12 @@ export const StepClientAction = dc(
                         v-slots={{
                             actions: () => (
                                 <>
-                                    <VBtn variant="tonal" size="small" onClick={validateMustInquire}>
+                                    <PgButton variant="tonal" size="small" onClick={validateMustInquire}>
                                         {t("Must Inquire")}
-                                    </VBtn>
-                                    <VBtn variant="tonal" size="small" onClick={addChannel}>
+                                    </PgButton>
+                                    <PgButton variant="tonal" size="small" onClick={addChannel}>
                                         {t("Add")}
-                                    </VBtn>
+                                    </PgButton>
                                 </>
                             ),
                         }}
@@ -363,7 +363,7 @@ export const StepClientAction = dc(
                             >
                                 <div style={gridStyle}>
                                     <FormField label={t("Confirmation Channel")}>
-                                        <VSelect
+                                        <PgAutocomplete
                                             items={[
                                                 "SYNC_RESPONSE",
                                                 "WEBHOOK",
@@ -378,19 +378,19 @@ export const StepClientAction = dc(
                                         />
                                     </FormField>
                                     <FormField label={t("Merchant Name")}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={channel.name}
                                             onUpdate:modelValue={(v: string) => updateChannel(index, { name: v })}
                                         />
                                     </FormField>
                                     <FormField label="secret_ref" sensitiveMakerChecker>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={channel.secretRef}
                                             onUpdate:modelValue={(v: string) => updateChannel(index, { secretRef: v })}
                                         />
                                     </FormField>
                                     <FormField label={t("IP Whitelist")}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={listToString(channel.ipAllowlist)}
                                             onUpdate:modelValue={(v: string) =>
                                                 updateChannel(index, { ipAllowlist: stringToList(v) })
@@ -398,7 +398,7 @@ export const StepClientAction = dc(
                                         />
                                     </FormField>
                                     <FormField label="timestamp_tolerance_sec">
-                                        <VTextField
+                                        <PgTextField
                                             type="number"
                                             modelValue={channel.timestampToleranceSeconds}
                                             onUpdate:modelValue={(v: any) =>
@@ -407,7 +407,7 @@ export const StepClientAction = dc(
                                         />
                                     </FormField>
                                     <FormField label={t("Must Inquire")}>
-                                        <VSwitch
+                                        <PgSwitch
                                             modelValue={channel.mustInquire}
                                             onUpdate:modelValue={(v: boolean | null) => updateChannel(index, { mustInquire: !!v })}
                                             density="compact"
@@ -424,9 +424,9 @@ export const StepClientAction = dc(
                         divider
                         v-slots={{
                             actions: () => (
-                                <VBtn variant="tonal" size="small" onClick={addPoll}>
+                                <PgButton variant="tonal" size="small" onClick={addPoll}>
                                     {t("Add")}
-                                </VBtn>
+                                </PgButton>
                             ),
                         }}
                     >
@@ -438,20 +438,20 @@ export const StepClientAction = dc(
                             >
                                 <div style={gridStyle}>
                                     <FormField label={t("Merchant Name")}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={policy.name}
                                             onUpdate:modelValue={(v: string) => updatePoll(index, { name: v })}
                                         />
                                     </FormField>
                                     <FormField label="interval_seconds">
-                                        <VTextField
+                                        <PgTextField
                                             type="number"
                                             modelValue={policy.intervalSeconds}
                                             onUpdate:modelValue={(v: any) => updatePoll(index, { intervalSeconds: Number(v) })}
                                         />
                                     </FormField>
                                     <FormField label="backoff_schedule">
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={(policy.backoffSchedule ?? []).join(",")}
                                             onUpdate:modelValue={(v: string) =>
                                                 updatePoll(index, {
@@ -464,14 +464,14 @@ export const StepClientAction = dc(
                                         />
                                     </FormField>
                                     <FormField label="max_attempts">
-                                        <VTextField
+                                        <PgTextField
                                             type="number"
                                             modelValue={policy.maxAttempts}
                                             onUpdate:modelValue={(v: any) => updatePoll(index, { maxAttempts: Number(v) })}
                                         />
                                     </FormField>
                                     <FormField label="timeout_seconds">
-                                        <VTextField
+                                        <PgTextField
                                             type="number"
                                             modelValue={policy.timeoutSeconds}
                                             onUpdate:modelValue={(v: any) => updatePoll(index, { timeoutSeconds: Number(v) })}

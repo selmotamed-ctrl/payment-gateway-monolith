@@ -1,9 +1,9 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
-import { VAlert, VBtn, VCard, VCardText, VSelect, VTextarea, VTextField } from "@/components/vael/VuetifyShim";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
+import {VAlert, PgButton, PgCard, PgCardText, PgAutocomplete, PgTextarea, PgTextField} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StatusChip} from "@pg/ui";
 import { runTransform, TRANSFORM_OPS, type TransformResult } from "@/components/guide/transform";
 
 const MONO_STYLE = {
@@ -47,22 +47,22 @@ export const TransformPlayground = dc(() => {
     };
 
     return () => (
-        <VCard variant="outlined">
-            <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+        <PgCard variant="outlined">
+            <PgCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                 <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "8px" }}>
                     {PRESETS.map((preset) => (
-                        <VBtn key={preset.value} size="small" variant="tonal" onClick={() => applyPreset(preset.value)}>
+                        <PgButton key={preset.value} size="small" variant="tonal" onClick={() => applyPreset(preset.value)}>
                             {preset.title}
-                        </VBtn>
+                        </PgButton>
                     ))}
                 </ThemedView>
-                <VTextarea
+                <PgTextarea
                     modelValue={input.value}
                     onUpdate:modelValue={(value: string) => (input.value = value ?? "")}
                     label="Input value"
                     rows={2}
                 />
-                <VSelect
+                <PgAutocomplete
                     multiple
                     chips
                     closableChips
@@ -71,16 +71,16 @@ export const TransformPlayground = dc(() => {
                     items={items}
                     label="TransformPipe[] (applied left to right)"
                 />
-                <VTextField
+                <PgTextField
                     modelValue={args.value}
                     onUpdate:modelValue={(value: string) => (args.value = value ?? "")}
                     label="Arguments (comma separated)"
                     hint="Example: 1000 for scale(1000); 2,2 for round(2) then format_decimal(2)"
                     persistentHint
                 />
-                <VBtn prependIcon="mdi-play" onClick={() => (result.value = runTransform(input.value, ops.value, args.value))}>
+                <PgButton prependIcon="mdi-play" onClick={() => (result.value = runTransform(input.value, ops.value, args.value))}>
                     Run TransformPipe
-                </VBtn>
+                </PgButton>
                 {result.value ? (
                     <ThemedView style={{ gap: "8px" }}>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
@@ -91,23 +91,23 @@ export const TransformPlayground = dc(() => {
                             <ThemedText style={{ fontSize: "12px", opacity: 0.7 }}>{`${result.value.steps.length} steps`}</ThemedText>
                         </ThemedView>
                         {result.value.steps.map((step, index) => (
-                            <VCard key={`${step.op}-${index}`} variant="outlined">
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                            <PgCard key={`${step.op}-${index}`} variant="outlined">
+                                <PgCardText style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                     <StatusChip label={`${index + 1}. ${step.op}`} tone={step.ok ? "primary" : "error"} size="x-small" />
                                     <pre style={{ ...MONO_STYLE, padding: "8px", borderRadius: "8px", background: "rgba(100,116,139,0.10)" }}>
                                         {step.output}
                                     </pre>
                                     {step.note ? <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>{step.note}</ThemedText> : null}
-                                </VCardText>
-                            </VCard>
+                                </PgCardText>
+                            </PgCard>
                         ))}
                         <VAlert type="success" variant="tonal" density="compact">
                             <pre style={MONO_STYLE}>{result.value.final}</pre>
                         </VAlert>
                     </ThemedView>
                 ) : null}
-            </VCardText>
-        </VCard>
+            </PgCardText>
+        </PgCard>
     );
 });
 

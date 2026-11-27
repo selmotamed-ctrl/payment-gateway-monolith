@@ -1,6 +1,6 @@
 import { ref, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VBtn, VTextField } from "@/components/vael/VuetifyShim";
+import {PgButton, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { parseListEntry } from "./model/jsonTree";
 
@@ -94,7 +94,7 @@ export const ChipListInput = defineComponent({
                                 >
                                     <span dir="auto" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{text}</span>
                                     {!props.disabled && (
-                                        <VBtn
+                                        <PgButton
                                             icon="mdi-close"
                                             variant="text"
                                             size="x-small"
@@ -110,7 +110,7 @@ export const ChipListInput = defineComponent({
                 )}
                 {!props.disabled && (
                     <div style={{ display: "flex", gap: "6px", alignItems: "flex-start" }}>
-                        <VTextField
+                        <PgTextField
                             modelValue={draft.value}
                             onUpdate:modelValue={(value: string) => {
                                 draft.value = value;
@@ -124,7 +124,7 @@ export const ChipListInput = defineComponent({
                             errorMessages={error.value ? [error.value] : []}
                             style={{ flex: 1, minInlineSize: 0 }}
                         />
-                        <VBtn variant="tonal" size="small" onClick={() => commit(draft.value)} aria-label={t("Add")} icon="mdi-plus" />
+                        <PgButton variant="tonal" size="small" onClick={() => commit(draft.value)} aria-label={t("Add")} icon="mdi-plus" />
                     </div>
                 )}
             </div>

@@ -2,25 +2,25 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VDivider, VIcon, VSwitch, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
+import {VAlert, PgButton, PgDivider, PgIcon, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MetaPill } from "@/components/ui/MetaPill";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
 type FaqItem = {
     q_ar: string;
     a_ar: string;
@@ -446,13 +446,13 @@ const AdminCheckoutHelpPage = dc(() => {
                                 toneOverride={isDirty.value ? "warning" : "success"}
                                 showDot={false}
                             />
-                            <VBtn size="small" variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyConfiguration()}>
+                            <PgButton size="small" variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyConfiguration()}>
                                 {tr("نسخ الإعدادات", "Copy configuration")}
-                            </VBtn>
+                            </PgButton>
                             {isDirty.value && (
-                                <VBtn size="small" variant="text" prependIcon="mdi-undo" onClick={discardChanges}>
+                                <PgButton size="small" variant="text" prependIcon="mdi-undo" onClick={discardChanges}>
                                     {tr("تجاهل التغييرات", "Discard changes")}
-                                </VBtn>
+                                </PgButton>
                             )}
                         </ThemedView>
                     )</PageHeader>
@@ -528,10 +528,10 @@ const AdminCheckoutHelpPage = dc(() => {
                                 </VAlert>
                             )}
 
-                            <VDivider />
+                            <PgDivider />
 
                             <ThemedView style={{ gap: "4px" }}>
-                                <VSwitch
+                                <PgSwitch
                                     modelValue={form.value.enabled}
                                     onUpdate:modelValue={(value: boolean | null) => (form.value.enabled = !!value)}
                                     label={tr("تفعيل قسم التواصل مع الدعم", "Enable contact support")}
@@ -546,7 +546,7 @@ const AdminCheckoutHelpPage = dc(() => {
                                 </ThemedText>
                             </ThemedView>
 
-                            <VSwitch
+                            <PgSwitch
                                 modelValue={form.value.show_platform_contact}
                                 onUpdate:modelValue={(value: boolean | null) =>
                                     (form.value.show_platform_contact = !!value)
@@ -556,7 +556,7 @@ const AdminCheckoutHelpPage = dc(() => {
                                 hideDetails
                             />
 
-                            <VSwitch
+                            <PgSwitch
                                 modelValue={form.value.show_merchant_contact}
                                 onUpdate:modelValue={(value: boolean | null) =>
                                     (form.value.show_merchant_contact = !!value)
@@ -573,7 +573,7 @@ const AdminCheckoutHelpPage = dc(() => {
                                     sensitiveMakerChecker
                                     style={{ flex: "1 1 260px", minWidth: "220px" }}
                                 >
-                                    <VTextField
+                                    <PgTextField
                                         modelValue={form.value.support_phone}
                                         onUpdate:modelValue={(value: string) => (form.value.support_phone = value)}
                                         placeholder="+218..."
@@ -586,7 +586,7 @@ const AdminCheckoutHelpPage = dc(() => {
                                     sensitiveMakerChecker
                                     style={{ flex: "1 1 260px", minWidth: "220px" }}
                                 >
-                                    <VTextField
+                                    <PgTextField
                                         modelValue={form.value.support_whatsapp}
                                         onUpdate:modelValue={(value: string) => (form.value.support_whatsapp = value)}
                                         placeholder="+218..."
@@ -600,7 +600,7 @@ const AdminCheckoutHelpPage = dc(() => {
                                 error={emailInvalid.value ? tr("أدخل بريداً إلكترونياً صحيحاً", "Enter a valid email address") : ""}
                                 sensitiveMakerChecker
                             >
-                                <VTextField
+                                <PgTextField
                                     modelValue={form.value.support_email}
                                     onUpdate:modelValue={(value: string) => (form.value.support_email = value)}
                                     placeholder="support@example.com"
@@ -611,14 +611,14 @@ const AdminCheckoutHelpPage = dc(() => {
 
                             <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "12px" }}>
                                 <FormField label={tr("ساعات العمل (عربي)", "Working hours (Arabic)")} style={{ flex: "1 1 260px", minWidth: "220px" }}>
-                                    <VTextField
+                                    <PgTextField
                                         modelValue={form.value.working_hours_ar}
                                         onUpdate:modelValue={(value: string) => (form.value.working_hours_ar = value)}
                                         placeholder="الأحد - الخميس 9:00 - 17:00"
                                     />
                                 </FormField>
                                 <FormField label={tr("ساعات العمل (إنجليزي)", "Working hours (English)")} style={{ flex: "1 1 260px", minWidth: "220px" }}>
-                                    <VTextField
+                                    <PgTextField
                                         modelValue={form.value.working_hours_en}
                                         onUpdate:modelValue={(value: string) => (form.value.working_hours_en = value)}
                                         placeholder="Sun - Thu 9:00 - 17:00"
@@ -626,7 +626,7 @@ const AdminCheckoutHelpPage = dc(() => {
                                 </FormField>
                             </ThemedView>
 
-                            <VDivider />
+                            <PgDivider />
 
                             <ThemedView
                                 style={{
@@ -638,14 +638,14 @@ const AdminCheckoutHelpPage = dc(() => {
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "15px", flex: 1 }}>
                                     {tr("الأسئلة الشائعة", "FAQ")}
                                 </ThemedText>
-                                <VBtn
+                                <PgButton
                                     size="small"
                                     variant="tonal"
                                     prependIcon="mdi-plus"
                                     onClick={() => addFaq()}
                                 >
                                     {tr("إضافة سؤال", "Add FAQ")}
-                                </VBtn>
+                                </PgButton>
                             </ThemedView>
 
                             {form.value.faq_items.length === 0 && (
@@ -677,7 +677,7 @@ const AdminCheckoutHelpPage = dc(() => {
                                             <ThemedText type="defaultSemiBold" style={{ fontSize: "13px", flex: 1 }}>
                                                 {tr("سؤال", "FAQ item")} #{index + 1}
                                             </ThemedText>
-                                            <VBtn
+                                            <PgButton
                                                 size="small"
                                                 variant="text"
                                                 color="error"
@@ -685,18 +685,18 @@ const AdminCheckoutHelpPage = dc(() => {
                                                 onClick={() => removeFaq(index)}
                                             >
                                                 {tr("حذف", "Remove")}
-                                            </VBtn>
+                                            </PgButton>
                                         </ThemedView>
 
                                         <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "10px" }}>
                                             <FormField label={tr("السؤال (عربي)", "Question (Arabic)")} style={{ flex: "1 1 260px", minWidth: "220px" }}>
-                                                <VTextField
+                                                <PgTextField
                                                     modelValue={item.q_ar}
                                                     onUpdate:modelValue={(value: string) => (item.q_ar = value)}
                                                 />
                                             </FormField>
                                             <FormField label={tr("السؤال (إنجليزي)", "Question (English)")} style={{ flex: "1 1 260px", minWidth: "220px" }}>
-                                                <VTextField
+                                                <PgTextField
                                                     modelValue={item.q_en}
                                                     onUpdate:modelValue={(value: string) => (item.q_en = value)}
                                                 />
@@ -704,7 +704,7 @@ const AdminCheckoutHelpPage = dc(() => {
                                         </ThemedView>
 
                                         <FormField label={tr("الإجابة (عربي)", "Answer (Arabic)")}>
-                                            <VTextarea
+                                            <PgTextarea
                                                 modelValue={item.a_ar}
                                                 onUpdate:modelValue={(value: string) => (item.a_ar = value)}
                                                 rows={2}
@@ -712,7 +712,7 @@ const AdminCheckoutHelpPage = dc(() => {
                                             />
                                         </FormField>
                                         <FormField label={tr("الإجابة (إنجليزي)", "Answer (English)")}>
-                                            <VTextarea
+                                            <PgTextarea
                                                 modelValue={item.a_en}
                                                 onUpdate:modelValue={(value: string) => (item.a_en = value)}
                                                 rows={2}
@@ -733,16 +733,16 @@ const AdminCheckoutHelpPage = dc(() => {
                                 incompleteMessage={tr("أكمل قائمة التحقق قبل الحفظ", "Complete the edit checklist before saving")}
                             />
                             <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
-                                <VBtn
+                                <PgButton
                                     variant="tonal"
                                     loading={loading.value}
                                     onClick={() => void load()}
                                 >
                                     {tr("إعادة تحميل", "Reload")}
-                                </VBtn>
-                                <VBtn color="primary" loading={saving.value} disabled={saving.value || !isDirty.value || hasValidationError.value || !editChecklistComplete.value} onClick={() => void save()}>
+                                </PgButton>
+                                <PgButton color="primary" loading={saving.value} disabled={saving.value || !isDirty.value || hasValidationError.value || !editChecklistComplete.value} onClick={() => void save()}>
                                     {tr("حفظ", "Save")}
-                                </VBtn>
+                                </PgButton>
                             </ThemedView>
                         </SurfaceCardText>
                     </SurfaceCard>
@@ -750,7 +750,7 @@ const AdminCheckoutHelpPage = dc(() => {
                     <SurfaceCard style={{ flex: "1 1 340px", minWidth: "300px" }}>
                         <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
-                                <VIcon icon="mdi-eye-outline" color="primary" />
+                                <PgIcon icon="mdi-eye-outline" color="primary" />
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
                                     {tr("معاينة مباشرة", "Live preview")}
                                 </ThemedText>
@@ -762,7 +762,7 @@ const AdminCheckoutHelpPage = dc(() => {
                                 )}
                             </ThemedText>
 
-                            <VDivider />
+                            <PgDivider />
 
                             <ThemedView style={{ gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "14px" }}>
@@ -803,7 +803,7 @@ const AdminCheckoutHelpPage = dc(() => {
                                                         style={{ flexDirection: "row", flexWrap: "wrap", gap: "8px" }}
                                                     >
                                                         {!!previewWhatsappHref.value && (
-                                                            <VBtn
+                                                            <PgButton
                                                                 size="small"
                                                                 variant="tonal"
                                                                 color="success"
@@ -811,25 +811,25 @@ const AdminCheckoutHelpPage = dc(() => {
                                                                 href={previewWhatsappHref.value}
                                                             >
                                                                 WhatsApp
-                                                            </VBtn>
+                                                            </PgButton>
                                                         )}
                                                         {!!previewPhone.value && (
-                                                            <VBtn
+                                                            <PgButton
                                                                 size="small"
                                                                 variant="tonal"
                                                                 prependIcon="mdi-phone"
                                                             >
                                                                 {previewPhone.value}
-                                                            </VBtn>
+                                                            </PgButton>
                                                         )}
                                                         {!!previewEmail.value && (
-                                                            <VBtn
+                                                            <PgButton
                                                                 size="small"
                                                                 variant="tonal"
                                                                 prependIcon="mdi-email-outline"
                                                             >
                                                                 {previewEmail.value}
-                                                            </VBtn>
+                                                            </PgButton>
                                                         )}
                                                     </ThemedView>
                                                 ) : (
@@ -863,7 +863,7 @@ const AdminCheckoutHelpPage = dc(() => {
                                 )}
                             </ThemedView>
 
-                            <VDivider />
+                            <PgDivider />
 
                             <ThemedView style={{ gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "14px" }}>
@@ -919,9 +919,9 @@ const AdminCheckoutHelpPage = dc(() => {
                                 {tr("سجل إصدارات الإعدادات", "Configuration version history")}
                             </ThemedText>
                             <MetaPill size="x-small" variant="tonal">{history.value.length}</MetaPill>
-                            <VBtn size="small" variant="text" loading={historyLoading.value} onClick={() => void loadHistory()}>
+                            <PgButton size="small" variant="text" loading={historyLoading.value} onClick={() => void loadHistory()}>
                                 {tr("تحديث", "Refresh")}
-                            </VBtn>
+                            </PgButton>
                         </ThemedView>
                         {history.value.length === 0 && (
                             <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>
@@ -938,15 +938,15 @@ const AdminCheckoutHelpPage = dc(() => {
                                     {index === 0 && <StatusBadge status="CURRENT" label={tr("الحالي", "Current")} toneOverride="success" showDot={false} />}
                                     <div style={{ flex: 1 }} />
                                     {index !== 0 && (
-                                        <VBtn
+                                        <PgButton
                                             size="x-small"
                                             variant="text"
                                             onClick={() => (compareVersion.value = version)}
                                         >
                                             {tr("مقارنة مع الحالي", "Compare with current")}
-                                        </VBtn>
+                                        </PgButton>
                                     )}
-                                    <VBtn
+                                    <PgButton
                                         size="x-small"
                                         variant="text"
                                         disabled={index === 0}
@@ -956,7 +956,7 @@ const AdminCheckoutHelpPage = dc(() => {
                                         }}
                                     >
                                         {tr("تحميل في المحرر", "Load into editor")}
-                                    </VBtn>
+                                    </PgButton>
                                 </ThemedView>
                                 <DescriptionList
                                     columns={2}
@@ -974,9 +974,9 @@ const AdminCheckoutHelpPage = dc(() => {
                                         <ThemedText type="defaultSemiBold" style={{ fontSize: "13px", flex: 1 }}>
                                             {tr("مقارنة", "Comparing")} v{compareVersion.value.version} → v{history.value[0]?.version}
                                         </ThemedText>
-                                        <VBtn size="x-small" variant="text" onClick={() => (compareVersion.value = null)}>
+                                        <PgButton size="x-small" variant="text" onClick={() => (compareVersion.value = null)}>
                                             {tr("مسح المقارنة", "Clear comparison")}
-                                        </VBtn>
+                                        </PgButton>
                                     </ThemedView>
                                     {diffRows.value.length === 0 && (
                                         <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>

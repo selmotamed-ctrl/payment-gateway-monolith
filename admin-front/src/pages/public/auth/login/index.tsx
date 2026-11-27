@@ -3,7 +3,7 @@ import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
 import { useForm } from "vael-form";
 import { validator } from "vael-form/validator";
-import { Button, Field, Input, Message, OtpInput, PasswordInput } from "vael-ui/vapor";
+
 import { dc } from "@/utils/dc";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -14,8 +14,8 @@ import { showSnackBar } from "@/utils/snackBar";
 import { setLocale } from "@/plugins/localization";
 import router from "@/router";
 import AuthLayout from "@/layouts/auth";
-import { AppIcon } from "@/components/AppIcon";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {AppIcon, PgAlert, PgButton, PgFormField, PgOtpInput, PgTextField} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
 
 type LoginValues = {
     identifier: string;
@@ -211,32 +211,32 @@ const LoginPage = dc(() => {
                     {typeof route.query.redirect === "string" &&
                         route.query.redirect.startsWith("/") &&
                         !route.query.redirect.startsWith("//") && (
-                            <Message variant="info">{t("Sign in to continue to your previous page.")}</Message>
+                            <PgAlert tone="info">{t("Sign in to continue to your previous page.")}</PgAlert>
                         )}
 
-                    {error.value && <Message variant="error" class="v-alert">{error.value}</Message>}
+                    {error.value && <PgAlert tone="danger">{error.value}</PgAlert>}
 
                     {capsLock.value && !mfaChallengeId.value && (
-                        <Message variant="warning">
+                        <PgAlert tone="warning">
                             {t("Caps Lock is on. Password letters may be entered in the wrong case.")}
-                        </Message>
+                        </PgAlert>
                     )}
 
                     {mfaChallengeId.value ? (
                         <>
-                            <Message variant="info">
+                            <PgAlert tone="info">
                                 {mfaChannels.value.includes("EMAIL") && mfaChannels.value.includes("SMS")
                                     ? t("Enter the six-digit code sent to your email address and phone.")
                                     : mfaChannels.value.includes("SMS")
                                       ? t("Enter the six-digit code sent to your phone.")
                                       : t("Enter the six-digit code sent to your email address.")}
-                            </Message>
-                            <Field
+                            </PgAlert>
+                            <PgFormField
                                 label={t("MFA code")}
                                 error={form.errors.mfaCode}
                                 required
                             >
-                                <OtpInput
+                                <PgOtpInput
                                     {...form.attrs.mfaCode}
                                     modelValue={form.model.mfaCode.value}
                                     onUpdate:modelValue={(value: string) => {
@@ -245,18 +245,19 @@ const LoginPage = dc(() => {
                                     length={6}
                                     {...{ autofocus: true }}
                                 />
-                            </Field>
-                            <Button
+                            </PgFormField>
+                            <PgButton
                                 block
                                 size="lg"
+                                variant="primary"
                                 type="submit"
                                 loading={form.submitting.value}
                                 disabled={(form.model.mfaCode.value ?? "").trim().length !== 6}
                             >
                                 {t("Verify")}
-                            </Button>
+                            </PgButton>
                             <div class="d-flex flex-wrap ga-2">
-                                <Button
+                                <PgButton
                                     variant="text"
                                     size="sm"
                                     loading={resending.value}
@@ -266,35 +267,33 @@ const LoginPage = dc(() => {
                                     {resendWait.value > 0
                                         ? t("Resend in {seconds}s", { seconds: resendWait.value })
                                         : t("Resend code")}
-                                </Button>
-                                <Button variant="text" size="sm" onClick={backToCredentials}>
+                                </PgButton>
+                                <PgButton variant="text" size="sm" onClick={backToCredentials}>
                                     {t("Back")}
-                                </Button>
+                                </PgButton>
                             </div>
                         </>
                     ) : (
                         <>
-                            <Field
+                            <PgFormField
                                 label={t("Email or phone")}
                                 error={form.errors.identifier}
                                 required
                             >
-                                <Input
+                                <PgTextField
                                     {...form.attrs.identifier}
                                     modelValue={form.model.identifier.value}
                                     onUpdate:modelValue={(value: string) => {
                                         form.model.identifier.value = value;
                                     }}
-                                    {...{ autocomplete: "username", autofocus: true }}
-                                    v-slots={{
-                                        start: () => (
-                                            <AppIcon name="mdi-account-outline" size={18} />
-                                        ),
-                                    }}
+                                    autocomplete="username"
+                                    autofocus
+                                    leadingIcon="mdi-account-outline"
                                 />
-                            </Field>
-                            <Field label={t("Password")} error={form.errors.password} required>
-                                <PasswordInput
+                            </PgFormField>
+                            <PgFormField label={t("Password")} error={form.errors.password} required>
+                                <PgTextField
+                                    type="password"
                                     {...form.attrs.password}
                                     modelValue={form.model.password.value}
                                     onUpdate:modelValue={(value: string) => {
@@ -304,38 +303,38 @@ const LoginPage = dc(() => {
                                     onKeydown={onKeyState}
                                     onKeyup={onKeyState}
                                 />
-                            </Field>
-                            <Button
+                            </PgFormField>
+                            <PgButton
                                 block
                                 size="lg"
+                                variant="primary"
                                 type="submit"
                                 loading={form.submitting.value}
                                 disabled={
                                     !form.model.identifier.value || !form.model.password.value
                                 }
-                                style={{ height: "38px" }}
                             >
                                 {t("Login")}
-                            </Button>
+                            </PgButton>
                         </>
                     )}
 
                     {!mfaChallengeId.value && (
                         <div class="d-flex flex-wrap ga-2 justify-space-between">
-                            <Button
+                            <PgButton
                                 variant="text"
                                 size="sm"
                                 onClick={() => void router.push({ name: "AcceptInvitation" })}
                             >
                                 {t("I have an invitation code")}
-                            </Button>
-                            <Button
+                            </PgButton>
+                            <PgButton
                                 variant="text"
                                 size="sm"
                                 onClick={() => void router.push({ name: "ForgotPassword" })}
                             >
                                 {t("Forgot password?")}
-                            </Button>
+                            </PgButton>
                         </div>
                     )}
 
@@ -346,20 +345,20 @@ const LoginPage = dc(() => {
                             alignItems: "center",
                         }}
                     >
-                        <Button variant="text" size="sm" onClick={() => setLocale("ar")}>
+                        <PgButton variant="text" size="sm" onClick={() => setLocale("ar")}>
                             العربية
-                        </Button>
-                        <Button variant="text" size="sm" onClick={() => setLocale("en")}>
+                        </PgButton>
+                        <PgButton variant="text" size="sm" onClick={() => setLocale("en")}>
                             English
-                        </Button>
+                        </PgButton>
                     </div>
-                    <Button
+                    <PgButton
                         variant="text"
                         size="sm"
                         onClick={() => void copySignInDiagnostics()}
                     >
                         {t("Copy sign-in diagnostics")}
-                    </Button>
+                    </PgButton>
                 </form>
             </SurfaceCard>
         </AuthLayout>

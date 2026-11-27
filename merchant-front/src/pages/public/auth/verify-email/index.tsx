@@ -1,5 +1,5 @@
 import { dc } from "@/utils/dc";
-import { VAlert, VBtn, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { computed, ref } from "vue";
 import { useRoute } from "vue-router";
@@ -8,8 +8,8 @@ import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import router from "@/router";
 import AuthLayout from "@/layouts/auth";
-import { FormField } from "@/components/ui/FormField";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {FormField} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
 
 const VerifyEmailPage = dc(() => {
     const { t } = useLocale();
@@ -64,9 +64,9 @@ const VerifyEmailPage = dc(() => {
                             <VAlert type="success" variant="tonal" density="compact">
                                 {t("Your email is verified. Sign in to continue.")}
                             </VAlert>
-                            <VBtn block size="large" onClick={() => void router.push({ name: "Login" })}>
+                            <PgButton block size="large" onClick={() => void router.push({ name: "Login" })}>
                                 {t("Continue to sign in")}
-                            </VBtn>
+                            </PgButton>
                         </>
                     ) : (
                         <>
@@ -74,7 +74,7 @@ const VerifyEmailPage = dc(() => {
                                 {t("Enter the six-digit code sent to your email address.")}
                             </VAlert>
                             <FormField label={t("Email")} required>
-                                <VTextField
+                                <PgTextField
                                     aria-label={t("Email")}
                                     type="email"
                                     autocomplete="email"
@@ -84,7 +84,7 @@ const VerifyEmailPage = dc(() => {
                                 />
                             </FormField>
                             <FormField label={t("Verification Code")} required>
-                                <VTextField
+                                <PgTextField
                                     aria-label={t("Verification Code")}
                                     autocomplete="one-time-code"
                                     {...{ inputmode: "numeric", maxlength: "6", autofocus: true }}
@@ -93,12 +93,12 @@ const VerifyEmailPage = dc(() => {
                                     hideDetails
                                 />
                             </FormField>
-                            <VBtn block size="large" loading={loading.value} disabled={!canSubmit.value} onClick={() => void submit()}>
+                            <PgButton block size="large" loading={loading.value} disabled={!canSubmit.value} onClick={() => void submit()}>
                                 {t("Verify")}
-                            </VBtn>
-                            <VBtn variant="text" size="small" onClick={() => void resend()} loading={loading.value}>
+                            </PgButton>
+                            <PgButton variant="text" size="small" onClick={() => void resend()} loading={loading.value}>
                                 {t("Resend Code")}
-                            </VBtn>
+                            </PgButton>
                         </>
                     )}
                 </div>

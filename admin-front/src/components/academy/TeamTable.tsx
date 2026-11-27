@@ -1,11 +1,11 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import {PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {MetricStrip, type MetricItem} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
 import type { TeamRow, TeamStatus } from "@/content/academy/apiTypes";
 import { fmtDate, fmtDateShort } from "./format";
 import { ProgressBar } from "./ui/ProgressBar";
@@ -217,7 +217,7 @@ export const TeamTable = dc(
                     <div class="pg-table-card">
                         <div class="pg-table-toolbar">
                             <div class="ac-team-filters">
-                                <VTextField
+                                <PgTextField
                                     class="pg-table-search"
                                     variant="outlined"
                                     density="compact"
@@ -229,7 +229,7 @@ export const TeamTable = dc(
                                     modelValue={search.value}
                                     onUpdate:modelValue={(value: string | null) => (search.value = value ?? "")}
                                 />
-                                <VSelect
+                                <PgAutocomplete
                                     class="ac-team-select"
                                     variant="outlined"
                                     density="compact"
@@ -240,7 +240,7 @@ export const TeamTable = dc(
                                     modelValue={role.value}
                                     onUpdate:modelValue={(value: unknown) => (role.value = typeof value === "string" ? value : ALL)}
                                 />
-                                <VSelect
+                                <PgAutocomplete
                                     class="ac-team-select ac-team-select--status"
                                     variant="outlined"
                                     density="compact"
@@ -256,9 +256,9 @@ export const TeamTable = dc(
                                 <span class="pg-record-count pg-tabular" aria-hidden="true">
                                     {shown}/{total}
                                 </span>
-                                <VBtn variant="outlined" prependIcon="mdi-download" disabled={shown === 0} onClick={exportCsv}>
+                                <PgButton variant="outlined" prependIcon="mdi-download" disabled={shown === 0} onClick={exportCsv}>
                                     {`${t("Export CSV")} (${shown})`}
-                                </VBtn>
+                                </PgButton>
                             </div>
                         </div>
                         {shown === 0 ? (

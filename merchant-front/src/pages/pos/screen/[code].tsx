@@ -2,20 +2,20 @@ import { dc } from "@/utils/dc";
 import { onBeforeUnmount, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import { VBtn } from "@/components/vael/VuetifyShim";
-import { StateView } from "@/components/StateView";
+import {PgButton} from "@pg/ui";
+import {StateView} from "@pg/ui";
 import { user } from "@/state/user";
 import { openSseStream } from "@/utils/security/sseFetch";
 import { sessionHeaders } from "@/utils/security/sessionToken";
 import { urlsMap } from "@/constants/urlsMap";
 import { sandboxMirrorAbsolute } from "@/state/sandbox";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { EmptyState } from "@/components/ui/EmptyState";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
 
 type ScreenState = {
     screenCode: string;
@@ -143,14 +143,14 @@ const PosScreenPage = dc(() => {
                                 label={connected.value ? t("Live") : t("Pending")}
                                 toneOverride={connected.value ? "success" : "warning"}
                             />
-                            <VBtn
+                            <PgButton
                                 variant="outlined"
                                 size="small"
                                 onClick={() => void load()}
                                 style={{ height: "32px" }}
                             >
                                 {t("Refresh")}
-                            </VBtn>
+                            </PgButton>
                         </div>
                     )</PageHeader>
 

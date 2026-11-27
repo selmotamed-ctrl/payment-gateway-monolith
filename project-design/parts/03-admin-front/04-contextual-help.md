@@ -11,7 +11,7 @@ code:
   - admin-front/src/components/guide/useContextHelp.ts
   - admin-front/src/components/guide/SafeguardDialog.tsx
   - admin-front/src/components/guide/useSafeguard.ts
-  - admin-front/src/components/ui/PageHeader.tsx
+  - packages/ui/src/layout/PgPageHeader.tsx
   - admin-front/src/layouts/default.tsx
   - admin-front/src/content/guide/generated/context-map.json
   - merchant-front/src/components/guide/ContextualHelpDrawer.tsx
@@ -42,7 +42,7 @@ This part owns the admin contextual-help button and drawer, the 30-screen contex
 
 ### 2.1 Button
 
-`admin-front/src/components/ui/PageHeader.tsx` renders `ContextHelpButton` automatically. The button uses the current route name, preferring `route.meta.parentName` over `route.name`, and opens a shared drawer through `useContextHelp()`. Pages never wire the button by hand. The app-bar "Help & SOP" button and the `?` shortcut open the same drawer with the same parent-first rule.
+`packages/ui/src/layout/PgPageHeader.tsx` renders `ContextHelpButton` automatically. The button uses the current route name, preferring `route.meta.parentName` over `route.name`, and opens a shared drawer through `useContextHelp()`. Pages never wire the button by hand. The app-bar "Help & SOP" button and the `?` shortcut open the same drawer with the same parent-first rule.
 
 The accessible name is "How this page works".
 
@@ -100,7 +100,7 @@ The integration points are the 22 action areas named in the guide design: approv
 | Shared state | `admin-front/src/components/guide/useContextHelp.ts` |
 | Safeguard dialog | `admin-front/src/components/guide/SafeguardDialog.tsx` |
 | Safeguard composable | `admin-front/src/components/guide/useSafeguard.ts` |
-| PageHeader mount | `admin-front/src/components/ui/PageHeader.tsx` |
+| PageHeader mount | `packages/ui/src/layout/PgPageHeader.tsx` |
 | Global mount | `admin-front/src/layouts/default.tsx` |
 | Context map | `admin-front/src/content/guide/generated/context-map.json` |
 | Merchant drawer | `merchant-front/src/components/guide/ContextualHelpDrawer.tsx` |

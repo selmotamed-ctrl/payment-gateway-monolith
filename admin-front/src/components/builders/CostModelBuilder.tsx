@@ -1,8 +1,8 @@
 import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VSelect, VSwitch, VTextField } from "@/components/vael/VuetifyShim";
+import {PgAutocomplete, PgSwitch, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
-import { FormField } from "@/components/ui/FormField";
+import {FormField} from "@pg/ui";
 import { RepeatableRows } from "./RepeatableRows";
 import { COST_ERROR_MESSAGES } from "./messages";
 import {
@@ -57,7 +57,7 @@ export const CostModelBuilder = defineComponent({
                 <div style={{ display: "flex", flexDirection: "column", gap: "12px", minInlineSize: 0 }}>
                     <div style={GRID}>
                         <FormField label={t("Calculation type")}>
-                            <VSelect
+                            <PgAutocomplete
                                 modelValue={form.calcType || null}
                                 onUpdate:modelValue={(value: CostCalcType | null) => patch({ calcType: value ?? "" })}
                                 items={COST_CALC_TYPES.map((value) => ({ title: t(CALC_LABELS[value]), value }))}
@@ -67,19 +67,19 @@ export const CostModelBuilder = defineComponent({
                             />
                         </FormField>
                         <FormField label={t("Flat fee")} error={errorFor("flat")}>
-                            <VTextField modelValue={form.flat} onUpdate:modelValue={(value: string) => patch({ flat: value })} density="compact" hideDetails />
+                            <PgTextField modelValue={form.flat} onUpdate:modelValue={(value: string) => patch({ flat: value })} density="compact" hideDetails />
                         </FormField>
                         <FormField label={t("Percentage (%)")} error={errorFor("percent")}>
-                            <VTextField modelValue={form.percent} onUpdate:modelValue={(value: string) => patch({ percent: value })} density="compact" hideDetails />
+                            <PgTextField modelValue={form.percent} onUpdate:modelValue={(value: string) => patch({ percent: value })} density="compact" hideDetails />
                         </FormField>
                         <FormField label={t("Minimum fee")} error={errorFor("min")}>
-                            <VTextField modelValue={form.min} onUpdate:modelValue={(value: string) => patch({ min: value })} density="compact" hideDetails />
+                            <PgTextField modelValue={form.min} onUpdate:modelValue={(value: string) => patch({ min: value })} density="compact" hideDetails />
                         </FormField>
                         <FormField label={t("Maximum fee")} error={errorFor("max")}>
-                            <VTextField modelValue={form.max} onUpdate:modelValue={(value: string) => patch({ max: value })} density="compact" hideDetails />
+                            <PgTextField modelValue={form.max} onUpdate:modelValue={(value: string) => patch({ max: value })} density="compact" hideDetails />
                         </FormField>
                     </div>
-                    <VSwitch
+                    <PgSwitch
                         modelValue={form.accrueFeeAtConfirm}
                         onUpdate:modelValue={(value: boolean | null) => patch({ accrueFeeAtConfirm: value === true })}
                         label={t("Accrue the fee when the payment is confirmed")}
@@ -91,7 +91,7 @@ export const CostModelBuilder = defineComponent({
                         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                             <span style={{ fontSize: "13px", fontWeight: 500 }}>{t("Fee tiers")}</span>
                             {errorFor("tiers") && (
-                                <span role="alert" style={{ fontSize: "12px", color: "var(--pg-status-danger-text)" }}>{errorFor("tiers")}</span>
+                                <span style={{ fontSize: "12px", color: "var(--pg-status-danger-text)" }}>{errorFor("tiers")}</span>
                             )}
                             <RepeatableRows
                                 count={form.tiers.length}
@@ -107,13 +107,13 @@ export const CostModelBuilder = defineComponent({
                                         return (
                                             <div style={GRID}>
                                                 <FormField label={t("Up to amount")} error={errorFor(`tiers.${index}.upTo`) || errorFor(`tiers.${index}`)} hint={index === form.tiers.length - 1 ? t("Leave empty for the last open-ended tier.") : ""}>
-                                                    <VTextField modelValue={tier.upTo} onUpdate:modelValue={(value: string) => patchTier(index, { upTo: value })} density="compact" hideDetails />
+                                                    <PgTextField modelValue={tier.upTo} onUpdate:modelValue={(value: string) => patchTier(index, { upTo: value })} density="compact" hideDetails />
                                                 </FormField>
                                                 <FormField label={t("Flat fee")} error={errorFor(`tiers.${index}.flat`)}>
-                                                    <VTextField modelValue={tier.flat} onUpdate:modelValue={(value: string) => patchTier(index, { flat: value })} density="compact" hideDetails />
+                                                    <PgTextField modelValue={tier.flat} onUpdate:modelValue={(value: string) => patchTier(index, { flat: value })} density="compact" hideDetails />
                                                 </FormField>
                                                 <FormField label={t("Percentage (%)")} error={errorFor(`tiers.${index}.percent`)}>
-                                                    <VTextField modelValue={tier.percent} onUpdate:modelValue={(value: string) => patchTier(index, { percent: value })} density="compact" hideDetails />
+                                                    <PgTextField modelValue={tier.percent} onUpdate:modelValue={(value: string) => patchTier(index, { percent: value })} density="compact" hideDetails />
                                                 </FormField>
                                             </div>
                                         );

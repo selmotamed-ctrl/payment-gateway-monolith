@@ -2,18 +2,18 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import { VBtn, VCheckbox, VIcon, VProgressLinear, VSelect } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
-import { LazyEChart as EChart } from "@/components/EChart/lazy";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { MonoRef } from "@/components/ui/MonoRef";
+import {PgButton, PgCheckbox, PgIcon, PgProgressBar, PgAutocomplete} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { LazyEChart as EChart } from "@/charts/EChart/lazy";
+import {StatusBadge} from "@pg/ui";
+import {MetricStrip, type MetricItem} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { areChecklistsVisible } from "@/constants/env";
@@ -25,9 +25,9 @@ import { showSnackBar } from "@/utils/snackBar";
 import { maskEmail } from "@/utils/privacy";
 import { buildOpenActionQueueSubLabel, buildSuccessRateSubLabel, buildUnknownBacklogSubLabel } from "./metricLabels";
 
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
 const ACTIVITY_EXPORT_CHECKS = [
     { key: "ACTIVITY_SCOPE_VERIFIED", label: "Activity scope verified" },
     { key: "ACTORS_REVIEWED", label: "Actor list reviewed" },
@@ -96,10 +96,7 @@ const PERIODS = [
     { title: "90 days", value: "90d" },
 ];
 
-const CHART_TEXT = "#64748b";
-const CHART_GRID = "#e2e8f0";
-const CHART_INDIGO = "#4f46e5";
-const CHART_EMERALD = "#059669";
+import { CHART_TEXT, CHART_GRID, CHART_INDIGO, CHART_EMERALD } from "@/charts/palette";
 
 const formatDuration = (seconds: number): string => {
     if (seconds < 60) return `${formatPlainNumber(seconds)}s`;
@@ -453,14 +450,14 @@ const DashboardPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Dashboard")} subtitle={t("Live platform health, volume, and operational queues.")}>(
+                <PageHeader title={t("Dashboard")} subtitle={t("Live platform health, volume, and operational queues.")}>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             <SegmentedTabs
                                 modelValue={period.value}
                                 tabs={periodTabs}
                                 onUpdate:modelValue={(value: string) => (period.value = value)}
                             />
-                            <VSelect
+                            <PgAutocomplete
                                 modelValue={currency.value}
                                 onUpdate:modelValue={(value: string) => (currency.value = value)}
                                 items={currencyOptions}
@@ -469,9 +466,9 @@ const DashboardPage = dc(() => {
                                 hideDetails
                                 style={{ maxWidth: "110px" }}
                             />
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => { void load(); void loadRecentActivity(); }}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!overview.value} onClick={() => void copyStatusSummary()}>{t("Copy summary")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} disabled={!exportChecklistComplete.value} onClick={() => void exportSnapshot()}>{t("Export snapshot")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => { void load(); void loadRecentActivity(); }}>{t("Refresh")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-content-copy" disabled={!overview.value} onClick={() => void copyStatusSummary()}>{t("Copy summary")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} disabled={!exportChecklistComplete.value} onClick={() => void exportSnapshot()}>{t("Export snapshot")}</PgButton>
                             {lastUpdatedAt.value && (
                                 <MetaPill color="info" variant="tonal" size="small">
                                     {t("Updated")} {lastUpdatedAt.value.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
@@ -479,7 +476,7 @@ const DashboardPage = dc(() => {
                             )}
                             <MetaPill color="primary" variant="tonal" size="small">{t("Operational")}</MetaPill>
                         </ThemedView>
-                    )</PageHeader>
+                    </PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
@@ -490,7 +487,7 @@ const DashboardPage = dc(() => {
                                 <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                                     <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Snapshot export checklist")}</ThemedText>
                                     {EXPORT_CHECKS.map((check) => (
-                                        <VCheckbox
+                                        <PgCheckbox
                                             key={check.key}
                                             modelValue={exportChecklist.value[check.key] === true}
                                             onUpdate:modelValue={(value: unknown) => (exportChecklist.value = { ...exportChecklist.value, [check.key]: Boolean(value) })}
@@ -511,7 +508,7 @@ const DashboardPage = dc(() => {
                         <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "18px" }}>
                             <SurfaceCard title={t("Attempts By State")} subtitle={t("Payment attempts created in the selected period")}>
                                 {loading.value ? (
-                                    <VProgressLinear indeterminate color="primary" />
+                                    <PgProgressBar indeterminate color="primary" />
                                 ) : attemptRows.value.length === 0 ? (
                                     <EmptyState title={t("No Data Found")} description={t("No payment attempts were recorded for the selected period.")} />
                                 ) : (
@@ -520,7 +517,7 @@ const DashboardPage = dc(() => {
                             </SurfaceCard>
                             <SurfaceCard title={t("Volume")} subtitle={t("Attempt volume by state")}>
                                 {loading.value ? (
-                                    <VProgressLinear indeterminate color="primary" />
+                                    <PgProgressBar indeterminate color="primary" />
                                 ) : attemptRows.value.length === 0 ? (
                                     <EmptyState title={t("No Data Found")} description={t("No payment attempts were recorded for the selected period.")} />
                                 ) : (
@@ -532,7 +529,7 @@ const DashboardPage = dc(() => {
                         <SurfaceCard title={t("Recent attempts")} subtitle={t("Payment attempts created in the selected period")} noPadding>
                             {loading.value ? (
                                 <div style={{ padding: "20px" }}>
-                                    <VProgressLinear indeterminate color="primary" />
+                                    <PgProgressBar indeterminate color="primary" />
                                 </div>
                             ) : attemptRows.value.length === 0 ? (
                                 <EmptyState title={t("No Data Found")} description={t("No payment attempts were recorded for the selected period.")} />
@@ -582,7 +579,7 @@ const DashboardPage = dc(() => {
                                     <ThemedText style={{ fontSize: "11px", opacity: 0.7 }}>
                                         {formatPlainNumber(overview.value?.routeHealth?.forced ?? 0)} {t("forced")} · {formatPlainNumber(overview.value?.routeHealth?.conflicts ?? 0)} {t("conflicts")}
                                     </ThemedText>
-                                    <VBtn size="small" variant="text" prependIcon="mdi-arrow-right" onClick={() => void router.push({ name: "GatewayRoutes" })}>{t("Open routes")}</VBtn>
+                                    <PgButton size="small" variant="text" prependIcon="mdi-arrow-right" onClick={() => void router.push({ name: "GatewayRoutes" })}>{t("Open routes")}</PgButton>
                                 </SurfaceCardText>
                             </SurfaceCard>
 
@@ -605,7 +602,7 @@ const DashboardPage = dc(() => {
                                             </ThemedView>
                                         ))
                                     )}
-                                    <VBtn size="small" variant="text" prependIcon="mdi-arrow-right" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</VBtn>
+                                    <PgButton size="small" variant="text" prependIcon="mdi-arrow-right" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</PgButton>
                                 </SurfaceCardText>
                             </SurfaceCard>
                         </ThemedView>
@@ -619,15 +616,15 @@ const DashboardPage = dc(() => {
                                             <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{t("Latest audited actions across the portal")}</ThemedText>
                                         </ThemedView>
                                         <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                            <VBtn size="small" variant="text" prependIcon="mdi-download" loading={activityExportLoading.value} disabled={!activityExportChecklistComplete.value} onClick={() => void exportActivity()}>{t("Export activity")}</VBtn>
-                                            <VBtn size="small" variant="text" prependIcon="mdi-history" onClick={() => void router.push({ name: "AuditLog" })}>{t("Open audit log")}</VBtn>
+                                            <PgButton size="small" variant="text" prependIcon="mdi-download" loading={activityExportLoading.value} disabled={!activityExportChecklistComplete.value} onClick={() => void exportActivity()}>{t("Export activity")}</PgButton>
+                                            <PgButton size="small" variant="text" prependIcon="mdi-history" onClick={() => void router.push({ name: "AuditLog" })}>{t("Open audit log")}</PgButton>
                                         </ThemedView>
                                     </ThemedView>
                                     {showChecklists && (
                                         <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                                             <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Activity export checklist")}</ThemedText>
                                             {ACTIVITY_EXPORT_CHECKS.map((check) => (
-                                                <VCheckbox
+                                                <PgCheckbox
                                                     key={check.key}
                                                     modelValue={activityExportChecklist.value[check.key] === true}
                                                     onUpdate:modelValue={(value: unknown) => (activityExportChecklist.value = { ...activityExportChecklist.value, [check.key]: Boolean(value) })}
@@ -642,7 +639,7 @@ const DashboardPage = dc(() => {
                                         </ThemedView>
                                     )}
                                     {activityLoading.value ? (
-                                        <VProgressLinear indeterminate color="primary" />
+                                        <PgProgressBar indeterminate color="primary" />
                                     ) : recentActivity.value.length === 0 ? (
                                         <EmptyState title={t("No activity recorded yet.")} description={t("Privileged actions will appear here as operators work.")} icon="mdi-shield-search" />
                                     ) : (
@@ -687,7 +684,7 @@ const DashboardPage = dc(() => {
                                     {queueLinks.map((link) => (
                                         <SurfaceCard key={link.title} variant="tonal" style={{ cursor: "pointer" }} onClick={() => void router.push({ name: link.route })}>
                                             <SurfaceCardText style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "10px", padding: "12px" }}>
-                                                <VIcon icon={link.icon} size="22" color="primary" />
+                                                <PgIcon icon={link.icon} size="22" color="primary" />
                                                 <ThemedView style={{ gap: "2px" }}>
                                                     <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{link.title}</ThemedText>
                                                     <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{link.subtitle}</ThemedText>

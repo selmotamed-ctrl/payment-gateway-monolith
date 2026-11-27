@@ -2,23 +2,23 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StatusBadge, formatHumanStatus } from "@/components/ui/StatusBadge";
-import { type MetricItem } from "@/components/ui/MetricStrip";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import type { TableHeader } from "@/components/Table/types";
+import {PgButton} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StatusBadge, formatHumanStatus} from "@pg/ui";
+import {type MetricItem} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import type { TableHeader } from "@pg/ui";
 import { JournalEntryDrawer } from "@/components/ledger/JournalEntryDrawer";
 import { LedgerRefLink } from "@/components/ledger/LedgerRefLink";
 import { formatDateTime } from "@/components/ledger/format";
@@ -253,7 +253,7 @@ const JournalEntriesPage = dc(() => {
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Journal Entries")} subtitle={t("Append-only double-entry postings of the ledger, with their balance check.")} badge={t("Ledger control")} badgeTone="info">(
-                        <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                        <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
                     )</PageHeader>
 
                 {summary.value && (

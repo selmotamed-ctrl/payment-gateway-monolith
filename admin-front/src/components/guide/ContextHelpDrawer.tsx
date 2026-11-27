@@ -1,7 +1,7 @@
 import { computed, onMounted, ref } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
-import { VNavigationDrawer } from "@/components/vael/VuetifyShim";
+import {PgNavigationDrawer} from "@pg/ui";
 import {
     loadArticles,
     loadCards,
@@ -78,7 +78,7 @@ export const ContextHelpDrawer = defineComponent({
         };
 
         return () => (
-            <VNavigationDrawer
+            <PgNavigationDrawer
                 modelValue={open.value}
                 onUpdate:modelValue={(value: boolean) => {
                     if (!value) closeContextHelp();
@@ -181,7 +181,7 @@ export const ContextHelpDrawer = defineComponent({
                     </button>
                     <small>Opening help never closes or resets this form.</small>
                 </div>
-            </VNavigationDrawer>
+            </PgNavigationDrawer>
         );
     },
 });

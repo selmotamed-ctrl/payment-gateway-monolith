@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VSelect, VTextarea } from "@/components/vael/VuetifyShim";
-import { ThemedText } from "@/components/ThemedText";
+import {VAlert, PgAutocomplete, PgTextarea} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -10,8 +10,8 @@ import { showSnackBar } from "@/utils/snackBar";
 import { REVIEW_REASON_CODES } from "../kybReviewHelp";
 import type { KybDocumentSummary } from "../types";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
 export type KybActionMode = "REPLACEMENT" | "REVALIDATION";
 
 const KybActionDialog = dc(
@@ -90,10 +90,10 @@ const KybActionDialog = dc(
                                 : t("A periodic re-verification request will be opened for the merchant. The current document remains available as historical evidence.")}
                         </VAlert>
                         <FormField label={t("Reason")} required>
-                            <VSelect v-model={reasonCode.value} items={REVIEW_REASON_CODES} />
+                            <PgAutocomplete v-model={reasonCode.value} items={REVIEW_REASON_CODES} />
                         </FormField>
                         <FormField label={t("Message to the merchant")} required>
-                            <VTextarea v-model={message.value} rows={4} autoGrow />
+                            <PgTextarea v-model={message.value} rows={4} autoGrow />
                         </FormField>
             </FormModal>
         );

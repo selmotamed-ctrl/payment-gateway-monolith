@@ -1,25 +1,25 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VTextField, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { StateView } from "@/components/StateView";
-import { DataTable } from "@/components/Table/DataTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { SectionFields } from "@/components/SectionFields";
+import {PgTextField, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
 type Application = {
     id: string;
     name: string;
@@ -224,14 +224,14 @@ const ApplicationsPage = dc(() => {
                 {mode.value === "DESCRIPTIVE" ? (
                     <SectionFields title={t("Profile")}>
                         <FormField label={t("Application Name")} required>
-                            <VTextField
+                            <PgTextField
                                 modelValue={descriptive.value.name}
                                 onUpdate:modelValue={(v: string) => (descriptive.value.name = v)}
                                 hideDetails
                             />
                         </FormField>
                         <FormField label={t("Sales Channel Description")}>
-                            <VTextarea
+                            <PgTextarea
                                 modelValue={descriptive.value.businessUseDescription}
                                 onUpdate:modelValue={(v: string) => (descriptive.value.businessUseDescription = v)}
                                 rows={3}
@@ -239,7 +239,7 @@ const ApplicationsPage = dc(() => {
                             />
                         </FormField>
                         <FormField label={t("Expected Monthly Volume")}>
-                            <VTextField
+                            <PgTextField
                                 modelValue={descriptive.value.expectedMonthlyVolume}
                                 onUpdate:modelValue={(v: string) => (descriptive.value.expectedMonthlyVolume = v)}
                                 hideDetails
@@ -249,28 +249,28 @@ const ApplicationsPage = dc(() => {
                 ) : (
                     <SectionFields title={t("Details")}>
                         <FormField label={t("Assigned Wallet ID")} hint={t("Wallet that receives settlements for this application.")}>
-                            <VTextField
+                            <PgTextField
                                 modelValue={sensitive.value.assignedWalletId}
                                 onUpdate:modelValue={(v: string) => (sensitive.value.assignedWalletId = v)}
                                 hideDetails
                             />
                         </FormField>
                         <FormField label={t("Rail Whitelist")} hint={t("Comma separated, empty means all rails.")}>
-                            <VTextField
+                            <PgTextField
                                 modelValue={sensitive.value.railWhitelist}
                                 onUpdate:modelValue={(v: string) => (sensitive.value.railWhitelist = v)}
                                 hideDetails
                             />
                         </FormField>
                         <FormField label={t("Redirect Domain Allowlist")} hint={t("Comma separated domains.")}>
-                            <VTextField
+                            <PgTextField
                                 modelValue={sensitive.value.redirectDomainAllowlist}
                                 onUpdate:modelValue={(v: string) => (sensitive.value.redirectDomainAllowlist = v)}
                                 hideDetails
                             />
                         </FormField>
                         <FormField label={t("Reason")}>
-                            <VTextarea
+                            <PgTextarea
                                 modelValue={sensitive.value.reason}
                                 onUpdate:modelValue={(v: string) => (sensitive.value.reason = v)}
                                 rows={2}

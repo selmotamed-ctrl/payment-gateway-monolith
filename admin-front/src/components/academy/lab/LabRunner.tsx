@@ -1,10 +1,10 @@
 import { computed, nextTick, reactive, ref, watch, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
+import {PgButton, PgIcon} from "@pg/ui";
 import type { Lab, LabTask } from "@/content/academy";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {MetaPill} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
 import { Callout, type CalloutTone } from "../ui/Callout";
 import { ProgressBar } from "../ui/ProgressBar";
 import { StateIcon, type StepState } from "../ui/StateIcon";
@@ -166,7 +166,7 @@ export const LabRunner = defineComponent({
         /** Calm training strip: a reminder, not an alarm (warning tokens, hairline border). */
         const ribbon = () => (
             <div role="note" class="ac-lab-ribbon">
-                <VIcon icon="mdi-school-outline" size={18} aria-hidden="true" />
+                <PgIcon icon="mdi-school-outline" size={18} aria-hidden="true" />
                 <span class="ac-lab-ribbon__text">{t("TRAINING — nothing here is real")}</span>
                 <MetaPill class="ac-lab-ribbon__tag" color="warning" variant="outlined" size="x-small">
                     {t("SANDBOX")}
@@ -272,7 +272,7 @@ export const LabRunner = defineComponent({
                         </div>
                     </dl>
                     <div class="ac-row ac-lab-best">
-                        <VIcon icon={passed ? "mdi-trophy-outline" : tried ? "mdi-history" : "mdi-flask-empty-outline"} size={18} aria-hidden="true" />
+                        <PgIcon icon={passed ? "mdi-trophy-outline" : tried ? "mdi-history" : "mdi-flask-empty-outline"} size={18} aria-hidden="true" />
                         <p class="ac-text">
                             {props.best && tried
                                 ? `${t("Your best score")}: ${props.best.bestScore}% (${props.best.attempts} ${t("attempts")})${props.best.passedAt ? " — " + t("Passed") : ""}`
@@ -280,7 +280,7 @@ export const LabRunner = defineComponent({
                         </p>
                     </div>
                     <div>
-                        <VBtn
+                        <PgButton
                             color="primary"
                             size="large"
                             onClick={() => {
@@ -289,7 +289,7 @@ export const LabRunner = defineComponent({
                             }}
                         >
                             {tried ? t("Start again") : t("Start lab")}
-                        </VBtn>
+                        </PgButton>
                     </div>
                 </SurfaceCard>
             );
@@ -315,7 +315,7 @@ export const LabRunner = defineComponent({
                         ) : null}
                     </Callout>
                     {outcome.criticalError ? (
-                        <Callout tone="danger" role="alert" icon="mdi-alert-octagon-outline" title={t("Critical error")}>
+                        <Callout tone="danger" icon="mdi-alert-octagon-outline" title={t("Critical error")}>
                             <p class="ac-lab-line">
                                 {t("This choice would be seriously harmful in real life. A lab with a critical error cannot be passed, whatever the score.")}
                             </p>
@@ -356,7 +356,7 @@ export const LabRunner = defineComponent({
                         <div class="ac-lab-answer">{renderTask(current, locked)}</div>
                         {!locked && current.hint && hintShown[current.id] ? (
                             <div class="ac-callout ac-lab-hint" role="note">
-                                <VIcon class="ac-callout__icon" icon="mdi-lightbulb-on-outline" size={18} aria-hidden="true" />
+                                <PgIcon class="ac-callout__icon" icon="mdi-lightbulb-on-outline" size={18} aria-hidden="true" />
                                 <div class="ac-callout__body" dir="auto">
                                     <strong>{t("Hint")}:</strong> {renderInline(current.hint)}{" "}
                                     <span class="ac-muted">({t("This hint costs 1 point.")})</span>
@@ -366,7 +366,7 @@ export const LabRunner = defineComponent({
                         {!locked ? (
                             <div class="ac-lab-actions">
                                 {current.hint && !hintShown[current.id] ? (
-                                    <VBtn
+                                    <PgButton
                                         variant="text"
                                         prependIcon="mdi-lightbulb-outline"
                                         onClick={() => {
@@ -374,11 +374,11 @@ export const LabRunner = defineComponent({
                                         }}
                                     >
                                         {t("Show hint (costs 1 point)")}
-                                    </VBtn>
+                                    </PgButton>
                                 ) : null}
-                                <VBtn class="ac-lab-actions__primary" color="primary" disabled={!canCheck.value} onClick={check}>
+                                <PgButton class="ac-lab-actions__primary" color="primary" disabled={!canCheck.value} onClick={check}>
                                     {t("Check")}
-                                </VBtn>
+                                </PgButton>
                             </div>
                         ) : null}
                         <div aria-live="polite" role="status" class="ac-lab-feedback">
@@ -386,9 +386,9 @@ export const LabRunner = defineComponent({
                         </div>
                         {outcome ? (
                             <div class="ac-lab-actions">
-                                <VBtn class="ac-lab-actions__primary" color="primary" onClick={next}>
+                                <PgButton class="ac-lab-actions__primary" color="primary" onClick={next}>
                                     {lastTask ? t("See results") : t("Next")}
-                                </VBtn>
+                                </PgButton>
                             </div>
                         ) : null}
                     </SurfaceCard>

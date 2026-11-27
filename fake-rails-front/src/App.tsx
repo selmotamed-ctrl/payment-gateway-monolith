@@ -1,16 +1,19 @@
-import { dc } from "@/utils/dc";
+import {PgApp, PgProvider} from "@pg/ui";
+import { useRouter } from "vue-router";
 import { RouterView } from "vue-router/experimental/vapor";
-import { VApp } from "@/components/vael/VuetifyShim";
-import { VaelProvider } from "@/components/vael/VaelProvider";
+import { dc } from "@/utils/dc";
+import { createUiConfig } from "./uiConfig";
 
 const App = dc(() => {
-  return () => (
-    <VApp>
-      <VaelProvider>
-        <RouterView />
-      </VaelProvider>
-    </VApp>
-  );
+    const router = useRouter();
+    const config = createUiConfig(router);
+    return () => (
+        <PgProvider config={config}>
+            <PgApp>
+                <RouterView />
+            </PgApp>
+        </PgProvider>
+    );
 });
 
 export default App;

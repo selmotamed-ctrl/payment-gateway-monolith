@@ -1,12 +1,12 @@
 import { dc } from "@/utils/dc";
 import { RouterLink } from "vue-router/experimental/vapor";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
+import {PgButton, PgIcon} from "@pg/ui";
 import LogoSvg from "@/assets/images/logo.svg";
 import { GuideMarkdown } from "@/components/guide/GuideMarkdown";
 import { showSnackBar } from "@/utils/snackBar";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {DescriptionList} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
 import type { AcademyBadge } from "@/content/academy/apiTypes";
 import { BadgeChip } from "./BadgeChip";
 import { fmtDate } from "./format";
@@ -135,26 +135,26 @@ export const CertificateView = dc((props: Props) => {
                                     ]}
                                 />
                                 <div class="ac-cert-actions">
-                                    <VBtn color="primary" block prependIcon="mdi-printer-outline" onClick={() => window.print()}>
+                                    <PgButton color="primary" block prependIcon="mdi-printer-outline" onClick={() => window.print()}>
                                         {t("Print certificate")}
-                                    </VBtn>
-                                    <VBtn variant="outlined" block prependIcon="mdi-content-copy" onClick={() => void copy(`ID: ${props.certificateId ?? b.id}`)}>
+                                    </PgButton>
+                                    <PgButton variant="outlined" block prependIcon="mdi-content-copy" onClick={() => void copy(`ID: ${props.certificateId ?? b.id}`)}>
                                         {t("Copy certificate ID")}
-                                    </VBtn>
-                                    {props.verifyUrl ? <VBtn variant="outlined" block prependIcon="mdi-link-variant" onClick={() => void copy(props.verifyUrl!)}>
+                                    </PgButton>
+                                    {props.verifyUrl ? <PgButton variant="outlined" block prependIcon="mdi-link-variant" onClick={() => void copy(props.verifyUrl!)}>
                                         {t("Copy verification link")}
-                                    </VBtn> : null}
-                                    {props.verifyUrl ? <VBtn
+                                    </PgButton> : null}
+                                    {props.verifyUrl ? <PgButton
                                         variant="outlined"
                                         block
                                         prependIcon="mdi-share-variant-outline"
                                         onClick={() => void copy(`${props.holderName} earned the ${props.trackTitle} certificate on ${fmtDate(b.earnedAt)}. Verify it here: ${props.verifyUrl}`)}
                                     >
                                         {t("Copy share message")}
-                                    </VBtn> : null}
+                                    </PgButton> : null}
                                 </div>
                                 <RouterLink class="ac-link ac-cert-back" to={{ name: "AdminAcademy" }}>
-                                    <VIcon class="ac-flip" icon="mdi-arrow-left" size={16} />
+                                    <PgIcon class="ac-flip" icon="mdi-arrow-left" size={16} />
                                     {t("Back to Academy")}
                                 </RouterLink>
                             </div>

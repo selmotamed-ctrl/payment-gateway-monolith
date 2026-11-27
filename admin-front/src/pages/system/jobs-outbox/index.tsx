@@ -2,21 +2,21 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StatusBadge, formatHumanStatus } from "@/components/ui/StatusBadge";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import { auditOutboxFilters, jobFilters, notificationFilters, outboxFilters } from "@/components/Table/registry/ledgerOps";
-import type { TableHeader } from "@/components/Table/types";
+import {PgButton} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StatusBadge, formatHumanStatus} from "@pg/ui";
+import {MetricStrip, type MetricItem} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import { auditOutboxFilters, jobFilters, notificationFilters, outboxFilters } from "@/tables/registry/ledgerOps";
+import type { TableHeader } from "@pg/ui";
 import { formatDateTime } from "@/components/ledger/format";
 import ReasonModal from "@/pages/merchants/components/ReasonModal";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {FormChecklist} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import MonitorTable from "./components/MonitorTable";
 import {
@@ -457,12 +457,12 @@ const JobsOutboxPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("System Jobs & Outbox")} subtitle={t("Delivery health of the transactional outbox, the audit outbox, background jobs and notifications.")} badge={t("Operations")} badgeTone="info">(
                         <>
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>
                                 {t("Refresh")}
-                            </VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!summary.value} onClick={() => void copyMonitorSummary()}>
+                            </PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-content-copy" disabled={!summary.value} onClick={() => void copyMonitorSummary()}>
                                 {t("Copy monitor summary")}
-                            </VBtn>
+                            </PgButton>
                         </>
                     )</PageHeader>
                 {summary.value && <MetricStrip items={metricItems.value} />}

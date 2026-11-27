@@ -115,8 +115,8 @@ describe("blob previews only allow png / jpeg / pdf", () => {
     expect(safeRasterImageMime("image/webp")).toBe("image/webp");
   });
   test("components use the whitelist and do not render <object>", () => {
-    expect(read("admin-front/src/components/ApiImage/index.tsx")).not.toContain("<object");
-    expect(read("merchant-front/src/components/ApiImage/index.tsx")).not.toContain("<object");
+    expect(read("admin-front/src/features/ApiImage/index.tsx")).not.toContain("<object");
+    expect(read("merchant-front/src/features/ApiImage/index.tsx")).not.toContain("<object");
     const join = read("admin-front/src/pages/join-requests/[id].tsx");
     expect(join).toContain("safePreviewMime(document.mime)");
     expect(join).toContain('"noopener,noreferrer"');
@@ -128,8 +128,8 @@ describe("no raw console.log of DOM/headers/query data in admin-front", () => {
   test("console.log calls are gated through devLog", () => {
     for (const f of [
       "admin-front/src/App.tsx",
-      "admin-front/src/components/ApiImage/index.tsx",
-      "admin-front/src/components/Table/ApiTable.tsx",
+      "admin-front/src/features/ApiImage/index.tsx",
+      "admin-front/src/tables/DataTable.tsx",
       "admin-front/src/utils/printJsx/index.tsx",
     ]) {
       expect(read(f), f).not.toContain("console.log(");

@@ -3,20 +3,20 @@ import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VCheckbox, VProgressCircular, VSelect, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { statusTone } from "@/components/Table/statusTone";
-import { JsonDiffViewer } from "@/components/ui/JsonDiffViewer";
-import { humanizeKey } from "@/components/ui/jsonDiffModel";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import type { TableHeader } from "@/components/Table/types";
+import {VAlert, PgButton, PgCheckbox, PgSpinner, PgAutocomplete, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {statusTone} from "@pg/ui";
+import {JsonDiffViewer} from "@pg/ui";
+import {humanizeKey} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { useOpenQuery } from "@/composables/useOpenQuery";
 import { areChecklistsVisible, areHelpPanelsVisible } from "@/constants/env";
@@ -33,18 +33,18 @@ import {
 } from "./approvalHelp";
 import type { ApprovalDetail, ApprovalRow, ApprovalSummary } from "./types";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { SectionFields } from "@/components/SectionFields";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 type ApprovalView = "pending" | "history" | "all";
 
 const SUMMARY_EXPORT_CHECKS = [
@@ -655,7 +655,7 @@ const ApprovalsPage = dc(() => {
             headerCellStyle: { justifyContent: "center" },
             Header: () => (
                 <span style={{ width: "28px", height: "40px", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-                    <VCheckbox
+                    <PgCheckbox
                         modelValue={allVisibleSelected.value}
                         indeterminate={someVisibleSelected.value}
                         onUpdate:modelValue={(value: boolean | null) => toggleVisible(value)}
@@ -667,7 +667,7 @@ const ApprovalsPage = dc(() => {
             ),
             Value: ({ row }: { row: ApprovalRow }) => (
                 <ThemedView style={{ width: "28px", height: "40px", alignItems: "center", justifyContent: "center" }}>
-                    <VCheckbox
+                    <PgCheckbox
                         modelValue={Boolean(selectedApprovals.value[row.id])}
                         onUpdate:modelValue={(value: boolean | null) => toggleRow(row, value)}
                         disabled={row.state !== "PENDING_REVIEW"}
@@ -786,8 +786,8 @@ const ApprovalsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Approvals")} subtitle={t("Review maker-checker requests, inspect the proposed diff and decide with an independent check.")} badge={summary.value ? `${summary.value.totalPending} ${t("Pending")}` : t("Four eyes")} badgeTone={summary.value && summary.value.totalPending > 0 ? "warning" : "success"}>(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</PgButton>
                         </ThemedView>
                     )</PageHeader>
 
@@ -847,10 +847,10 @@ const ApprovalsPage = dc(() => {
                         <ThemedText style={{ fontSize: "13px", fontWeight: 700 }}>{selectedCount.value} {t("selected")}</ThemedText>
                         <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("Only pending requests can be rejected in bulk.")}</ThemedText>
                         <div style={{ flex: 1 }} />
-                        <VBtn size="small" variant="text" onClick={clearSelection}>{t("Clear selection")}</VBtn>
-                        <VBtn size="small" color="error" variant="flat" prependIcon="mdi-close-octagon-outline" onClick={openBulkReject}>
+                        <PgButton size="small" variant="text" onClick={clearSelection}>{t("Clear selection")}</PgButton>
+                        <PgButton size="small" color="error" variant="flat" prependIcon="mdi-close-octagon-outline" onClick={openBulkReject}>
                             {t("Reject selected")}
-                        </VBtn>
+                        </PgButton>
                     </ThemedView>
                 )}
 
@@ -938,7 +938,7 @@ const ApprovalsPage = dc(() => {
                         hint={t("At least 2 characters. Applied to every selected request.")}
                         required
                     >
-                        <VTextarea
+                        <PgTextarea
                             modelValue={bulkRejectReason.value}
                             onUpdate:modelValue={(value: string) => (bulkRejectReason.value = value)}
                             rows={3}
@@ -948,7 +948,7 @@ const ApprovalsPage = dc(() => {
                         <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                             <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Bulk rejection checklist")}</ThemedText>
                             {BULK_REJECT_CHECKS.map((check) => (
-                                <VCheckbox
+                                <PgCheckbox
                                     key={check.key}
                                     modelValue={bulkRejectChecklist.value[check.key] === true}
                                     onUpdate:modelValue={(value: unknown) => (bulkRejectChecklist.value = { ...bulkRejectChecklist.value, [check.key]: Boolean(value) })}
@@ -977,7 +977,7 @@ const ApprovalsPage = dc(() => {
             >
 {detailLoading.value || !selected.value ? (
                             <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "300px", gap: "12px" }}>
-                                <VProgressCircular indeterminate size={52} color="primary" />
+                                <PgSpinner indeterminate size={52} color="primary" />
                                 <ThemedText style={{ opacity: 0.65 }}>{t("Loading approval detail")}</ThemedText>
                             </ThemedView>
                         ) : (
@@ -1021,7 +1021,7 @@ const ApprovalsPage = dc(() => {
                                                 />
                                             )}
                                             {subjectRoute(selected.value) && (
-                                                <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => openSubject(selected.value as ApprovalRow)}>{t("Open subject")}</VBtn>
+                                                <PgButton size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => openSubject(selected.value as ApprovalRow)}>{t("Open subject")}</PgButton>
                                             )}
                                         </SurfaceCardText>
                                     </SurfaceCard>
@@ -1035,9 +1035,9 @@ const ApprovalsPage = dc(() => {
                                                     {
                                                         label: t("Maker"),
                                                         value: (
-                                                            <VBtn size="x-small" variant="text" style={{ textTransform: "none", paddingInline: 0 }} onClick={() => void router.push({ name: "AdminUserDetail", params: { id: selected.value!.makerUserId } })}>
+                                                            <PgButton size="x-small" variant="text" style={{ textTransform: "none", paddingInline: 0 }} onClick={() => void router.push({ name: "AdminUserDetail", params: { id: selected.value!.makerUserId } })}>
                                                                 {selected.value.makerName || selected.value.makerUserId}
-                                                            </VBtn>
+                                                            </PgButton>
                                                         ),
                                                     },
                                                     { label: t("Checker"), value: selected.value.checkerName || "—" },
@@ -1068,7 +1068,7 @@ const ApprovalsPage = dc(() => {
                                         <ThemedText type="defaultSemiBold">{t("Checker decision")}</ThemedText>
                                         {requiresOutcome.value && (
                                             <FormField label={t("Dispute outcome")} required>
-                                                <VSelect
+                                                <PgAutocomplete
                                                     items={["WON", "LOST"]}
                                                     clearable
                                                     modelValue={outcome.value}
@@ -1080,7 +1080,7 @@ const ApprovalsPage = dc(() => {
                                             <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                                                 <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Decision checklist")}</ThemedText>
                                                 {APPROVAL_CHECKS.map((check) => (
-                                                    <VCheckbox
+                                                    <PgCheckbox
                                                         key={check.key}
                                                         modelValue={decisionChecklist.value[check.key] === true}
                                                         onUpdate:modelValue={(value: unknown) => (decisionChecklist.value = { ...decisionChecklist.value, [check.key]: Boolean(value) })}
@@ -1099,29 +1099,29 @@ const ApprovalsPage = dc(() => {
                                             hint={t("Required for rejection. A clear reason lets the maker correct the request.")}
                                             required={canReject.value}
                                         >
-                                            <VTextarea
+                                            <PgTextarea
                                                 modelValue={decisionReason.value}
                                                 onUpdate:modelValue={(value: string) => (decisionReason.value = value)}
                                                 rows={2}
                                             />
                                         </FormField>
                                         <FormField label={t("Risk acceptance note (optional)")}>
-                                            <VTextarea
+                                            <PgTextarea
                                                 modelValue={riskAcceptanceNote.value}
                                                 onUpdate:modelValue={(value: string) => (riskAcceptanceNote.value = value)}
                                                 rows={2}
                                             />
                                         </FormField>
                                         <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                                            <VBtn
+                                            <PgButton
                                                 color="success"
                                                 disabled={!canApprove.value || !decisionChecklistComplete.value}
                                                 loading={actionLoading.value}
                                                 onClick={() => void decide(true)}
                                             >
                                                 {t("Approve")}
-                                            </VBtn>
-                                            <VBtn
+                                            </PgButton>
+                                            <PgButton
                                                 color="error"
                                                 variant="tonal"
                                                 disabled={!canReject.value || !decisionChecklistComplete.value}
@@ -1129,9 +1129,9 @@ const ApprovalsPage = dc(() => {
                                                 onClick={() => void decide(false)}
                                             >
                                                 {t("Reject")}
-                                            </VBtn>
-                                            <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyApprovalSummary()}>{t("Copy summary")}</VBtn>
-                                            <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
+                                            </PgButton>
+                                            <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyApprovalSummary()}>{t("Copy summary")}</PgButton>
+                                            <PgButton variant="text" onClick={closeDetails}>{t("Close")}</PgButton>
                                         </ThemedView>
                                     </SurfaceCardText>
                                 </SurfaceCard>

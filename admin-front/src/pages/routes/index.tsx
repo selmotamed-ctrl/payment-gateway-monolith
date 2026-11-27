@@ -4,21 +4,21 @@ import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
 import { useRoute, useRouter } from "vue-router";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import type { TableHeader } from "@/components/Table/types";
+import {VAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { useOpenQuery } from "@/composables/useOpenQuery";
@@ -27,12 +27,12 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { useSafeguard } from "@/components/guide/useSafeguard";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { SectionFields } from "@/components/SectionFields";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { CostModelBuilder } from "@/components/builders/CostModelBuilder";
 import { MismatchPolicyBuilder, RouteScopeBuilder } from "@/components/builders/RouteScopeBuilder";
 import { MaintenanceWindowsBuilder } from "@/components/builders/MaintenanceWindowsBuilder";
@@ -659,10 +659,10 @@ const RoutesPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Routes")} subtitle={t("Routing priority, limits, and circuit-breaker health.")}>(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
-                            <VBtn color="primary" variant="flat" prependIcon={"mdi-plus"} onClick={() => void openCreateRoute()}>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</PgButton>
+                            <PgButton color="primary" variant="flat" prependIcon={"mdi-plus"} onClick={() => void openCreateRoute()}>
                                 {t("Add Route")}
-                            </VBtn>
+                            </PgButton>
                         </ThemedView>
                     )</PageHeader>
 
@@ -790,10 +790,10 @@ const RoutesPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <>
-                            <VBtn variant="outlined" disabled={actionLoading.value} onClick={closeRouteEditDialog}>
+                            <PgButton variant="outlined" disabled={actionLoading.value} onClick={closeRouteEditDialog}>
                                 {t("Cancel")}
-                            </VBtn>
-                            <VBtn
+                            </PgButton>
+                            <PgButton
                                 color="primary"
                                 variant="flat"
                                 {...{ type: "submit" }}
@@ -801,7 +801,7 @@ const RoutesPage = dc(() => {
                                 disabled={!routeEditChecklistComplete.value}
                             >
                                 {t("Save")}
-                            </VBtn>
+                            </PgButton>
                         </>
                     ),
                 }}
@@ -812,39 +812,39 @@ const RoutesPage = dc(() => {
                 </ThemedView>
                 <SectionFields title={t("Routing controls")}>
                     <FormField label={t("Priority")} sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             type="number"
                             modelValue={String(routeEditForm.value.priority)}
                             onUpdate:modelValue={(v: string) => (routeEditForm.value.priority = Number(v) || 0)}
                         />
                     </FormField>
                     <FormField label={t("Weight")} sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             type="number"
                             modelValue={String(routeEditForm.value.weight)}
                             onUpdate:modelValue={(v: string) => (routeEditForm.value.weight = Number(v) || 1)}
                         />
                     </FormField>
                     <FormField label={t("Minimum amount")} sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             modelValue={routeEditForm.value.minAmount}
                             onUpdate:modelValue={(v: string) => (routeEditForm.value.minAmount = v)}
                         />
                     </FormField>
                     <FormField label={t("Maximum amount")} sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             modelValue={routeEditForm.value.maxAmount}
                             onUpdate:modelValue={(v: string) => (routeEditForm.value.maxAmount = v)}
                         />
                     </FormField>
                     <FormField label={t("Daily cap")} sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             modelValue={routeEditForm.value.dailyCapAmount}
                             onUpdate:modelValue={(v: string) => (routeEditForm.value.dailyCapAmount = v)}
                         />
                     </FormField>
                     <FormField label={t("Status")} sensitiveMakerChecker>
-                        <VSelect
+                        <PgAutocomplete
                             items={["ACTIVE", "PAUSED", "DRAINING"]}
                             modelValue={routeEditForm.value.status}
                             onUpdate:modelValue={(v: string) => (routeEditForm.value.status = v)}
@@ -892,10 +892,10 @@ const RoutesPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <>
-                            <VBtn variant="outlined" disabled={creating.value} onClick={() => (createOpen.value = false)}>
+                            <PgButton variant="outlined" disabled={creating.value} onClick={() => (createOpen.value = false)}>
                                 {t("Cancel")}
-                            </VBtn>
-                            <VBtn
+                            </PgButton>
+                            <PgButton
                                 color="primary"
                                 variant="flat"
                                 {...{ type: "submit" }}
@@ -903,35 +903,35 @@ const RoutesPage = dc(() => {
                                 disabled={!routeForm.value.railId || !routeForm.value.gatewayId}
                             >
                                 {t("Create")}
-                            </VBtn>
+                            </PgButton>
                         </>
                     ),
                 }}
             >
                 <SectionFields title={t("Route pairing")}>
                     <FormField label={t("Rails")} required>
-                        <VSelect
+                        <PgAutocomplete
                             items={railOptions.value}
                             modelValue={routeForm.value.railId}
                             onUpdate:modelValue={(v: string) => (routeForm.value.railId = v)}
                         />
                     </FormField>
                     <FormField label={t("Gateways")} required>
-                        <VSelect
+                        <PgAutocomplete
                             items={gatewayOptions.value}
                             modelValue={routeForm.value.gatewayId}
                             onUpdate:modelValue={(v: string) => (routeForm.value.gatewayId = v)}
                         />
                     </FormField>
                     <FormField label={t("Priority")} sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             type="number"
                             modelValue={String(routeForm.value.priority)}
                             onUpdate:modelValue={(v: string) => (routeForm.value.priority = Number(v) || 0)}
                         />
                     </FormField>
                     <FormField label={t("Max Amount")} hint="optional, e.g. 5000.0000" sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             modelValue={routeForm.value.limitAmount}
                             onUpdate:modelValue={(v: string) => (routeForm.value.limitAmount = v)}
                         />

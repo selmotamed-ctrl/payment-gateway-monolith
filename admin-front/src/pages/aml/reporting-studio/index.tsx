@@ -2,21 +2,21 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import { VAlert, VBtn, VFileInput, VSelect, VTextarea, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgFileUpload, PgAutocomplete, PgTextarea, PgTextField} from "@pg/ui";
 import { fileToBase64 } from "@/utils/FileToB64";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
+import {MonoRef} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -708,7 +708,7 @@ const AmlReportingStudioPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={t("Reporting Studio")} subtitle={t("Declarative XML/XLSX/DOCX schemas, mapping, validation and filing gates")}><VBtn color="primary" onClick={openCreate}>{t("New schema")}</VBtn></PageHeader>
+            <PageHeader title={t("Reporting Studio")} subtitle={t("Declarative XML/XLSX/DOCX schemas, mapping, validation and filing gates")}><PgButton color="primary" onClick={openCreate}>{t("New schema")}</PgButton></PageHeader>
             {error.value && <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert>}
             <ThemedView style={{ display: "grid", gap: "12px" }}>
                 {loading.value && <ThemedText>{t("Loading schemas")}</ThemedText>}
@@ -740,9 +740,9 @@ const AmlReportingStudioPage = dc(() => {
                                 <MonoRef value={schema.definitionSha256 ?? schema.templateSha256 ?? ""} />
                             </SurfaceCardText>
                             <ThemedView style={{ display: "flex", flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                                <VBtn size="small" variant="tonal" onClick={() => void openStudio(schema)}>{t("Open studio")}</VBtn>
-                                {schema.status === "CONFIRMED" && <VBtn size="small" variant="text" onClick={() => openDefault(schema)}>{t("Set default")}</VBtn>}
-                                {(schema.status === "DRAFT" || schema.status === "PROVISIONAL") && <VBtn size="small" variant="text" onClick={() => openPromote(schema)}>{t("Promote")}</VBtn>}
+                                <PgButton size="small" variant="tonal" onClick={() => void openStudio(schema)}>{t("Open studio")}</PgButton>
+                                {schema.status === "CONFIRMED" && <PgButton size="small" variant="text" onClick={() => openDefault(schema)}>{t("Set default")}</PgButton>}
+                                {(schema.status === "DRAFT" || schema.status === "PROVISIONAL") && <PgButton size="small" variant="text" onClick={() => openPromote(schema)}>{t("Promote")}</PgButton>}
                             </ThemedView>
                         </ThemedView>
                     </SurfaceCard>
@@ -758,10 +758,10 @@ const AmlReportingStudioPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <ThemedView style={{ display: "flex", flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            {detail.value?.capabilities.edit && <VBtn color="primary" loading={actionLoading.value} onClick={() => void save()}>{t("Save draft")}</VBtn>}
-                            <VBtn variant="tonal" loading={actionLoading.value} onClick={() => void validate()}>{t("Validate")}</VBtn>
-                            <VBtn variant="text" onClick={() => { cloneOpen.value = true; cloneName.value = `${detail.value?.schema.name ?? ""} copy`; cloneVersion.value = (detail.value?.schema.version ?? 1) + 1; }}>{t("Clone as new version")}</VBtn>
-                            <VBtn variant="text" onClick={() => (studioOpen.value = false)}>{t("Close")}</VBtn>
+                            {detail.value?.capabilities.edit && <PgButton color="primary" loading={actionLoading.value} onClick={() => void save()}>{t("Save draft")}</PgButton>}
+                            <PgButton variant="tonal" loading={actionLoading.value} onClick={() => void validate()}>{t("Validate")}</PgButton>
+                            <PgButton variant="text" onClick={() => { cloneOpen.value = true; cloneName.value = `${detail.value?.schema.name ?? ""} copy`; cloneVersion.value = (detail.value?.schema.version ?? 1) + 1; }}>{t("Clone as new version")}</PgButton>
+                            <PgButton variant="text" onClick={() => (studioOpen.value = false)}>{t("Close")}</PgButton>
                         </ThemedView>
                     ),
                 }}
@@ -795,13 +795,13 @@ const AmlReportingStudioPage = dc(() => {
                         )}
                         {activeTab.value === "definition" && (
                             <FormField label={detail.value.schema.format === "XML" ? t("XSD XML") : t("Workbook JSON")} required>
-                                <VTextarea modelValue={definitionDraft.value} onUpdate:modelValue={(value: string) => (definitionDraft.value = value)} rows={18} hideDetails />
+                                <PgTextarea modelValue={definitionDraft.value} onUpdate:modelValue={(value: string) => (definitionDraft.value = value)} rows={18} hideDetails />
                             </FormField>
                         )}
                         {activeTab.value === "structure" && detail.value.schema.format === "XML" && (
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "minmax(280px, 0.8fr) minmax(320px, 1.2fr)", gap: "16px" }}>
                                 <ThemedView style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                    <VTextField modelValue={pathSearch.value} onUpdate:modelValue={(value: string) => (pathSearch.value = value)} label={t("Search paths")} hideDetails />
+                                    <PgTextField modelValue={pathSearch.value} onUpdate:modelValue={(value: string) => (pathSearch.value = value)} label={t("Search paths")} hideDetails />
                                     <ThemedView style={{ maxHeight: "520px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "3px" }}>
                                         {leafPaths.value.map((path) => (
                                             <button
@@ -830,7 +830,7 @@ const AmlReportingStudioPage = dc(() => {
                                         return (
                                             <>
                                                 <FormField label={t("Source")}>
-                                                    <VSelect
+                                                    <PgAutocomplete
                                                         items={SOURCE_KINDS.map((value) => ({ title: value, value }))}
                                                         modelValue={binding?.sourceKind ?? "CONTEXT_PATH"}
                                                         onUpdate:modelValue={(value: "CONTEXT_PATH" | "CONSTANT" | "CODE_MAP" | "TEMPLATE") => updateBinding(selectedPath.value, { sourceKind: value })}
@@ -839,7 +839,7 @@ const AmlReportingStudioPage = dc(() => {
                                                 </FormField>
                                                 {(binding?.sourceKind ?? "CONTEXT_PATH") === "CONTEXT_PATH" && (
                                                     <FormField label={t("Context path")}>
-                                                        <VSelect
+                                                        <PgAutocomplete
                                                             items={contextPathGroups.value.flatMap((group) => group.values.map((value) => ({ title: value, value })))}
                                                             modelValue={binding?.contextPath ?? ""}
                                                             onUpdate:modelValue={(value: string) => updateBinding(selectedPath.value, { contextPath: value })}
@@ -849,15 +849,15 @@ const AmlReportingStudioPage = dc(() => {
                                                 )}
                                                 {(binding?.sourceKind ?? "CONTEXT_PATH") === "CONSTANT" && (
                                                     <FormField label={t("Constant")}>
-                                                        <VTextField modelValue={binding?.constantValue ?? ""} onUpdate:modelValue={(value: string) => updateBinding(selectedPath.value, { constantValue: value })} hideDetails />
+                                                        <PgTextField modelValue={binding?.constantValue ?? ""} onUpdate:modelValue={(value: string) => updateBinding(selectedPath.value, { constantValue: value })} hideDetails />
                                                     </FormField>
                                                 )}
                                                 {(binding?.sourceKind ?? "CONTEXT_PATH") === "CODE_MAP" && (
                                                     <FormField label={t("Code map key")}>
-                                                        <VSelect items={Object.keys(mappingDraft.value.codeMaps).map((value) => ({ title: value, value }))} modelValue={binding?.codeMapKey ?? ""} onUpdate:modelValue={(value: string) => updateBinding(selectedPath.value, { codeMapKey: value })} hideDetails />
+                                                        <PgAutocomplete items={Object.keys(mappingDraft.value.codeMaps).map((value) => ({ title: value, value }))} modelValue={binding?.codeMapKey ?? ""} onUpdate:modelValue={(value: string) => updateBinding(selectedPath.value, { codeMapKey: value })} hideDetails />
                                                     </FormField>
                                                 )}
-                                                <VBtn size="small" color="error" variant="text" onClick={() => removeBinding(selectedPath.value)}>{t("Remove binding")}</VBtn>
+                                                <PgButton size="small" color="error" variant="text" onClick={() => removeBinding(selectedPath.value)}>{t("Remove binding")}</PgButton>
                                             </>
                                         );
                                     })()}
@@ -877,10 +877,10 @@ const AmlReportingStudioPage = dc(() => {
                                                     {codeList.allowedValues.map((allowed) => (
                                                         <ThemedView key={allowed} style={{ display: "grid", gridTemplateColumns: "minmax(120px, 1fr) minmax(120px, 1fr)", gap: "8px", alignItems: "center" }}>
                                                             <MonoRef value={allowed} />
-                                                            <VTextField modelValue={map.mappings[allowed] ?? ""} onUpdate:modelValue={(value: string) => setCodeMapValue(key, allowed, value)} placeholder={t("Internal value")} hideDetails density="compact" />
+                                                            <PgTextField modelValue={map.mappings[allowed] ?? ""} onUpdate:modelValue={(value: string) => setCodeMapValue(key, allowed, value)} placeholder={t("Internal value")} hideDetails density="compact" />
                                                         </ThemedView>
                                                     ))}
-                                                    <VTextField modelValue={map.defaultFallback ?? ""} onUpdate:modelValue={(value: string) => setCodeMapFallback(key, value)} label={t("Fallback value")} hideDetails density="compact" />
+                                                    <PgTextField modelValue={map.defaultFallback ?? ""} onUpdate:modelValue={(value: string) => setCodeMapFallback(key, value)} label={t("Fallback value")} hideDetails density="compact" />
                                                 </ThemedView>
                                             );
                                         })}
@@ -895,22 +895,22 @@ const AmlReportingStudioPage = dc(() => {
                                         {workbookSheets.value.map((sheet, index) => (
                                             <ThemedView key={`${sheet.name}-${index}`} style={{ display: "flex", flexDirection: "column", gap: "8px", border: "1px solid var(--pg-border-subtle)", borderRadius: "6px", padding: "10px" }}>
                                                 <ThemedView style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                                                    <VTextField modelValue={sheet.name} onUpdate:modelValue={(value: string) => { sheet.name = value; syncWorkbookDefinition(); }} label={t("Sheet name")} hideDetails density="compact" style={{ maxWidth: "220px" }} />
-                                                    <VTextField modelValue={sheet.rows.repeatOver} onUpdate:modelValue={(value: string) => { sheet.rows.repeatOver = value; syncWorkbookDefinition(); }} label={t("Rows path")} hideDetails density="compact" style={{ maxWidth: "260px" }} />
-                                                    <VBtn size="small" variant="text" color="error" onClick={() => removeSheet(index)}>{t("Remove sheet")}</VBtn>
+                                                    <PgTextField modelValue={sheet.name} onUpdate:modelValue={(value: string) => { sheet.name = value; syncWorkbookDefinition(); }} label={t("Sheet name")} hideDetails density="compact" style={{ maxWidth: "220px" }} />
+                                                    <PgTextField modelValue={sheet.rows.repeatOver} onUpdate:modelValue={(value: string) => { sheet.rows.repeatOver = value; syncWorkbookDefinition(); }} label={t("Rows path")} hideDetails density="compact" style={{ maxWidth: "260px" }} />
+                                                    <PgButton size="small" variant="text" color="error" onClick={() => removeSheet(index)}>{t("Remove sheet")}</PgButton>
                                                 </ThemedView>
                                                 {sheet.columns.map((column, columnIndex) => (
                                                     <ThemedView key={`${column.key}-${columnIndex}`} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 120px 100px auto", gap: "6px", alignItems: "center" }}>
-                                                        <VTextField modelValue={column.key} onUpdate:modelValue={(value: string) => { column.key = value; syncWorkbookDefinition(); }} label={t("Key/path")} hideDetails density="compact" />
-                                                        <VTextField modelValue={column.header} onUpdate:modelValue={(value: string) => { column.header = value; syncWorkbookDefinition(); }} label={t("Header")} hideDetails density="compact" />
-                                                        <VSelect items={["string", "number", "date", "boolean", "list"].map((value) => ({ title: value, value }))} modelValue={column.type} onUpdate:modelValue={(value: string) => { column.type = value as WorkbookColumn["type"]; syncWorkbookDefinition(); }} hideDetails density="compact" />
-                                                        <VBtn size="small" variant="text" color="error" onClick={() => removeColumn(sheet, columnIndex)}>{t("Remove")}</VBtn>
+                                                        <PgTextField modelValue={column.key} onUpdate:modelValue={(value: string) => { column.key = value; syncWorkbookDefinition(); }} label={t("Key/path")} hideDetails density="compact" />
+                                                        <PgTextField modelValue={column.header} onUpdate:modelValue={(value: string) => { column.header = value; syncWorkbookDefinition(); }} label={t("Header")} hideDetails density="compact" />
+                                                        <PgAutocomplete items={["string", "number", "date", "boolean", "list"].map((value) => ({ title: value, value }))} modelValue={column.type} onUpdate:modelValue={(value: string) => { column.type = value as WorkbookColumn["type"]; syncWorkbookDefinition(); }} hideDetails density="compact" />
+                                                        <PgButton size="small" variant="text" color="error" onClick={() => removeColumn(sheet, columnIndex)}>{t("Remove")}</PgButton>
                                                     </ThemedView>
                                                 ))}
-                                                <VBtn size="small" variant="tonal" onClick={() => addColumn(sheet)}>{t("Add column")}</VBtn>
+                                                <PgButton size="small" variant="tonal" onClick={() => addColumn(sheet)}>{t("Add column")}</PgButton>
                                             </ThemedView>
                                         ))}
-                                        <VBtn size="small" variant="tonal" onClick={addSheet}>{t("Add sheet")}</VBtn>
+                                        <PgButton size="small" variant="tonal" onClick={addSheet}>{t("Add sheet")}</PgButton>
                                     </ThemedView>
                                 </SurfaceCardText>
                             </SurfaceCard>
@@ -920,7 +920,7 @@ const AmlReportingStudioPage = dc(() => {
                                 <SurfaceCardText>
                                     <ThemedView style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                         {detail.value.capabilities.edit && (
-                                            <VFileInput
+                                            <PgFileUpload
                                                 label={t("Upload .xlsx template")}
                                                 {...{ accept: ".xlsx" }}
                                                 modelValue={null}
@@ -930,9 +930,9 @@ const AmlReportingStudioPage = dc(() => {
                                             />
                                         )}
                                         <ThemedView style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                                            <VBtn size="small" variant="tonal" loading={templateLoading.value} onClick={() => void analyzeTemplate()}>{t("Analyze existing template")}</VBtn>
-                                            <VBtn size="small" variant="text" onClick={() => void downloadTemplate()}>{t("Download template")}</VBtn>
-                                            {detail.value.capabilities.edit && <VBtn size="small" variant="text" color="error" onClick={() => void deleteTemplate()}>{t("Remove template")}</VBtn>}
+                                            <PgButton size="small" variant="tonal" loading={templateLoading.value} onClick={() => void analyzeTemplate()}>{t("Analyze existing template")}</PgButton>
+                                            <PgButton size="small" variant="text" onClick={() => void downloadTemplate()}>{t("Download template")}</PgButton>
+                                            {detail.value.capabilities.edit && <PgButton size="small" variant="text" color="error" onClick={() => void deleteTemplate()}>{t("Remove template")}</PgButton>}
                                         </ThemedView>
                                         {(templateAnalysis.value || templateBindingDraft.value) && (
                                             <ThemedView style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -943,7 +943,7 @@ const AmlReportingStudioPage = dc(() => {
                                                     return (
                                                         <ThemedView key={sheet.name} style={{ border: "1px solid var(--pg-border-subtle)", borderRadius: "var(--pg-radius-md)", padding: "12px", display: "flex", flexDirection: "column", gap: "8px" }}>
                                                             <ThemedText type="defaultSemiBold">{sheet.name}</ThemedText>
-                                                            <VSelect
+                                                            <PgAutocomplete
                                                                 items={(templateNamedRanges.value.length > 0 ? templateNamedRanges.value : binding.rangeName ? [{ name: binding.rangeName, ranges: [] }] : []).map((range) => ({ title: `${range.name} (${range.ranges[0] ?? ""})`, value: range.name }))}
                                                                 modelValue={binding.rangeName ?? ""}
                                                                 onUpdate:modelValue={(value: string) => { binding.rangeName = value; }}
@@ -952,13 +952,13 @@ const AmlReportingStudioPage = dc(() => {
                                                                 density="compact"
                                                             />
                                                             <ThemedView style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-                                                                <VTextField type="number" modelValue={binding.dataStartRow ?? 2} onUpdate:modelValue={(value: string) => { binding.dataStartRow = Number(value) || 2; }} label={t("Data start row")} hideDetails density="compact" />
-                                                                <VTextField type="number" modelValue={binding.prototypeRow ?? binding.dataStartRow ?? 2} onUpdate:modelValue={(value: string) => { binding.prototypeRow = Number(value) || 2; }} label={t("Prototype row")} hideDetails density="compact" />
+                                                                <PgTextField type="number" modelValue={binding.dataStartRow ?? 2} onUpdate:modelValue={(value: string) => { binding.dataStartRow = Number(value) || 2; }} label={t("Data start row")} hideDetails density="compact" />
+                                                                <PgTextField type="number" modelValue={binding.prototypeRow ?? binding.dataStartRow ?? 2} onUpdate:modelValue={(value: string) => { binding.prototypeRow = Number(value) || 2; }} label={t("Prototype row")} hideDetails density="compact" />
                                                             </ThemedView>
                                                             {binding.columns.map((column) => (
                                                                 <ThemedView key={column.key} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
                                                                     <ThemedText style={{ fontSize: "11px", alignSelf: "center" }}>{column.key}</ThemedText>
-                                                                    <VSelect
+                                                                    <PgAutocomplete
                                                                         items={(templateNamedRanges.value.length > 0 ? templateNamedRanges.value : column.namedRange ? [{ name: column.namedRange, ranges: [] }] : []).map((range) => ({ title: range.name, value: range.name }))}
                                                                         modelValue={column.namedRange ?? ""}
                                                                         onUpdate:modelValue={(value: string) => { column.namedRange = value; }}
@@ -971,7 +971,7 @@ const AmlReportingStudioPage = dc(() => {
                                                             {binding.columns.filter((column) => column.type === "number").map((column) => {
                                                                 const total = binding.totals?.find((entry) => entry.column === column.key);
                                                                 return (
-                                                                    <VSelect
+                                                                    <PgAutocomplete
                                                                         key={`total-${column.key}`}
                                                                         items={[{ title: t("No total cell"), value: "" }].concat(templateNamedRanges.value.map((range) => ({ title: range.name, value: range.name })))}
                                                                         modelValue={total?.namedRange ?? ""}
@@ -995,12 +995,12 @@ const AmlReportingStudioPage = dc(() => {
                                                         {(templateBindingDraft.value?.narrative ?? []).map((section) => (
                                                             <ThemedView key={section.key} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", alignItems: "center" }}>
                                                                 <ThemedText style={{ fontSize: "11px" }}>{section.key}</ThemedText>
-                                                                <VSelect items={templateNamedRanges.value.map((range) => ({ title: range.name, value: range.name }))} modelValue={section.namedRange ?? ""} onUpdate:modelValue={(value: string) => { section.namedRange = value; }} label={t("Named range")} hideDetails density="compact" />
+                                                                <PgAutocomplete items={templateNamedRanges.value.map((range) => ({ title: range.name, value: range.name }))} modelValue={section.namedRange ?? ""} onUpdate:modelValue={(value: string) => { section.namedRange = value; }} label={t("Named range")} hideDetails density="compact" />
                                                             </ThemedView>
                                                         ))}
                                                     </ThemedView>
                                                 )}
-                                                {detail.value.capabilities.edit && <VBtn size="small" variant="tonal" loading={templateLoading.value} onClick={() => void saveTemplateBinding()}>{t("Save template mapping")}</VBtn>}
+                                                {detail.value.capabilities.edit && <PgButton size="small" variant="tonal" loading={templateLoading.value} onClick={() => void saveTemplateBinding()}>{t("Save template mapping")}</PgButton>}
                                             </ThemedView>
                                         )}
                                     </ThemedView>
@@ -1009,19 +1009,19 @@ const AmlReportingStudioPage = dc(() => {
                         )}
                         {activeTab.value === "simulate" && (
                             <ThemedView style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                <VBtn size="small" variant="tonal" onClick={() => void suggestContext()}>{t("Load saved sample context")}</VBtn>
+                                <PgButton size="small" variant="tonal" onClick={() => void suggestContext()}>{t("Load saved sample context")}</PgButton>
                                 <FormField label={t("Canonical context JSON")} required>
-                                    <VTextarea modelValue={simulationContext.value} onUpdate:modelValue={(value: string) => (simulationContext.value = value)} rows={10} hideDetails />
+                                    <PgTextarea modelValue={simulationContext.value} onUpdate:modelValue={(value: string) => (simulationContext.value = value)} rows={10} hideDetails />
                                 </FormField>
-                                <VBtn color="primary" variant="tonal" loading={actionLoading.value} onClick={() => void simulate()}>{t("Run simulation")}</VBtn>
-                                {simulationResult.value && <VTextarea modelValue={simulationResult.value} readonly rows={16} hideDetails />}
+                                <PgButton color="primary" variant="tonal" loading={actionLoading.value} onClick={() => void simulate()}>{t("Run simulation")}</PgButton>
+                                {simulationResult.value && <PgTextarea modelValue={simulationResult.value} readonly rows={16} hideDetails />}
                             </ThemedView>
                         )}
                         {activeTab.value === "bindings" && (
                             <ThemedView style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText>{t("Default binding key")}: {detail.value.schema.authority} / {detail.value.schema.reportType} / {detail.value.schema.reportCode} / {detail.value.schema.format}</ThemedText>
-                                {detail.value.capabilities.setDefault && <VBtn size="small" color="primary" onClick={() => openDefault(detail.value!.schema)}>{t("Set as default")}</VBtn>}
-                                <VBtn size="small" variant="tonal" onClick={() => openPromote(detail.value!.schema)} disabled={!detail.value.capabilities.promote}>{t("Promote")}</VBtn>
+                                {detail.value.capabilities.setDefault && <PgButton size="small" color="primary" onClick={() => openDefault(detail.value!.schema)}>{t("Set as default")}</PgButton>}
+                                <PgButton size="small" variant="tonal" onClick={() => openPromote(detail.value!.schema)} disabled={!detail.value.capabilities.promote}>{t("Promote")}</PgButton>
                                 <ThemedText style={{ opacity: 0.7 }}>{t("Schema versions")}: {schemas.value.filter((schema) => schema.schemaCode === detail.value?.schema.schemaCode).map((schema) => `v${schema.version} (${schema.status})`).join(", ")}</ThemedText>
                             <ThemedView style={{ display: "flex", flexDirection: "column", gap: "10px", borderTop: "1px solid var(--pg-border-subtle)", paddingTop: "12px" }}>
                                 <ThemedText type="defaultSemiBold">{t("Rule schema overrides")}</ThemedText>
@@ -1036,7 +1036,7 @@ const AmlReportingStudioPage = dc(() => {
                                         {(["XML", "XLSX", "DOCX"] as const).map((format) => (
                                             <ThemedView key={format} style={{ display: "grid", gridTemplateColumns: "70px 1fr", gap: "8px", alignItems: "center" }}>
                                                 <ThemedText>{format}</ThemedText>
-                                                <VSelect
+                                                <PgAutocomplete
                                                     items={[{ title: t("Use default binding"), value: "" }].concat(schemasForRule(rule, format).map((schema) => ({ title: `${schema.name} · v${schema.version}`, value: schema.id })))}
                                                     modelValue={ruleBindingDraft.value[rule.id]?.[format] ?? ""}
                                                     onUpdate:modelValue={(value: string) => {
@@ -1047,7 +1047,7 @@ const AmlReportingStudioPage = dc(() => {
                                                 />
                                             </ThemedView>
                                         ))}
-                                        <VBtn size="small" variant="tonal" onClick={() => void saveRuleBindings(rule)}>{t("Save rule binding for approval")}</VBtn>
+                                        <PgButton size="small" variant="tonal" onClick={() => void saveRuleBindings(rule)}>{t("Save rule binding for approval")}</PgButton>
                                     </ThemedView>
                                 ))}
                             </ThemedView>
@@ -1058,15 +1058,15 @@ const AmlReportingStudioPage = dc(() => {
             </SlideOverDrawer>
 
             <FormModal modelValue={createOpen.value} onUpdate:modelValue={(value: boolean) => (createOpen.value = value)} title={t("New reporting schema")} size="lg" loading={actionLoading.value} submitLabel={t("Save draft")} onSubmit={() => void createSchema()}>
-                <FormField label={t("Authority")} required><VTextField modelValue={form.value.authority} onUpdate:modelValue={(value: string) => (form.value.authority = value)} hideDetails /></FormField>
-                <FormField label={t("Report type")} required><VSelect items={REPORT_TYPES.map((value) => ({ title: value, value }))} modelValue={form.value.reportType} onUpdate:modelValue={(value: string) => (form.value.reportType = value)} hideDetails /></FormField>
-                <FormField label={t("Return code")} required><VTextField modelValue={form.value.reportCode} onUpdate:modelValue={(value: string) => (form.value.reportCode = value)} hideDetails /></FormField>
-                <FormField label={t("Format")} required><VSelect items={FORMATS.map((value) => ({ title: value, value }))} modelValue={form.value.format} onUpdate:modelValue={(value: "XML" | "XLSX" | "DOCX") => (form.value.format = value)} hideDetails /></FormField>
-                <FormField label={t("Schema code")} required><VTextField modelValue={form.value.schemaCode} onUpdate:modelValue={(value: string) => (form.value.schemaCode = value)} hideDetails /></FormField>
-                <FormField label={t("Name")} required><VTextField modelValue={form.value.name} onUpdate:modelValue={(value: string) => (form.value.name = value)} hideDetails /></FormField>
-                <FormField label={t("Version")} required><VTextField type="number" modelValue={form.value.version} onUpdate:modelValue={(value: string) => (form.value.version = Number(value) || 1)} hideDetails /></FormField>
-                <FormField label={form.value.format === "XML" ? t("XSD XML") : form.value.format === "DOCX" ? t("DOCX narrative JSON") : t("Workbook JSON")} required><VTextarea modelValue={form.value.definitionText} onUpdate:modelValue={(value: string) => (form.value.definitionText = value)} rows={10} hideDetails /></FormField>
-                <FormField label={t("Mapping blueprint JSON")} required><VTextarea modelValue={form.value.mappingBlueprint} onUpdate:modelValue={(value: string) => (form.value.mappingBlueprint = value)} rows={6} hideDetails /></FormField>
+                <FormField label={t("Authority")} required><PgTextField modelValue={form.value.authority} onUpdate:modelValue={(value: string) => (form.value.authority = value)} hideDetails /></FormField>
+                <FormField label={t("Report type")} required><PgAutocomplete items={REPORT_TYPES.map((value) => ({ title: value, value }))} modelValue={form.value.reportType} onUpdate:modelValue={(value: string) => (form.value.reportType = value)} hideDetails /></FormField>
+                <FormField label={t("Return code")} required><PgTextField modelValue={form.value.reportCode} onUpdate:modelValue={(value: string) => (form.value.reportCode = value)} hideDetails /></FormField>
+                <FormField label={t("Format")} required><PgAutocomplete items={FORMATS.map((value) => ({ title: value, value }))} modelValue={form.value.format} onUpdate:modelValue={(value: "XML" | "XLSX" | "DOCX") => (form.value.format = value)} hideDetails /></FormField>
+                <FormField label={t("Schema code")} required><PgTextField modelValue={form.value.schemaCode} onUpdate:modelValue={(value: string) => (form.value.schemaCode = value)} hideDetails /></FormField>
+                <FormField label={t("Name")} required><PgTextField modelValue={form.value.name} onUpdate:modelValue={(value: string) => (form.value.name = value)} hideDetails /></FormField>
+                <FormField label={t("Version")} required><PgTextField type="number" modelValue={form.value.version} onUpdate:modelValue={(value: string) => (form.value.version = Number(value) || 1)} hideDetails /></FormField>
+                <FormField label={form.value.format === "XML" ? t("XSD XML") : form.value.format === "DOCX" ? t("DOCX narrative JSON") : t("Workbook JSON")} required><PgTextarea modelValue={form.value.definitionText} onUpdate:modelValue={(value: string) => (form.value.definitionText = value)} rows={10} hideDetails /></FormField>
+                <FormField label={t("Mapping blueprint JSON")} required><PgTextarea modelValue={form.value.mappingBlueprint} onUpdate:modelValue={(value: string) => (form.value.mappingBlueprint = value)} rows={6} hideDetails /></FormField>
             </FormModal>
             <FormModal
                 modelValue={defaulting.value !== null}
@@ -1104,8 +1104,8 @@ const AmlReportingStudioPage = dc(() => {
                 />
             </FormModal>
             <FormModal modelValue={cloneOpen.value} onUpdate:modelValue={(value: boolean) => (cloneOpen.value = value)} title={t("Clone schema as new version")} size="sm" loading={actionLoading.value} submitLabel={t("Clone")} onSubmit={() => void cloneSchema()}>
-                <FormField label={t("Name")}><VTextField modelValue={cloneName.value} onUpdate:modelValue={(value: string) => (cloneName.value = value)} hideDetails /></FormField>
-                <FormField label={t("Version")}><VTextField type="number" modelValue={cloneVersion.value ?? ""} onUpdate:modelValue={(value: string) => (cloneVersion.value = Number(value) || null)} hideDetails /></FormField>
+                <FormField label={t("Name")}><PgTextField modelValue={cloneName.value} onUpdate:modelValue={(value: string) => (cloneName.value = value)} hideDetails /></FormField>
+                <FormField label={t("Version")}><PgTextField type="number" modelValue={cloneVersion.value ?? ""} onUpdate:modelValue={(value: string) => (cloneVersion.value = Number(value) || null)} hideDetails /></FormField>
                 <VAlert type="info" variant="tonal">{t("The clone copies the definition, mapping and template but not approvals, defaults or sample PII.")}</VAlert>
             </FormModal>
         </ScreenContainer>

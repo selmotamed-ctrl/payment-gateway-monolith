@@ -2,7 +2,7 @@ import { computed, ref, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import { VIcon } from "@/components/vael/VuetifyShim";
+import {PgIcon} from "@pg/ui";
 import type { Question } from "@/content/academy";
 import { Callout } from "./ui/Callout";
 
@@ -88,7 +88,7 @@ export const LessonCheck = defineComponent({
                                         aria-pressed={wasPicked}
                                         onClick={() => choose(option.id)}
                                     >
-                                        <VIcon
+                                        <PgIcon
                                             class="ac-lesson-choice__icon"
                                             icon={good ? "mdi-check-circle" : bad ? "mdi-close-circle" : "mdi-circle-outline"}
                                             size={18}
@@ -132,7 +132,7 @@ export const LessonCheck = defineComponent({
                         )}
                         {solved.value && q.refs.length > 0 && (
                             <p class="ac-muted ac-lesson-refs">
-                                <VIcon icon="mdi-book-open-page-variant-outline" size={16} aria-hidden="true" />
+                                <PgIcon icon="mdi-book-open-page-variant-outline" size={16} aria-hidden="true" />
                                 <span>
                                     {t("More in the Guide")}:{" "}
                                     {q.refs.map((id, i) => (

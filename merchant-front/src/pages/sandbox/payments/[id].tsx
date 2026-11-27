@@ -2,24 +2,24 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { StateView } from "@/components/StateView";
-import { DataTable } from "@/components/Table/DataTable";
-import type { TableHeader } from "@/components/Table/types";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { SectionFields } from "@/components/SectionFields";
-import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
+import {VAlert, PgButton, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {MetricStrip, type MetricItem} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import type { TableHeader } from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
+import { SandboxBanner } from "@/features/sandbox/SandboxBanner";
 import { sandboxGet, sandboxPost, type SandboxLedgerLine, type SandboxPaymentDetail } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -140,9 +140,9 @@ const SandboxPaymentDetailPage = dc(() => {
         <ScreenContainer>
             <PageHeader title={t("Sandbox Payment")} subtitle={detail.value?.attempt.reference ?? attemptId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Payments"), to: "/sandbox/payments" }, { label: detail.value?.attempt.reference ?? attemptId() }]}>(
                     <div class="d-flex flex-wrap ga-2">
-                        <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</VBtn>
-                        <VBtn variant="tonal" prependIcon="mdi-cash-refund" onClick={() => { refundAmount.value = ""; refundReason.value = ""; refundOpen.value = true; }}>{t("Refund")}</VBtn>
-                        <VBtn variant="tonal" color="warning" loading={busy.value === t("Sandbox dispute created")} disabled={detail.value?.attempt.status !== "SUCCEEDED"} onClick={() => void action(t("Sandbox dispute created"), `/payments/${detail.value?.attempt.id}/simulate-dispute`)}>{t("Simulate dispute")}</VBtn>
+                        <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</PgButton>
+                        <PgButton variant="tonal" prependIcon="mdi-cash-refund" onClick={() => { refundAmount.value = ""; refundReason.value = ""; refundOpen.value = true; }}>{t("Refund")}</PgButton>
+                        <PgButton variant="tonal" color="warning" loading={busy.value === t("Sandbox dispute created")} disabled={detail.value?.attempt.status !== "SUCCEEDED"} onClick={() => void action(t("Sandbox dispute created"), `/payments/${detail.value?.attempt.id}/simulate-dispute`)}>{t("Simulate dispute")}</PgButton>
                     </div>
                 )</PageHeader>
             <SandboxBanner subtitle={t("Refunds and disputes post to the sandbox ledger and governance queues only.")} />
@@ -179,7 +179,7 @@ const SandboxPaymentDetailPage = dc(() => {
                                 </SurfaceCard>
                                 <SurfaceCard title={t("Dispute action")} style={{ flex: "1 1 320px" }}>
                                     <div class="d-flex flex-column ga-2">
-                                        <VBtn variant="tonal" color="success" disabled={!detail.value.disputes.some((row) => ["OPENED", "EVIDENCE_REQUESTED", "EVIDENCE_SUBMITTED"].includes(String(row.status)))} loading={busy.value === t("Sandbox dispute resolved")} onClick={() => void resolveDispute()}>{t("Resolve dispute as won")}</VBtn>
+                                        <PgButton variant="tonal" color="success" disabled={!detail.value.disputes.some((row) => ["OPENED", "EVIDENCE_REQUESTED", "EVIDENCE_SUBMITTED"].includes(String(row.status)))} loading={busy.value === t("Sandbox dispute resolved")} onClick={() => void resolveDispute()}>{t("Resolve dispute as won")}</PgButton>
                                         <p class="text-caption text-medium-emphasis">{t("A lost dispute books a sandbox chargeback adjustment; a won dispute releases the attempt.")}</p>
                                     </div>
                                 </SurfaceCard>
@@ -217,10 +217,10 @@ const SandboxPaymentDetailPage = dc(() => {
             <FormModal modelValue={refundOpen.value} onUpdate:modelValue={(v: any) => (refundOpen.value = v)} title={t("Refund sandbox payment")} size="sm" loading={busy.value === t("Sandbox refund processed")} submitLabel={t("Refund")} onSubmit={() => void refund()}>
                 <SectionFields title={t("Refund")}>
                     <FormField label={t("Amount LYD")}>
-                        <VTextField type="number" modelValue={refundAmount.value} onUpdate:modelValue={(v: string) => (refundAmount.value = v)} placeholder={t("Blank for full refund")} hideDetails />
+                        <PgTextField type="number" modelValue={refundAmount.value} onUpdate:modelValue={(v: string) => (refundAmount.value = v)} placeholder={t("Blank for full refund")} hideDetails />
                     </FormField>
                     <FormField label={t("Reason")}>
-                        <VTextField modelValue={refundReason.value} onUpdate:modelValue={(v: string) => (refundReason.value = v)} hideDetails />
+                        <PgTextField modelValue={refundReason.value} onUpdate:modelValue={(v: string) => (refundReason.value = v)} hideDetails />
                     </FormField>
                     <div class="text-caption text-medium-emphasis">{t("Refundable")}: {detail.value?.refundableAmount} {detail.value?.attempt.currency}</div>
                 </SectionFields>

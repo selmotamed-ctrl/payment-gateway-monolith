@@ -10,6 +10,7 @@ import {
     type OutputEncoding,
 } from "./engine/crypto";
 import { useGuideLocale } from "./useGuideLocale";
+import { PgAutocomplete, PgTextarea, PgTextField } from "@pg/ui";
 
 const parseFields = (value: string): Record<string, string> => {
     const fields: Record<string, string> = {};
@@ -87,52 +88,60 @@ export const CryptoLab = defineComponent({
                     {L("Teaching tool — not connected to any real system. Example data, not a real partner's contract.", "أداة تعليمية — غير متصلة بأي نظام حقيقي. بيانات مثال وليست عقد شريك حقيقي.")}
                 </p>
                 <div class="guide-tool__grid">
-                    <label class="guide-field">
+                    <div class="guide-field">
                         <span>{L("Mode", "الوضع")}</span>
-                        <select value={mode.value} onChange={(event) => (mode.value = (event.target as HTMLSelectElement).value as CryptoMode)}>
-                            <option value="SORTED_KEY_VALUE_AMP">SORTED_KEY_VALUE_AMP</option>
-                            <option value="SORTED_VALUES_HASH">SORTED_VALUES_HASH</option>
-                            <option value="TIMESTAMP_DOT_RAW_BODY">TIMESTAMP_DOT_RAW_BODY</option>
-                            <option value="RAW_BODY">RAW_BODY</option>
-                        </select>
-                    </label>
-                    <label class="guide-field">
+                        <PgAutocomplete
+                            density="compact"
+                            searchable={false}
+                            clearable={false}
+                            items={["SORTED_KEY_VALUE_AMP", "SORTED_VALUES_HASH", "TIMESTAMP_DOT_RAW_BODY", "RAW_BODY"]}
+                            modelValue={mode.value}
+                            onUpdate:modelValue={(value: CryptoMode) => (mode.value = value)}
+                        />
+                    </div>
+                    <div class="guide-field">
                         <span>{L("Key encoding", "ترميز المفتاح")}</span>
-                        <select value={keyEncoding.value} onChange={(event) => (keyEncoding.value = (event.target as HTMLSelectElement).value as KeyEncoding)}>
-                            <option value="UTF8">UTF8</option>
-                            <option value="HEX">HEX</option>
-                            <option value="BASE64">BASE64</option>
-                        </select>
-                    </label>
-                    <label class="guide-field">
+                        <PgAutocomplete
+                            density="compact"
+                            searchable={false}
+                            clearable={false}
+                            items={["UTF8", "HEX", "BASE64"]}
+                            modelValue={keyEncoding.value}
+                            onUpdate:modelValue={(value: KeyEncoding) => (keyEncoding.value = value)}
+                        />
+                    </div>
+                    <div class="guide-field">
                         <span>{L("Output encoding", "ترميز الخرج")}</span>
-                        <select value={outputEncoding.value} onChange={(event) => (outputEncoding.value = (event.target as HTMLSelectElement).value as OutputEncoding)}>
-                            <option value="HEX_UPPER">HEX_UPPER</option>
-                            <option value="HEX_LOWER">HEX_LOWER</option>
-                            <option value="BASE64">BASE64</option>
-                        </select>
-                    </label>
+                        <PgAutocomplete
+                            density="compact"
+                            searchable={false}
+                            clearable={false}
+                            items={["HEX_UPPER", "HEX_LOWER", "BASE64"]}
+                            modelValue={outputEncoding.value}
+                            onUpdate:modelValue={(value: OutputEncoding) => (outputEncoding.value = value)}
+                        />
+                    </div>
                 </div>
-                <label class="guide-field">
+                <div class="guide-field">
                     <span>{L("Key", "المفتاح")}</span>
-                    <textarea rows={2} value={key.value} onInput={(event) => (key.value = (event.target as HTMLTextAreaElement).value)} />
-                </label>
+                    <PgTextarea rows={2} density="compact" modelValue={key.value} onUpdate:modelValue={(value: string) => (key.value = value)} />
+                </div>
                 {mode.value === "TIMESTAMP_DOT_RAW_BODY" ? (
-                    <label class="guide-field">
+                    <div class="guide-field">
                         <span>{L("Timestamp", "الطابع الزمني")}</span>
-                        <input value={timestamp.value} onInput={(event) => (timestamp.value = (event.target as HTMLInputElement).value)} />
-                    </label>
+                        <PgTextField density="compact" modelValue={timestamp.value} onUpdate:modelValue={(value: string) => (timestamp.value = value)} />
+                    </div>
                 ) : null}
                 {mode.value === "SORTED_KEY_VALUE_AMP" || mode.value === "SORTED_VALUES_HASH" ? (
-                    <label class="guide-field">
+                    <div class="guide-field">
                         <span>{L("Fields (one key=value per line)", "الحقول (مفتاح=قيمة في كل سطر)")}</span>
-                        <textarea rows={6} value={fields.value} onInput={(event) => (fields.value = (event.target as HTMLTextAreaElement).value)} />
-                    </label>
+                        <PgTextarea rows={6} density="compact" modelValue={fields.value} onUpdate:modelValue={(value: string) => (fields.value = value)} />
+                    </div>
                 ) : (
-                    <label class="guide-field">
+                    <div class="guide-field">
                         <span>{L("Raw body", "النص الخام")}</span>
-                        <textarea rows={4} value={body.value} onInput={(event) => (body.value = (event.target as HTMLTextAreaElement).value)} />
-                    </label>
+                        <PgTextarea rows={4} density="compact" modelValue={body.value} onUpdate:modelValue={(value: string) => (body.value = value)} />
+                    </div>
                 )}
                 <button type="button" class="guide-primary-button" onClick={() => void run()} disabled={running.value}>
                     {L("Sign", "وقّع")}
@@ -147,10 +156,10 @@ export const CryptoLab = defineComponent({
                         <code class="guide-signature">{result.value.output}</code>
                     </div>
                 ) : null}
-                <label class="guide-field">
+                <div class="guide-field">
                     <span>{L("Compare with partner's signature", "قارن مع توقيع الشريك")}</span>
-                    <input value={comparison.value} onInput={(event) => (comparison.value = (event.target as HTMLInputElement).value)} />
-                </label>
+                    <PgTextField density="compact" modelValue={comparison.value} onUpdate:modelValue={(value: string) => (comparison.value = value)} />
+                </div>
                 {comparison.value && result.value ? (
                     <div class={signaturesMatch(comparison.value, result.value.output) ? "guide-match" : "guide-no-match"} role="status">
                         <strong>{signaturesMatch(comparison.value, result.value.output) ? "MATCH" : "NO MATCH"}</strong>

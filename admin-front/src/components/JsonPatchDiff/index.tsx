@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
-import { JsonDiffViewer, type JsonPatchOperation } from "@/components/ui/JsonDiffViewer";
+import {JsonDiffViewer, type JsonPatchOperation} from "@pg/ui";
 
-export type { JsonPatchOperation } from "@/components/ui/JsonDiffViewer";
+export type { JsonPatchOperation } from "@pg/ui";
 
 export type JsonPatchDiffProps = {
     operations: JsonPatchOperation[];

@@ -4,18 +4,18 @@ import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import { statusTone } from "@/components/Table/statusTone";
-import type { TableHeader } from "@/components/Table/types";
+import {VAlert, PgButton, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import {statusTone} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
@@ -27,16 +27,16 @@ import type {
     GatewayInquiryScheduleSummary,
 } from "../types";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
+import {FormModal} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
 import { xlsxUIPipeline } from "@/utils/xlsx";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { EmptyState } from "@/components/ui/EmptyState";
+import {SlideOverDrawer} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
 const filterDefinitions = tableRegistry.GatewayInquiries?.filters ?? [];
 
 const SUMMARY_EXPORT_CHECKS = [
@@ -418,14 +418,14 @@ const GatewayInquirySchedulesPage = dc(() => {
             label: "Case",
             value: (row) => row.caseRef ?? row.operatorCaseId ?? "",
             Value: ({ row }) => (
-                <VBtn
+                <PgButton
                     size="small"
                     variant="text"
                     disabled={!row.operatorCaseId}
                     onClick={() => openCase(row)}
                 >
                     {row.caseRef || row.operatorCaseId || "—"}
-                </VBtn>
+                </PgButton>
             ),
         },
         {
@@ -542,12 +542,12 @@ const GatewayInquirySchedulesPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Gateway Inquiry Schedule")} subtitle={t("Monitor and operate gateway status inquiry schedules created by operator cases.")} badge={summary.value ? `${summary.value.overdue} ${t("Overdue")}` : t("Gateway inquiries")} badgeTone={summary.value && summary.value.overdue > 0 ? "danger" : "info"}>(
                         <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
-                            <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "OperatorCases" })}>
+                            <PgButton variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "OperatorCases" })}>
                                 {t("Operator Cases")}
-                            </VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" loading={summaryLoading.value} onClick={refreshAll}>
+                            </PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" loading={summaryLoading.value} onClick={refreshAll}>
                                 {t("Refresh")}
-                            </VBtn>
+                            </PgButton>
                         </ThemedView>
                     )</PageHeader>
 
@@ -646,7 +646,7 @@ const GatewayInquirySchedulesPage = dc(() => {
                     hint={actionMode.value === "cancel" ? t("At least 3 characters.") : ""}
                     required={actionMode.value === "cancel"}
                 >
-                    <VTextarea
+                    <PgTextarea
                         modelValue={actionReason.value}
                         onUpdate:modelValue={(value: string) => (actionReason.value = value)}
                         rows={3}

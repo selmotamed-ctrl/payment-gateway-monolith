@@ -1,6 +1,6 @@
 import { type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VIcon } from "@/components/vael/VuetifyShim";
+import {PgIcon} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 
 /**
@@ -47,7 +47,7 @@ export const LedgerRefLink = defineComponent({
                     }}
                 >
                     <span>{shown}</span>
-                    <VIcon icon="mdi-open-in-new" size={12} />
+                    <PgIcon icon="mdi-open-in-new" size={12} />
                 </button>
             );
         };

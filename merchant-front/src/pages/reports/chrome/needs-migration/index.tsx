@@ -2,13 +2,13 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import { VBtn } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { ThemedView } from "@/components/ThemedView";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { MetaPill, MonoRef, PageHeader, StatusBadge } from "@/components/ui";
+import {PgButton} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {MetaPill, MonoRef, PageHeader, StatusBadge} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -150,12 +150,12 @@ const Page = dc(() => {
       <ThemedView style={{ gap: "18px" }}>
         <PageHeader title={t("Needs Migration")} subtitle={t("Migrate your branding header/footer to keep your company name and logo on reports")} badge="NEEDS_MIGRATION" badgeLabel={t("Needs migration")} badgeTone="danger">(
             <div class="d-flex flex-wrap ga-2">
-              <VBtn variant="tonal" prependIcon="mdi-palette-outline" onClick={() => void router.push({ name: "MerchantReportsChrome" })}>
+              <PgButton variant="tonal" prependIcon="mdi-palette-outline" onClick={() => void router.push({ name: "MerchantReportsChrome" })}>
                 {t("Report Branding")}
-              </VBtn>
-              <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => refreshHook.value?.refreshAsIs()}>
+              </PgButton>
+              <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => refreshHook.value?.refreshAsIs()}>
                 {t("Refresh")}
-              </VBtn>
+              </PgButton>
             </div>
           )</PageHeader>
         <ApiTable<Row>

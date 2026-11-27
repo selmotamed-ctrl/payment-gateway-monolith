@@ -2,11 +2,11 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import { VAlert, VAutocomplete, VBtn, VSelect, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
+import {VAlert, PgAutocomplete, PgButton, PgTextField, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -14,11 +14,11 @@ import { showSnackBar } from "@/utils/snackBar";
 import { copyToClipboard } from "@/utils/common";
 import { formatDateTime } from "./joinRequestHelp";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { FormField } from "@/components/ui/FormField";
+import {FormModal} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {FormField} from "@pg/ui";
 type MerchantOption = {
     id: string;
     title: string;
@@ -258,9 +258,9 @@ const JoinRequestNewPage = dc(() => {
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("New admin-assisted join request")} subtitle={t("Prepare a complete onboarding package on behalf of a merchant without bypassing maker-checker controls.")} badge={t("Admin assisted")} badgeTone="info">(
-                        <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "JoinRequests" })}>
+                        <PgButton variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "JoinRequests" })}>
                             {t("Back to queue")}
-                        </VBtn>
+                        </PgButton>
                     )</PageHeader>
 
                 <VAlert type="info" variant="tonal">
@@ -291,7 +291,7 @@ const JoinRequestNewPage = dc(() => {
                                 hint={t("Only pending or rejected merchants can start a new onboarding request.")}
                                 required
                             >
-                                <VAutocomplete
+                                <PgAutocomplete
                                     items={merchantOptions.value}
                                     itemTitle="title"
                                     itemValue="id"
@@ -313,47 +313,47 @@ const JoinRequestNewPage = dc(() => {
                         </ThemedText>
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "14px" }}>
                             <FormField label={t("Legal name")} required>
-                                <VTextField v-model={form.value.legalName} />
+                                <PgTextField v-model={form.value.legalName} />
                             </FormField>
                             <FormField label={t("Trade name")} required>
-                                <VTextField v-model={form.value.tradeName} />
+                                <PgTextField v-model={form.value.tradeName} />
                             </FormField>
                             <FormField label={t("Country code (2 letters)")} error={countryInvalid.value ? t("Use exactly 2 letters") : ""}>
-                                <VTextField v-model={form.value.country} error={countryInvalid.value} />
+                                <PgTextField v-model={form.value.country} error={countryInvalid.value} />
                             </FormField>
                             <FormField label={t("Business category")}>
-                                <VTextField v-model={form.value.businessCategory} />
+                                <PgTextField v-model={form.value.businessCategory} />
                             </FormField>
                             <FormField label={t("Registration number")}>
-                                <VTextField v-model={form.value.registrationNumber} />
+                                <PgTextField v-model={form.value.registrationNumber} />
                             </FormField>
                             <FormField label={t("Tax ID")}>
-                                <VTextField v-model={form.value.taxId} />
+                                <PgTextField v-model={form.value.taxId} />
                             </FormField>
                             <FormField label={t("Contact phone")} error={phoneInvalid.value ? t("Enter a phone number with 6-15 digits") : ""}>
-                                <VTextField v-model={form.value.contactPhone} error={phoneInvalid.value} />
+                                <PgTextField v-model={form.value.contactPhone} error={phoneInvalid.value} />
                             </FormField>
                             <FormField label={t("Contact email")} error={emailInvalid.value ? t("Enter a valid email address") : ""}>
-                                <VTextField v-model={form.value.contactEmail} error={emailInvalid.value} />
+                                <PgTextField v-model={form.value.contactEmail} error={emailInvalid.value} />
                             </FormField>
                             <FormField label={t("Expected monthly volume")} error={volumeInvalid.value ? t("Use a number with up to 4 decimals") : ""}>
-                                <VTextField v-model={form.value.expectedMonthlyVolume} error={volumeInvalid.value} />
+                                <PgTextField v-model={form.value.expectedMonthlyVolume} error={volumeInvalid.value} />
                             </FormField>
                             <FormField label={t("Currency (3 letters)")} error={currencyInvalid.value ? t("Use exactly 3 letters") : ""}>
-                                <VTextField v-model={form.value.currency} error={currencyInvalid.value} />
+                                <PgTextField v-model={form.value.currency} error={currencyInvalid.value} />
                             </FormField>
                             <FormField label={t("Proposed risk tier")}>
-                                <VSelect v-model={form.value.riskTier} items={["LOW", "STANDARD", "HIGH"]} />
+                                <PgAutocomplete v-model={form.value.riskTier} items={["LOW", "STANDARD", "HIGH"]} />
                             </FormField>
                             <FormField label={t("Website URL")} error={websiteInvalid.value ? t("Enter a full http:// or https:// URL") : ""}>
-                                <VTextField v-model={form.value.websiteUrl} error={websiteInvalid.value} />
+                                <PgTextField v-model={form.value.websiteUrl} error={websiteInvalid.value} />
                             </FormField>
                         </div>
                         <FormField label={t("Registered address")}>
-                            <VTextField v-model={form.value.registeredAddress} />
+                            <PgTextField v-model={form.value.registeredAddress} />
                         </FormField>
                         <FormField label={t("Business use description")}>
-                            <VTextarea v-model={form.value.businessUseDescription} rows={3} autoGrow />
+                            <PgTextarea v-model={form.value.businessUseDescription} rows={3} autoGrow />
                         </FormField>
                     </SurfaceCardText>
                 </SurfaceCard>
@@ -365,10 +365,10 @@ const JoinRequestNewPage = dc(() => {
                         </ThemedText>
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "14px" }}>
                             <FormField label={t("Bank name")} error={payoutIncomplete.value ? t("Enter both bank name and account number") : ""}>
-                                <VTextField v-model={form.value.payoutBankName} error={payoutIncomplete.value} />
+                                <PgTextField v-model={form.value.payoutBankName} error={payoutIncomplete.value} />
                             </FormField>
                             <FormField label={t("IBAN / account number")} error={payoutIncomplete.value ? t("Enter both bank name and account number") : ""}>
-                                <VTextField v-model={form.value.payoutAccount} error={payoutIncomplete.value} />
+                                <PgTextField v-model={form.value.payoutAccount} error={payoutIncomplete.value} />
                             </FormField>
                         </div>
                         <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
@@ -378,12 +378,12 @@ const JoinRequestNewPage = dc(() => {
                 </SurfaceCard>
 
                 <ThemedView style={{ flexDirection: "row", gap: "12px", justifyContent: "flex-end" }}>
-                    <VBtn variant="text" onClick={() => void router.push({ name: "JoinRequests" })}>
+                    <PgButton variant="text" onClick={() => void router.push({ name: "JoinRequests" })}>
                         {t("Cancel")}
-                    </VBtn>
-                    <VBtn color="primary" loading={saving.value} disabled={!canSubmit.value} onClick={() => void create()}>
+                    </PgButton>
+                    <PgButton color="primary" loading={saving.value} disabled={!canSubmit.value} onClick={() => void create()}>
                         {t("Create draft")}
-                    </VBtn>
+                    </PgButton>
                 </ThemedView>
             </ThemedView>
 
@@ -395,7 +395,7 @@ const JoinRequestNewPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <>
-                            <VBtn
+                            <PgButton
                                 variant="tonal"
                                 prependIcon="mdi-content-copy"
                                 onClick={() => {
@@ -406,10 +406,10 @@ const JoinRequestNewPage = dc(() => {
                                 }}
                             >
                                 {t("Copy token")}
-                            </VBtn>
-                            <VBtn color="primary" onClick={() => void continueToDraft()}>
+                            </PgButton>
+                            <PgButton color="primary" onClick={() => void continueToDraft()}>
                                 {t("Continue to draft")}
-                            </VBtn>
+                            </PgButton>
                         </>
                     ),
                 }}

@@ -2,22 +2,13 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { ThemedView } from "@/components/ThemedView";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import {
-  FormField,
-  FormModal,
-  MetaPill,
-  MonoRef,
-  PageHeader,
-  SegmentedTabs,
-  SlideOverDrawer,
-  SurfaceCard,
-} from "@/components/ui";
+import {VAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {FormField, FormModal, MetaPill, MonoRef, PageHeader, SegmentedTabs, SlideOverDrawer, SurfaceCard} from "@pg/ui";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { extractApiError, extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -336,14 +327,14 @@ const MerchantReportsPage = dc(() => {
             <div class="d-flex flex-wrap align-center ga-3">
               <span>{t("Some reports are temporarily unavailable while platform templates are updated")}</span>
               {canStudio.value && (health.value?.brokenReportSpecs ?? 0) > 0 && (
-                <VBtn size="small" variant="text" onClick={() => void router.push({ name: "MerchantReportsNeedsMigration" })}>
+                <PgButton size="small" variant="text" onClick={() => void router.push({ name: "MerchantReportsNeedsMigration" })}>
                   {t("Reports Needing Migration")}
-                </VBtn>
+                </PgButton>
               )}
               {canStudio.value && (health.value?.ownReportsBlockedByChrome ?? 0) > 0 && (
-                <VBtn size="small" variant="text" onClick={() => void router.push({ name: "MerchantReportsChromeNeedsMigration" })}>
+                <PgButton size="small" variant="text" onClick={() => void router.push({ name: "MerchantReportsChromeNeedsMigration" })}>
                   {t("Headers & Footers migration")}
-                </VBtn>
+                </PgButton>
               )}
             </div>
           </VAlert>
@@ -365,13 +356,13 @@ const MerchantReportsPage = dc(() => {
                     tabs={availableLocales.value.map((entry) => ({ label: entry.toUpperCase(), value: entry }))}
                     ariaLabel={t("Output language")}
                   />
-                  <VBtn size="small" variant="tonal" prependIcon="mdi-refresh" loading={generating.value} onClick={() => void runGenerate(locale.value)}>
+                  <PgButton size="small" variant="tonal" prependIcon="mdi-refresh" loading={generating.value} onClick={() => void runGenerate(locale.value)}>
                     {t("Regenerate")}
-                  </VBtn>
-                  <VBtn size="small" variant="tonal" prependIcon="mdi-microsoft-excel" disabled={!hasRows.value} onClick={() => void exportExcel()}>
+                  </PgButton>
+                  <PgButton size="small" variant="tonal" prependIcon="mdi-microsoft-excel" disabled={!hasRows.value} onClick={() => void exportExcel()}>
                     {t("Export Excel")}
-                  </VBtn>
-                  <VBtn
+                  </PgButton>
+                  <PgButton
                     size="small"
                     variant="tonal"
                     prependIcon="mdi-printer-outline"
@@ -379,7 +370,7 @@ const MerchantReportsPage = dc(() => {
                     onClick={() => previewRef.value?.printClientSideVectorPdf?.()}
                   >
                     {t("Print")}
-                  </VBtn>
+                  </PgButton>
                 </ThemedView>
               ),
             }}
@@ -434,11 +425,11 @@ const MerchantReportsPage = dc(() => {
               selected.value ? (
                 <div class="pg-report-actions">
                   <div class="pg-report-actions__secondary">
-                    <VBtn variant="text" onClick={resetInputs}>{t("Reset inputs")}</VBtn>
+                    <PgButton variant="text" onClick={resetInputs}>{t("Reset inputs")}</PgButton>
                   </div>
-                  <VBtn color="primary" prependIcon="mdi-file-chart" loading={generating.value} onClick={requestGenerate}>
+                  <PgButton color="primary" prependIcon="mdi-file-chart" loading={generating.value} onClick={requestGenerate}>
                     {t("Generate Report")}
-                  </VBtn>
+                  </PgButton>
                 </div>
               ) : null,
           }}
@@ -468,7 +459,7 @@ const MerchantReportsPage = dc(() => {
                       label={t("Output language")}
                       hint={t("Choose the language used for the report text, headings and labels.")}
                     >
-                      <VSelect
+                      <PgAutocomplete
                         v-model={locale.value}
                         items={availableLocales.value}
                         density="compact"
@@ -495,7 +486,7 @@ const MerchantReportsPage = dc(() => {
           loading={cloning.value}
           onSubmit={() => void cloneTemplate()}
         >
-          <VTextField
+          <PgTextField
             modelValue={cloneCode.value}
             onUpdate:modelValue={(value: string) => (cloneCode.value = value.slice(0, 64))}
             label={t("New report code")}

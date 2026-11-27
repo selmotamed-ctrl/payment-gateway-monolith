@@ -2,17 +2,18 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn, VCol, VFileInput, VRow, VSwitch } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { ThemedView } from "@/components/ThemedView";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { DescriptionList, MetaPill, MonoRef, PageHeader, SegmentedTabs, SlideOverDrawer, StatusBadge, SurfaceCard } from "@/components/ui";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { FormModal } from "@/components/ui/FormModal";
+import {VAlert, PgButton, PgCol, PgFileUpload, PgRow, PgSwitch} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {DescriptionList, MetaPill, MonoRef, PageHeader, SegmentedTabs, SlideOverDrawer, StatusBadge, SurfaceCard} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {FormModal} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import { ReportDiagnosticsPanel } from "@/components/reports/ReportDiagnosticsPanel";
+import { CHROME_PREVIEW_CSS } from "@/components/reports/chromePreviewCss";
 import { JsonSpecEditor } from "@/components/reports/JsonSpecEditor";
 import { ASSET_ZIP_TOO_LARGE_MESSAGE, diagnosticsFromApiError, friendlyApiErrorMessage } from "@/utils/reports/diagnostics";
 import { downloadText, fileToBase64, isAssetZipTooLarge } from "@/utils/reports/jsonSpec";
@@ -539,25 +540,7 @@ const ReportsChromePage = dc(() => {
     [
       previewHeader.value?.spec.template.scoped_css ?? "",
       previewFooter.value?.spec.template.scoped_css ?? "",
-      `.chrome-preview-shell{padding:18px;background:#dfe6ec;display:flex;justify-content:center}
-       .chrome-preview-frame{width:calc(210mm * .78);height:calc(297mm * .78);position:relative}
-       .chrome-preview-page{position:absolute;top:0;left:0;width:210mm;height:297mm;background:#fff;overflow:hidden;transform:scale(.78);transform-origin:top left;box-shadow:0 12px 30px rgba(15,23,42,.16)}
-       .chrome-preview-header{position:absolute;top:2mm;left:14mm;right:14mm;height:22mm}
-       .chrome-preview-footer{position:absolute;bottom:4mm;left:14mm;right:14mm;height:16mm}
-       .chrome-preview-body{position:absolute;top:26mm;left:14mm;right:14mm;bottom:24mm;padding-top:5mm;color:#1f2d3d;font-family:Arial,'Noto Sans Arabic',sans-serif}
-       .cp-eyebrow{font-size:7pt;font-weight:700;letter-spacing:1.4pt;text-transform:uppercase;color:#0b5d7a}
-       .chrome-preview-body h1{font-size:24pt;line-height:1.05;margin:4mm 0 3mm;color:#0d3b66}
-       .cp-lede{font-size:9pt;line-height:1.45;color:#5b6b7a;max-width:135mm;margin:0 0 7mm}
-       .cp-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:3mm}
-       .cp-kpi{border:0.3mm solid #d9e4ea;border-inline-start:1.2mm solid #0b5d7a;border-radius:2.6mm;padding:4mm;background:#f7fafb}
-       .cp-kpi:nth-child(2){border-inline-start-color:#2e8b57}.cp-kpi:nth-child(3){border-inline-start-color:#e67e22}
-       .cp-kpi span{display:block;font-size:6.4pt;letter-spacing:.7pt;text-transform:uppercase;color:#6b7c8c}
-       .cp-kpi strong{display:block;margin-top:2mm;font-size:15pt;color:#0d3b66}
-       .cp-card{margin-top:7mm;border:0.3mm solid #d9e4ea;border-radius:3mm;padding:5mm}
-       .cp-card-head{display:flex;justify-content:space-between;gap:4mm;font-size:7pt;color:#8a99a8;margin-bottom:3mm}
-       .cp-card-head strong{font-size:9pt;color:#0d3b66}
-       .cp-row{display:flex;justify-content:space-between;padding:2.4mm 0;border-bottom:0.2mm solid #eef5f8;font-size:7.4pt}
-       .cp-row:last-child{border-bottom:0}.cp-ok{color:#1e6b43;font-weight:700}.cp-warn{color:#7a4b00;font-weight:700}`,
+      CHROME_PREVIEW_CSS,
     ].join("\n");
 
   const localeLabel = (locale: string) => (locale === "ar" ? t("Arabic") : locale === "en" ? t("English") : locale.toUpperCase());
@@ -602,19 +585,19 @@ const ReportsChromePage = dc(() => {
       <ThemedView style={{ gap: "18px" }}>
         <PageHeader title={t("Report Headers & Footers")} subtitle={t("Upload reusable bilingual chrome specs and assign the global default")}>(
             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-              <VBtn variant="tonal" prependIcon="mdi-refresh" loading={busy.value} onClick={refresh}>
+              <PgButton variant="tonal" prependIcon="mdi-refresh" loading={busy.value} onClick={refresh}>
                 {t("Refresh")}
-              </VBtn>
-              <VBtn variant="tonal" prependIcon="mdi-alert-decagram-outline" onClick={() => void router.push({ name: "ReportsChromeNeedsMigration" })}>
+              </PgButton>
+              <PgButton variant="tonal" prependIcon="mdi-alert-decagram-outline" onClick={() => void router.push({ name: "ReportsChromeNeedsMigration" })}>
                 {t("Needs Migration")}
-              </VBtn>
-              <VBtn variant="tonal" prependIcon="mdi-file-chart-outline" onClick={() => void router.push({ name: "ReportsCatalog" })}>
+              </PgButton>
+              <PgButton variant="tonal" prependIcon="mdi-file-chart-outline" onClick={() => void router.push({ name: "ReportsCatalog" })}>
                 {t("Open Catalog")}
-              </VBtn>
+              </PgButton>
               {canAuthor.value && (
-                <VBtn variant="tonal" prependIcon="mdi-robot-outline" onClick={() => void router.push({ name: "ReportsStudio" })}>
+                <PgButton variant="tonal" prependIcon="mdi-robot-outline" onClick={() => void router.push({ name: "ReportsStudio" })}>
                   {t("Open Studio")}
-                </VBtn>
+                </PgButton>
               )}
             </ThemedView>
           )</PageHeader>
@@ -629,9 +612,9 @@ const ReportsChromePage = dc(() => {
         )}
 
         <SurfaceCard title={t("Chrome AI Transcript")} subtitle={t("Author headers and footers with the same closed contract")}>
-          <VBtn color="primary" loading={busy.value} prependIcon="mdi-download" onClick={() => void downloadTranscript()}>
+          <PgButton color="primary" loading={busy.value} prependIcon="mdi-download" onClick={() => void downloadTranscript()}>
             {t("Download Header/Footer AI Transcript")}
-          </VBtn>
+          </PgButton>
         </SurfaceCard>
 
         {migrationOpen.value && editingRow.value && (
@@ -639,12 +622,12 @@ const ReportsChromePage = dc(() => {
             <div class="d-flex flex-column ga-2">
               <span>{t("Migrate and restore default")}: {editingRow.value.code} v{editingRow.value.version}</span>
               <div class="d-flex flex-wrap ga-2">
-                <VBtn size="small" variant="tonal" loading={migrationPromptBusy.value} disabled={!canPrompt.value} onClick={() => void copyMigrationPrompt()}>
+                <PgButton size="small" variant="tonal" loading={migrationPromptBusy.value} disabled={!canPrompt.value} onClick={() => void copyMigrationPrompt()}>
                   {t("Copy migration prompt")}
-                </VBtn>
-                <VBtn size="small" variant="tonal" loading={migrationPromptBusy.value} disabled={!canPrompt.value} onClick={() => void downloadMigrationPrompt()}>
+                </PgButton>
+                <PgButton size="small" variant="tonal" loading={migrationPromptBusy.value} disabled={!canPrompt.value} onClick={() => void downloadMigrationPrompt()}>
                   {t("Download migration prompt")}
-                </VBtn>
+                </PgButton>
               </div>
             </div>
           </VAlert>
@@ -664,25 +647,25 @@ const ReportsChromePage = dc(() => {
             }
           >
             <div class="d-flex flex-column ga-3">
-              <VRow dense>
-                <VCol cols={12} md={6}>
-                  <VFileInput
+              <PgRow dense>
+                <PgCol cols={12} md={6}>
+                  <PgFileUpload
                     label={t("Chrome spec (.json)")}
                     {...{ accept: "application/json,.json" }}
                     modelValue={specFile.value}
                     onUpdate:modelValue={(files: File | File[] | null) => void readSpecFile(pickFile(files))}
                   />
-                </VCol>
-                <VCol cols={12} md={6}>
-                  <VFileInput
+                </PgCol>
+                <PgCol cols={12} md={6}>
+                  <PgFileUpload
                     label={t("Logo/seal bundle (.zip, optional)")}
                     {...{ accept: "application/zip,.zip" }}
                     modelValue={zipFile.value}
                     errorMessages={zipError.value ? [zipError.value] : []}
                     onUpdate:modelValue={(files: File | File[] | null) => (zipFile.value = pickFile(files))}
                   />
-                </VCol>
-              </VRow>
+                </PgCol>
+              </PgRow>
               {editingNeedsZip.value && (
                 <VAlert type="info" variant="tonal">
                   {t("This header/footer uses assets. Re-attach its logo/seal bundle (.zip); saving creates a new version and assets are not carried over.")}
@@ -697,17 +680,17 @@ const ReportsChromePage = dc(() => {
                 copiedMessage={t("Chrome JSON copied")}
               />
               <div class="d-flex flex-wrap ga-4 align-center">
-                <VBtn color="primary" loading={busy.value} disabled={!canSave.value || !canManageChrome.value} onClick={requestSaveChrome}>
+                <PgButton color="primary" loading={busy.value} disabled={!canSave.value || !canManageChrome.value} onClick={requestSaveChrome}>
                   {t("Verify & Save")}
-                </VBtn>
-                <VSwitch
+                </PgButton>
+                <PgSwitch
                   label={t("Publish")}
                   color="primary"
                   hideDetails
                   modelValue={publish.value}
                   onUpdate:modelValue={(value: boolean | null) => (publish.value = Boolean(value))}
                 />
-                <VSwitch
+                <PgSwitch
                   label={t("Make default")}
                   color="primary"
                   hideDetails

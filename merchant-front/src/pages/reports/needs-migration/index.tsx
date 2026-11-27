@@ -2,13 +2,13 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import { VBtn } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { ThemedView } from "@/components/ThemedView";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { MonoRef, PageHeader, StatusBadge } from "@/components/ui";
+import {PgButton} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {MonoRef, PageHeader, StatusBadge} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -128,12 +128,12 @@ const Page = dc(() => {
       <ThemedView style={{ gap: "18px" }}>
         <PageHeader title={t("Reports Needing Migration")} subtitle={t("Your reports that must be regenerated or migrated before they can run again")} badge="NEEDS_MIGRATION" badgeLabel={t("Needs migration")} badgeTone="danger">(
             <div class="d-flex flex-wrap ga-2">
-              <VBtn variant="tonal" prependIcon="mdi-palette-outline" onClick={() => void router.push({ name: "MerchantReportsChromeNeedsMigration" })}>
+              <PgButton variant="tonal" prependIcon="mdi-palette-outline" onClick={() => void router.push({ name: "MerchantReportsChromeNeedsMigration" })}>
                 {t("Headers & Footers migration")}
-              </VBtn>
-              <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => refreshHook.value?.refreshAsIs()}>
+              </PgButton>
+              <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => refreshHook.value?.refreshAsIs()}>
                 {t("Refresh")}
-              </VBtn>
+              </PgButton>
             </div>
           )</PageHeader>
         <ApiTable<Row>

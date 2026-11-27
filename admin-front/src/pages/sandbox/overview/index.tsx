@@ -2,23 +2,23 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { DataTable } from "@/components/Table/DataTable";
-import type { TableHeader } from "@/components/Table/types";
-import { StateView } from "@/components/StateView";
-import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {VAlert, PgButton, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import type { TableHeader } from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { SandboxBanner } from "@/features/sandbox/SandboxBanner";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import { SectionFields } from "@/components/SectionFields";
+import {SectionFields} from "@pg/ui";
 import { adminSandbox, sandboxPost, type AdminSandboxMerchantRow, type AdminSandboxOverview } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -140,7 +140,7 @@ const AdminSandboxOverviewPage = dc(() => {
         { key: "applications", label: "Applications", value: (row) => String(row.applications) },
         { key: "payments", label: "Payments", value: (row) => String(row.payments) },
         { key: "availableBalance", label: "Available", value: (row) => `${row.availableBalance} LYD` },
-        { key: "actions", label: "", Value: ({ row }) => <VBtn size="small" variant="tonal" onClick={() => void router.push(`/sandbox/merchants/${row.id}`)}>{t("Open")}</VBtn> },
+        { key: "actions", label: "", Value: ({ row }) => <PgButton size="small" variant="tonal" onClick={() => void router.push(`/sandbox/merchants/${row.id}`)}>{t("Open")}</PgButton> },
     ];
 
     const exportSummary = async () => {
@@ -163,7 +163,7 @@ const AdminSandboxOverviewPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={t("Sandbox & Fake Rails Health")} subtitle={t("Inspect the isolated sandbox plane, its reference catalog and recent merchant activity.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!overview.value} onClick={() => void copySandboxSummary()}>{t("Copy summary")}</VBtn><VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn><VBtn variant="tonal" prependIcon="mdi-storefront-outline" onClick={() => void router.push("/sandbox/merchants")}>{t("Merchants")}</VBtn><VBtn variant="tonal" color="error" prependIcon="mdi-restore" onClick={() => { resetConfirm.value = ""; resetChecklist.value = {}; resetOpen.value = true; }}>{t("Reset all sandbox data")}</VBtn></div></PageHeader>
+            <PageHeader title={t("Sandbox & Fake Rails Health")} subtitle={t("Inspect the isolated sandbox plane, its reference catalog and recent merchant activity.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</PgButton><PgButton variant="tonal" prependIcon="mdi-content-copy" disabled={!overview.value} onClick={() => void copySandboxSummary()}>{t("Copy summary")}</PgButton><PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</PgButton><PgButton variant="tonal" prependIcon="mdi-storefront-outline" onClick={() => void router.push("/sandbox/merchants")}>{t("Merchants")}</PgButton><PgButton variant="tonal" color="error" prependIcon="mdi-restore" onClick={() => { resetConfirm.value = ""; resetChecklist.value = {}; resetOpen.value = true; }}>{t("Reset all sandbox data")}</PgButton></div></PageHeader>
             <SandboxBanner />
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             <StateView loading={loading.value} minHeight="180px">
@@ -182,9 +182,9 @@ const AdminSandboxOverviewPage = dc(() => {
                         </SurfaceCard>
                         <SurfaceCard title={t("Control center")} style={{ flex: "1 1 400px" }}>
                             <div class="d-flex flex-wrap ga-2">
-                                <VBtn variant="tonal" prependIcon="mdi-bank-outline" onClick={() => void router.push("/sandbox/fake-rails")}>{t("Fake Rails accounts & clearing")}</VBtn>
-                                <VBtn variant="tonal" prependIcon="mdi-storefront-outline" onClick={() => void router.push("/sandbox/merchants")}>{t("Sandbox merchants")}</VBtn>
-                                <VBtn variant="tonal" prependIcon="mdi-history" onClick={() => void router.push("/sandbox/mirror/audit-logs")}>{t("Audit logs")}</VBtn>
+                                <PgButton variant="tonal" prependIcon="mdi-bank-outline" onClick={() => void router.push("/sandbox/fake-rails")}>{t("Fake Rails accounts & clearing")}</PgButton>
+                                <PgButton variant="tonal" prependIcon="mdi-storefront-outline" onClick={() => void router.push("/sandbox/merchants")}>{t("Sandbox merchants")}</PgButton>
+                                <PgButton variant="tonal" prependIcon="mdi-history" onClick={() => void router.push("/sandbox/mirror/audit-logs")}>{t("Audit logs")}</PgButton>
                             </div>
                             <p class="text-caption text-medium-emphasis mt-3">{t("Sandbox and Fake Rails data are deliberately excluded from backup targets.")}</p>
                         </SurfaceCard>
@@ -196,7 +196,7 @@ const AdminSandboxOverviewPage = dc(() => {
             <FormModal modelValue={resetOpen.value} onUpdate:modelValue={(v: any) => (resetOpen.value = v)} title={t("Reset all sandbox data")} size="sm" loading={busy.value} submitLabel={t("Reset sandbox")} onSubmit={() => void resetAll()}>
                 <SectionFields title={t("Confirmation")}>
                     <FormField label={t("Type RESET SANDBOX to confirm")} required>
-                        <VTextField modelValue={resetConfirm.value} onUpdate:modelValue={(v: string) => (resetConfirm.value = v)} hideDetails />
+                        <PgTextField modelValue={resetConfirm.value} onUpdate:modelValue={(v: string) => (resetConfirm.value = v)} hideDetails />
                     </FormField>
                     <p class="text-caption text-medium-emphasis">{t("This deletes sandbox wallets, applications, links, payments, disputes and Fake Rails test accounts. Live data is never touched.")}</p>
                 </SectionFields>

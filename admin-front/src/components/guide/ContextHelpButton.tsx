@@ -1,6 +1,6 @@
 import { defineComponent } from "@/utils/dc";
 import { useRoute } from "vue-router";
-import { VIcon } from "@/components/vael/VuetifyShim";
+import {PgIcon} from "@pg/ui";
 import { useContextHelp } from "./useContextHelp";
 
 export const ContextHelpButton = defineComponent({
@@ -23,7 +23,7 @@ export const ContextHelpButton = defineComponent({
                     title="How this page works"
                     onClick={() => openContextHelp(name)}
                 >
-                    <VIcon icon="mdi-help-circle-outline" size={18} />
+                    <PgIcon icon="mdi-help-circle-outline" size={18} />
                     <span>Help</span>
                 </button>
             );

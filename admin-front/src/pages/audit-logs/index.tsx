@@ -3,18 +3,18 @@ import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VDivider } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import type { TableHeader } from "@/components/Table/types";
+import {VAlert, PgButton, PgDivider} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { useOpenQuery } from "@/composables/useOpenQuery";
 import { urlsMap } from "@/constants/urlsMap";
@@ -22,14 +22,14 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { MetaPill } from "@/components/ui/MetaPill";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { JsonDiffViewer } from "@/components/ui/JsonDiffViewer";
+import {FormModal} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {JsonDiffViewer} from "@pg/ui";
 import { AuditChangeChips } from "@/components/AuditChangeChips";
 import { summarizeAuditChange } from "@/utils/auditSummary";
 type AuditLog = {
@@ -367,8 +367,8 @@ const AuditLogsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Audit Log")} subtitle={t("Immutable operator and system activity across the platform.")}>(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</PgButton>
                         </ThemedView>
                     )</PageHeader>
 
@@ -487,8 +487,8 @@ const AuditLogsPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <>
-                            <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyEventJson()}>{t("Copy event JSON")}</VBtn>
-                            <VBtn variant="outlined" onClick={closeDetails}>{t("Close")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyEventJson()}>{t("Copy event JSON")}</PgButton>
+                            <PgButton variant="outlined" onClick={closeDetails}>{t("Close")}</PgButton>
                         </>
                     ),
                 }}
@@ -511,13 +511,13 @@ const AuditLogsPage = dc(() => {
                                     value: selected.value.approvalRequestId ? (
                                         <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
                                             <MonoRef value={selected.value.approvalRequestId} truncate={18} />
-                                            <VBtn size="x-small" variant="text" onClick={() => void router.push({ name: "Approvals", query: { open: selected.value!.approvalRequestId! } })}>{t("Open")}</VBtn>
+                                            <PgButton size="x-small" variant="text" onClick={() => void router.push({ name: "Approvals", query: { open: selected.value!.approvalRequestId! } })}>{t("Open")}</PgButton>
                                         </ThemedView>
                                     ) : "—",
                                 },
                             ]}
                         />
-                        <VDivider />
+                        <PgDivider />
                         <JsonDiffViewer diff={{ before: selected.value.beforeJson, after: selected.value.afterJson }} />
                     </>
                 ) : null}

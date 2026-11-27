@@ -7,6 +7,7 @@ import {
     type TransformResult,
 } from "./engine/transforms";
 import { useGuideLocale } from "./useGuideLocale";
+import { PgAutocomplete, PgTextarea, PgTextField } from "@pg/ui";
 
 interface OperationRow {
     op: string;
@@ -91,42 +92,33 @@ export const TransformSandbox = defineComponent({
                 <p class="guide-tool__warning">
                     {L("Teaching tool — not connected to any real system.", "أداة تعليمية — غير متصلة بأي نظام حقيقي.")}
                 </p>
-                <label class="guide-field">
+                <div class="guide-field">
                     <span>{L("Input", "المدخل")}</span>
-                    <textarea
-                        rows={2}
-                        value={input.value}
-                        onInput={(event) => (input.value = (event.target as HTMLTextAreaElement).value)}
-                    />
-                </label>
+                    <PgTextarea rows={2} density="compact" modelValue={input.value} onUpdate:modelValue={(value: string) => (input.value = value)} />
+                </div>
                 <div class="guide-operation-list">
                     {operations.value.map((row, index) => (
                         <div class="guide-operation" key={`${row.op}-${index}`}>
                             <span class="guide-operation__index">{index + 1}</span>
-                            <select
-                                value={row.op}
-                                onChange={(event) => {
+                            <PgAutocomplete
+                                density="compact"
+                                searchable={false}
+                                clearable={false}
+                                items={TRANSFORM_LIBRARY}
+                                modelValue={row.op}
+                                onUpdate:modelValue={(value: string) => {
                                     const next = [...operations.value];
-                                    next[index] = { ...row, op: (event.target as HTMLSelectElement).value };
+                                    next[index] = { ...row, op: value };
                                     operations.value = next;
                                 }}
-                            >
-                                {TRANSFORM_LIBRARY.map((operation) => (
-                                    <option key={operation} value={operation}>
-                                        {operation}
-                                    </option>
-                                ))}
-                            </select>
-                            <input
-                                type="text"
-                                value={row.argsText}
+                            />
+                            <PgTextField
+                                density="compact"
                                 placeholder={L("arguments, comma separated", "الوسائط مفصولة بفواصل")}
-                                onInput={(event) => {
+                                modelValue={row.argsText}
+                                onUpdate:modelValue={(value: string) => {
                                     const next = [...operations.value];
-                                    next[index] = {
-                                        ...row,
-                                        argsText: (event.target as HTMLInputElement).value,
-                                    };
+                                    next[index] = { ...row, argsText: value };
                                     operations.value = next;
                                 }}
                             />

@@ -1,10 +1,10 @@
 import { dc } from "@/utils/dc";
 import { computed } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VTextField, VSelect } from "@/components/vael/VuetifyShim";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { FormField } from "@/components/ui";
+import {PgTextField, PgAutocomplete} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {FormField} from "@pg/ui";
 import { normalizeFieldValue } from "@/utils/zReady";
 import type { RailFieldDescriptor } from "@/components/renderers/types";
 
@@ -54,7 +54,7 @@ export const RailFieldForm = dc(
                                 error={error}
                                 required={field.required}
                             >
-                                <VSelect
+                                <PgAutocomplete
                                     items={(field.options ?? []).map((option) => ({ title: option, value: option }))}
                                     {...shared}
                                     onUpdate:modelValue={(raw: string) =>
@@ -71,7 +71,7 @@ export const RailFieldForm = dc(
                             error={error}
                             required={field.required}
                         >
-                            <VTextField
+                            <PgTextField
                                 {...shared}
                                 type={field.sensitivity === "PAN" ? "password" : "text"}
                                 autocomplete="off"

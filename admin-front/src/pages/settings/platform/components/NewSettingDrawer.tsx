@@ -1,9 +1,9 @@
 import { defineComponent } from "@/utils/dc";
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
-import { VAlert, VBtn, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {SlideOverDrawer} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 import { SETTING_STATUS_META, settingTitle, type SettingEntry } from "@/components/builders/model";
 
 export const NewSettingDrawer = defineComponent({
@@ -60,7 +60,7 @@ export const NewSettingDrawer = defineComponent({
             >
                 {props.modelValue ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                    <VTextField
+                    <PgTextField
                         modelValue={search.value}
                         onUpdate:modelValue={(value: string) => (search.value = value)}
                         prependInnerIcon="mdi-magnify"
@@ -99,7 +99,7 @@ export const NewSettingDrawer = defineComponent({
                     <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                         <span style={{ fontSize: "13px", fontWeight: 600 }}>{t("Advanced: custom key")}</span>
                         <div style={{ display: "flex", gap: "8px", alignItems: "flex-start", flexWrap: "wrap" }}>
-                            <VTextField
+                            <PgTextField
                                 modelValue={customKey.value}
                                 onUpdate:modelValue={(value: string) => (customKey.value = value)}
                                 label={t("Setting key")}
@@ -108,7 +108,7 @@ export const NewSettingDrawer = defineComponent({
                                 hideDetails={false}
                                 style={{ flex: 1, minInlineSize: "220px" }}
                             />
-                            <VBtn variant="tonal" prependIcon="mdi-plus" onClick={createCustom}>{t("Continue")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-plus" onClick={createCustom}>{t("Continue")}</PgButton>
                         </div>
                         {error.value && <span style={{ fontSize: "12px", color: "var(--pg-status-danger-text)" }}>{error.value}</span>}
                     </div>

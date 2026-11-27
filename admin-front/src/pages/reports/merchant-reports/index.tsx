@@ -1,15 +1,15 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { ThemedView } from "@/components/ThemedView";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { DataTable } from "@/components/Table/DataTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { FormModal, MetaPill, MonoRef, PageHeader, StatusBadge } from "@/components/ui";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {PgButton, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {FormModal, MetaPill, MonoRef, PageHeader, StatusBadge} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
@@ -290,12 +290,12 @@ const MerchantReportsPage = dc(() => {
                 <span class="text-caption text-medium-emphasis">
                   {executionsMerchant.value?.merchantName} · {executionsMerchant.value?.merchantId}
                 </span>
-                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={executionExportLoading.value} onClick={() => { executionExportChecklist.value = {}; executionExportOpen.value = true; }}>
+                <PgButton size="small" variant="tonal" prependIcon="mdi-download" loading={executionExportLoading.value} onClick={() => { executionExportChecklist.value = {}; executionExportOpen.value = true; }}>
                   {t("Export executions")}
-                </VBtn>
-                <VBtn size="small" variant="tonal" prependIcon="mdi-refresh" loading={executionsLoading.value} onClick={() => void loadExecutions(executionsMerchant.value!)}>
+                </PgButton>
+                <PgButton size="small" variant="tonal" prependIcon="mdi-refresh" loading={executionsLoading.value} onClick={() => void loadExecutions(executionsMerchant.value!)}>
                   {t("Refresh")}
-                </VBtn>
+                </PgButton>
               </div>
             )}
           />
@@ -335,7 +335,7 @@ const MerchantReportsPage = dc(() => {
           errorMessage={suspendError.value}
           onSubmit={() => void suspendStudio()}
         >
-          <VTextarea
+          <PgTextarea
             modelValue={suspendReason.value}
             onUpdate:modelValue={(value: string) => {
               suspendReason.value = value;

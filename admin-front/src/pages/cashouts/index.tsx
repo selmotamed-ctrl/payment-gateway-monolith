@@ -3,18 +3,18 @@ import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VProgressCircular, VSelect, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { statusTone } from "@/components/Table/statusTone";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import type { TableHeader } from "@/components/Table/types";
+import {VAlert, PgButton, PgSpinner, PgAutocomplete, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {statusTone} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { useOpenQuery } from "@/composables/useOpenQuery";
 import { urlsMap } from "@/constants/urlsMap";
@@ -23,18 +23,18 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { useSafeguard } from "@/components/guide/useSafeguard";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
-import { SectionFields } from "@/components/SectionFields";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { JournalEntryDrawer } from "@/components/ledger/JournalEntryDrawer";
 import { LedgerRefLink } from "@/components/ledger/LedgerRefLink";
 type Cashout = {
@@ -531,8 +531,8 @@ const CashoutsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Cash-Outs")} subtitle={t("Review and process merchant cash-out requests with wallet, destination, and AML checks.")} badge={t("Payouts")} badgeTone="info">(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</PgButton>
                         </ThemedView>
                     )</PageHeader>
 
@@ -587,7 +587,7 @@ const CashoutsPage = dc(() => {
                     searchValue={search.value}
                     setSearchValue={(value) => (search.value = value)}
                     headers={headers.value}
-                    rowColor={(row) => (row.state === "PENDING" ? "#d97706" : row.state === "PROCESSING" ? "#2563eb" : undefined)}
+                    rowColor={(row) => (row.state === "PENDING" ? "var(--pg-status-warning-dot)" : row.state === "PROCESSING" ? "var(--pg-status-info-dot)" : undefined)}
                     apiDataExtractor={(data) => {
                         const payload = data as { cashouts?: Cashout[]; rows?: Cashout[] };
                         return payload.cashouts ?? payload.rows ?? [];
@@ -639,17 +639,17 @@ const CashoutsPage = dc(() => {
                     footer: () => (
                         <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
                             {selected.value?.canProcess && (
-                                <VBtn color="primary" onClick={() => { actionError.value = ""; processOpen.value = true; }}>{t("Process")}</VBtn>
+                                <PgButton color="primary" onClick={() => { actionError.value = ""; processOpen.value = true; }}>{t("Process")}</PgButton>
                             )}
-                            {selected.value && <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyCashoutSummary()}>{t("Copy summary")}</VBtn>}
-                            <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
+                            {selected.value && <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyCashoutSummary()}>{t("Copy summary")}</PgButton>}
+                            <PgButton variant="text" onClick={closeDetails}>{t("Close")}</PgButton>
                         </ThemedView>
                     ),
                 }}
             >
                 {detailLoading.value || !selected.value ? (
                     <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "280px", gap: "12px" }}>
-                        <VProgressCircular indeterminate size={52} color="primary" />
+                        <PgSpinner indeterminate size={52} color="primary" />
                         <ThemedText style={{ opacity: 0.65 }}>{t("Loading cash-out")}</ThemedText>
                     </ThemedView>
                 ) : (
@@ -682,7 +682,7 @@ const CashoutsPage = dc(() => {
                                     { label: t("Last update"), value: formatDateTime(selected.value.updatedAt) },
                                     { label: t("Age"), value: formatHours(selected.value.ageHours) },
                                 ]} />
-                                <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "MerchantDetail", params: { id: selected.value?.merchantId ?? "" } })}>{t("Open merchant")}</VBtn>
+                                <PgButton size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "MerchantDetail", params: { id: selected.value?.merchantId ?? "" } })}>{t("Open merchant")}</PgButton>
                             </ThemedView>
 
                             <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
@@ -743,7 +743,7 @@ const CashoutsPage = dc(() => {
                 />
                 <SectionFields title={t("Finance decision")}>
                     <FormField label={t("Decision")} required sensitiveMakerChecker>
-                        <VSelect
+                        <PgAutocomplete
                             items={[
                                 { title: t("Approve and execute"), value: "APPROVE" },
                                 { title: t("Reject and release"), value: "REJECT" },
@@ -758,7 +758,7 @@ const CashoutsPage = dc(() => {
                         hint={t("Required for rejection.")}
                         sensitiveMakerChecker
                     >
-                        <VTextarea
+                        <PgTextarea
                             rows={3}
                             modelValue={reason.value}
                             onUpdate:modelValue={(value: string) => (reason.value = value)}

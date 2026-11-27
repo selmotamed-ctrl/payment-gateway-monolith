@@ -1,10 +1,10 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VTextField } from "@/components/vael/VuetifyShim";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { FormField } from "@/components/ui";
+import {PgButton, PgTextField} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {FormField} from "@pg/ui";
 import { normalizeArabicDigits } from "@/utils/arabic";
 import type { OtpClientAction } from "./types";
 
@@ -66,7 +66,7 @@ export const OtpFormRenderer = dc(
                     error={fieldError.value}
                     required
                 >
-                    <VTextField
+                    <PgTextField
                         aria-label={t("One Time Password")}
                         modelValue={otp.value}
                         error={!!fieldError.value}
@@ -87,15 +87,15 @@ export const OtpFormRenderer = dc(
                         {t("Attempts Remaining")}: {attemptsLeft.value}
                     </ThemedText>
                     {props.onResend && (
-                        <VBtn variant="text" size="small" onClick={resend}>
+                        <PgButton variant="text" size="small" onClick={resend}>
                             {t("Resend Code")}
-                        </VBtn>
+                        </PgButton>
                     )}
                 </ThemedView>
 
-                <VBtn color="primary" size="large" block loading={props.submitting} onClick={submit}>
+                <PgButton color="primary" size="large" block loading={props.submitting} onClick={submit}>
                     {t("Verify & Pay")}
-                </VBtn>
+                </PgButton>
             </ThemedView>
         );
     },

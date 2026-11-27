@@ -1,7 +1,7 @@
 import { computed, ref, useId } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import {SegmentedTabs, PgTextField} from "@pg/ui";
 import { formatMoney } from "@/utils/money";
 import { LANDING_FEE_BEARERS, computeLandingFees, type LandingFeeBearer } from "@/content/landing/landingModel";
 
@@ -54,35 +54,30 @@ export const FeePreview = defineComponent({
                 <div class="pgl-fee__inputs">
                     <label class="pgl-field" for={amountId}>
                         <span class="pgl-field__label">{t("Sale amount (LYD)")}</span>
-                        <input
+                        <PgTextField
                             id={amountId}
                             class="pgl-input pgl-tabular"
+                            density="compact"
+                            hideDetails
                             dir="ltr"
                             inputmode="decimal"
                             autocomplete="off"
-                            value={amount.value}
-                            onInput={(event: Event) => {
-                                const el = event.target as HTMLInputElement;
-                                amount.value = sanitizeAmount(el.value);
-                                el.value = amount.value;
-                            }}
+                            modelValue={amount.value}
+                            onUpdate:modelValue={(value: string) => (amount.value = sanitizeAmount(value))}
                         />
                     </label>
                     <label class="pgl-field pgl-field--narrow" for={rateId}>
                         <span class="pgl-field__label">{t("Example commission %")}</span>
-                        <input
+                        <PgTextField
                             id={rateId}
                             class="pgl-input pgl-tabular"
+                            density="compact"
+                            hideDetails
                             dir="ltr"
                             inputmode="decimal"
                             autocomplete="off"
-                            value={rate.value}
-                            onInput={(event: Event) => {
-                                const el = event.target as HTMLInputElement;
-                                const clean = sanitizeAmount(el.value).slice(0, 5);
-                                rate.value = clean;
-                                el.value = clean;
-                            }}
+                            modelValue={rate.value}
+                            onUpdate:modelValue={(value: string) => (rate.value = sanitizeAmount(value).slice(0, 5))}
                         />
                     </label>
                 </div>

@@ -3,7 +3,7 @@ import { defineComponent } from "@/utils/dc";
 import { useRoute, useRouter } from "vue-router";
 import { RouterLink } from "vue-router/experimental/vapor";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
+import {PgButton, PgIcon} from "@pg/ui";
 import { AcademyShell, Skeleton, useAcademyData, userRole } from "@/components/academy/AcademyShell";
 import { LessonCheck } from "@/components/academy/LessonCheck";
 import { ReadingList } from "@/components/academy/ReadingList";
@@ -16,10 +16,10 @@ import { ProgressBar } from "@/components/academy/ui/ProgressBar";
 import { StateIcon, type StepState } from "@/components/academy/ui/StateIcon";
 import { useAcademyProgress } from "@/components/academy/useAcademyProgress";
 import { MarkdownView } from "@/components/guide/MarkdownView";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { PageHeader } from "@/components/ui/PageHeader";
+import {EmptyState} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
 import { showSnackBar } from "@/utils/snackBar";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {SurfaceCard} from "@pg/ui";
 import { loadChecks, roleTrackFor, type Question } from "@/content/academy";
 import { loadArticles } from "@/content/guide";
 
@@ -146,9 +146,9 @@ export const AdminAcademyLessonPage = defineComponent({
                             : { label: t("My learning"), to: router.resolve({ name: "AdminAcademy" }).fullPath },
                         { label: l?.title ?? t("Lesson") },
                     ]} badge={l && finished ? "COMPLETED" : ""} badgeLabel={t("Completed")} badgeTone="success">(
-                        <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyLessonSummary()}>
+                        <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyLessonSummary()}>
                             {t("Copy lesson summary")}
-                        </VBtn>
+                        </PgButton>
                     )</PageHeader>
             );
 
@@ -158,9 +158,9 @@ export const AdminAcademyLessonPage = defineComponent({
                     to={{ name: "AdminAcademyLesson", params: { lessonId: id } }}
                 >
                     <span class="ac-lesson-tile__dir">
-                        {direction === "prev" && <VIcon class="ac-flip" icon="mdi-arrow-left" size={16} aria-hidden="true" />}
+                        {direction === "prev" && <PgIcon class="ac-flip" icon="mdi-arrow-left" size={16} aria-hidden="true" />}
                         {direction === "prev" ? t("Previous lesson") : t("Next lesson")}
-                        {direction === "next" && <VIcon class="ac-flip" icon="mdi-arrow-right" size={16} aria-hidden="true" />}
+                        {direction === "next" && <PgIcon class="ac-flip" icon="mdi-arrow-right" size={16} aria-hidden="true" />}
                     </span>
                     <span class="ac-lesson-tile__title" dir="auto">
                         {lessonTitle(id)}
@@ -296,15 +296,15 @@ export const AdminAcademyLessonPage = defineComponent({
                                 {(!finished || step) && (
                                     <div class="ac-lesson-finish__actions">
                                         {!finished && (
-                                            <VBtn color="primary" prependIcon="mdi-check" disabled={!canComplete.value} onClick={() => void complete()}>
+                                            <PgButton color="primary" prependIcon="mdi-check" disabled={!canComplete.value} onClick={() => void complete()}>
                                                 {t("Mark lesson complete")}
-                                            </VBtn>
+                                            </PgButton>
                                         )}
                                         {finished && step && (
-                                            <VBtn color="primary" to={{ name: step.route.name, params: step.route.params }}>
+                                            <PgButton color="primary" to={{ name: step.route.name, params: step.route.params }}>
                                                 {t("Next")}
-                                                <VIcon class="ac-flip" icon="mdi-arrow-right" size={18} end aria-hidden="true" />
-                                            </VBtn>
+                                                <PgIcon class="ac-flip" icon="mdi-arrow-right" size={18} end aria-hidden="true" />
+                                            </PgButton>
                                         )}
                                     </div>
                                 )}

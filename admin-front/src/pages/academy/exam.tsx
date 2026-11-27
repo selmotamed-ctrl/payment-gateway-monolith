@@ -10,7 +10,7 @@ import { ExamRunner, clearExamDraft } from "@/components/academy/exam/ExamRunner
 import { ExamResult } from "@/components/academy/exam/ExamResult";
 import { loadExamBlueprints, loadModules, loadPages, loadTracks, type ExamBlueprintPublic } from "@/content/academy";
 import type { ExamAnswer, ExamResult as ExamResultPayload, ExamStartResponse } from "@/content/academy/apiTypes";
-import { PageHeader } from "@/components/ui/PageHeader";
+import {PageHeader} from "@pg/ui";
 import { loadArticles } from "@/content/guide";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";

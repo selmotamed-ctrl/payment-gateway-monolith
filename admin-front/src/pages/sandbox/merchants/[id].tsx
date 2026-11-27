@@ -2,24 +2,24 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { StateView } from "@/components/StateView";
-import { DataTable } from "@/components/Table/DataTable";
-import type { TableHeader } from "@/components/Table/types";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {MetricStrip, type MetricItem} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import type { TableHeader } from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import { SandboxBanner } from "@/features/sandbox/SandboxBanner";
 import { adminSandbox, type AdminSandboxMerchantDetail } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -175,7 +175,7 @@ const AdminSandboxMerchantDetailPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={detail.value?.merchant.tradeName ?? t("Sandbox Merchant")} subtitle={detail.value?.merchant.id ?? merchantId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Merchants"), to: "/sandbox/merchants" }, { label: detail.value?.merchant.tradeName ?? merchantId() }]}><div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!detail.value} onClick={() => void copySandboxMerchantSummary()}>{t("Copy summary")}</VBtn><VBtn variant="tonal" prependIcon="mdi-play" loading={busy.value === "seed"} onClick={() => openSeed(false)}>{t("Seed demo")}</VBtn><VBtn variant="tonal" prependIcon="mdi-history" loading={busy.value === "history"} onClick={() => openSeed(true)}>{t("Seed history")}</VBtn><VBtn variant="tonal" prependIcon="mdi-storefront-outline" onClick={() => void router.push("/sandbox/merchants")}>{t("Back")}</VBtn></div></PageHeader>
+            <PageHeader title={detail.value?.merchant.tradeName ?? t("Sandbox Merchant")} subtitle={detail.value?.merchant.id ?? merchantId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Merchants"), to: "/sandbox/merchants" }, { label: detail.value?.merchant.tradeName ?? merchantId() }]}><div class="d-flex flex-wrap ga-2"><PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</PgButton><PgButton variant="tonal" prependIcon="mdi-content-copy" disabled={!detail.value} onClick={() => void copySandboxMerchantSummary()}>{t("Copy summary")}</PgButton><PgButton variant="tonal" prependIcon="mdi-play" loading={busy.value === "seed"} onClick={() => openSeed(false)}>{t("Seed demo")}</PgButton><PgButton variant="tonal" prependIcon="mdi-history" loading={busy.value === "history"} onClick={() => openSeed(true)}>{t("Seed history")}</PgButton><PgButton variant="tonal" prependIcon="mdi-storefront-outline" onClick={() => void router.push("/sandbox/merchants")}>{t("Back")}</PgButton></div></PageHeader>
             <SandboxBanner />
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             <StateView loading={loading.value} minHeight="220px">

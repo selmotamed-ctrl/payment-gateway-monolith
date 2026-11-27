@@ -12,7 +12,7 @@ code:
   - admin-front/src/pages/guide/**
   - admin-front/src/router/index.ts
   - admin-front/src/layouts/default.tsx
-  - admin-front/src/components/ui/PageHeader.tsx
+  - packages/ui/src/layout/PgPageHeader.tsx
   - admin-front/src/styles/guide.css
 design_sources:
   - design/07-guides-and-academy/guide_system_design_and_content.md

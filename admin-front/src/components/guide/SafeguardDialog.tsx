@@ -1,6 +1,6 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VDialog } from "@/components/vael/VuetifyShim";
+import {PgCheckbox, PgDialog} from "@pg/ui";
 import { loadCards, type Card } from "@/content/guide";
 import { MarkdownView } from "./MarkdownView";
 import { useSafeguardState } from "./useSafeguard";
@@ -36,7 +36,7 @@ export const SafeguardDialog = defineComponent({
         };
 
         return () => (
-            <VDialog
+            <PgDialog
                 modelValue={open.value}
                 onUpdate:modelValue={(value: boolean) => {
                     if (!value) resolveSafeguard(false);
@@ -62,14 +62,15 @@ export const SafeguardDialog = defineComponent({
                                 <MarkdownView source={card.value.body} compact disableGlossaryLinks />
                                 <div class="guide-safeguard__checks" role="group" aria-label="Required checks">
                                     {card.value.checklist.map((item, index) => (
-                                        <label key={`${card.value!.id}-${index}`} class="guide-safeguard-check">
-                                            <input
-                                                type="checkbox"
-                                                checked={ticks.value[index] ?? false}
-                                                onChange={() => toggle(index)}
-                                            />
-                                            <span>{item}</span>
-                                        </label>
+                                        <PgCheckbox
+                                            key={`${card.value!.id}-${index}`}
+                                            class="guide-safeguard-check"
+                                            modelValue={ticks.value[index] ?? false}
+                                            onUpdate:modelValue={() => toggle(index)}
+                                            label={item}
+                                            density="compact"
+                                            hideDetails
+                                        />
                                     ))}
                                 </div>
                                 {card.value.irreversible ? (
@@ -105,7 +106,7 @@ export const SafeguardDialog = defineComponent({
                         </div>
                     )}
                 </div>
-            </VDialog>
+            </PgDialog>
         );
     },
 });

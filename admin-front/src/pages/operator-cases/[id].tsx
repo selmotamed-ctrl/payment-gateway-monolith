@@ -3,19 +3,19 @@ import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn, VCheckbox, VExpansionPanel, VExpansionPanelText, VExpansionPanelTitle, VExpansionPanels, VIcon, VSelect, VTextField, VTextarea, VTimeline, VTimelineItem } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
+import {VAlert, PgButton, PgCheckbox, PgExpansionPanel, PgExpansionPanelText, PgExpansionPanelTitle, PgExpansionPanels, PgIcon, PgAutocomplete, PgTextField, PgTextarea, PgTimeline, PgTimelineItem} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
 import { api } from "@/state/api";
 import { user, hasOneOfAuthorities } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { useSafeguard } from "@/components/guide/useSafeguard";
-import { statusTone } from "@/components/Table/statusTone";
+import {statusTone} from "@pg/ui";
 import {
     CASE_REFERENCE_SOURCE_HELP,
     INQUIRY_REASON_HELP,
@@ -29,16 +29,16 @@ import {
 import type { OperatorCaseDetail } from "./types";
 import { CASE_ACTION_LABELS, caseTypeMeta } from "./caseTypes";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { FormField } from "@/components/ui/FormField";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MetricStrip } from "@/components/ui/MetricStrip";
-import { DescriptionList, type DescriptionItem } from "@/components/ui/DescriptionList";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { JsonDiffViewer } from "@/components/ui/JsonDiffViewer";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import {FormModal} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {MetricStrip} from "@pg/ui";
+import {DescriptionList, type DescriptionItem} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {JsonDiffViewer} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
 const parse = (payload: unknown): OperatorCaseDetail => {
     const source = (payload ?? {}) as Record<string, unknown>;
     return (source.operatorCase ?? source) as OperatorCaseDetail;
@@ -740,26 +740,26 @@ const OperatorCaseDetailPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={`${t("Operator Case")} ${caseRef.value}`} subtitle={t("Inspect the case, evidence, identifiers and maker-checker resolution path.")}>(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => router.push({ name: "OperatorCases" })}>
+                            <PgButton variant="text" prependIcon="mdi-arrow-left" onClick={() => router.push({ name: "OperatorCases" })}>
                                 {t("Back")}
-                            </VBtn>
+                            </PgButton>
                             {typeMeta.value.sourceRoute && (
-                                <VBtn variant="tonal" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: typeMeta.value.sourceRoute! })}>
+                                <PgButton variant="tonal" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: typeMeta.value.sourceRoute! })}>
                                     {t(typeMeta.value.sourceLabel ?? "Open source")}
-                                </VBtn>
+                                </PgButton>
                             )}
                             {canWrite.value && !isResolved.value && !isPendingChecker.value && (
                                 <>
-                                    <VBtn variant="tonal" loading={actionLoading.value} onClick={() => void assignToMe()}>
+                                    <PgButton variant="tonal" loading={actionLoading.value} onClick={() => void assignToMe()}>
                                         {t("Assign to me")}
-                                    </VBtn>
+                                    </PgButton>
                                     {detail.value?.state === "OPEN" && (
-                                        <VBtn variant="tonal" loading={actionLoading.value} onClick={() => void acknowledge()}>
+                                        <PgButton variant="tonal" loading={actionLoading.value} onClick={() => void acknowledge()}>
                                             {t("Acknowledge")}
-                                        </VBtn>
+                                        </PgButton>
                                     )}
                                     <span title={INQUIRY_REASON_HELP[inquiry.value?.reason ?? ""] ?? t("Inquiry is not available")}>
-                                        <VBtn
+                                        <PgButton
                                             variant="tonal"
                                             color="primary"
                                             prependIcon="mdi-radar"
@@ -768,11 +768,11 @@ const OperatorCaseDetailPage = dc(() => {
                                             onClick={openInquiry}
                                         >
                                             {t("Inquire Gateway Now")}
-                                        </VBtn>
+                                        </PgButton>
                                     </span>
-                                    <VBtn color="primary" onClick={openResolve}>
+                                    <PgButton color="primary" onClick={openResolve}>
                                         {t("Propose resolution")}
-                                    </VBtn>
+                                    </PgButton>
                                 </>
                             )}
                         </ThemedView>
@@ -815,7 +815,7 @@ const OperatorCaseDetailPage = dc(() => {
                                                 label={state}
                                                 toneOverride={detail.value?.state === state ? asBadgeTone(statusTone(state)) : "neutral"}
                                             />
-                                            {index < 3 && <VIcon icon="mdi-chevron-right" size={16} style={{ opacity: 0.35 }} />}
+                                            {index < 3 && <PgIcon icon="mdi-chevron-right" size={16} style={{ opacity: 0.35 }} />}
                                         </ThemedView>
                                     ))}
                                     <ThemedText style={{ fontSize: "12px", opacity: 0.6, marginInlineStart: "8px" }}>
@@ -830,9 +830,9 @@ const OperatorCaseDetailPage = dc(() => {
                                 <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                     <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
                                         <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Gateway inquiry schedule")}</ThemedText>
-                                        <VBtn size="small" variant="text" prependIcon="mdi-radar" onClick={() => void router.push({ name: "GatewayInquirySchedules" })}>
+                                        <PgButton size="small" variant="text" prependIcon="mdi-radar" onClick={() => void router.push({ name: "GatewayInquirySchedules" })}>
                                             {t("Open inquiry schedule")}
-                                        </VBtn>
+                                        </PgButton>
                                     </ThemedView>
                                     {detail.value.inquirySchedules.slice(0, 3).map((schedule) => (
                                         <ThemedView key={schedule.id} style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", alignItems: "center", flexWrap: "wrap", borderBottom: "1px solid var(--pg-border-subtle)", paddingBottom: "7px" }}>
@@ -945,28 +945,28 @@ const OperatorCaseDetailPage = dc(() => {
                                                     label={t("Checker note")}
                                                     hint={t("Required when rejecting; optional when approving.")}
                                                 >
-                                                    <VTextarea
+                                                    <PgTextarea
                                                         modelValue={checkerReason.value}
                                                         onUpdate:modelValue={(value: string) => (checkerReason.value = value)}
                                                         rows={2}
                                                     />
                                                 </FormField>
                                                 <ThemedView style={{ flexDirection: "row", gap: "10px" }}>
-                                                    <VBtn
+                                                    <PgButton
                                                         color="success"
                                                         loading={actionLoading.value}
                                                         onClick={() => void decideApproval(true)}
                                                     >
                                                         {t("Approve and execute")}
-                                                    </VBtn>
-                                                    <VBtn
+                                                    </PgButton>
+                                                    <PgButton
                                                         color="error"
                                                         variant="tonal"
                                                         loading={actionLoading.value}
                                                         onClick={() => void decideApproval(false)}
                                                     >
                                                         {t("Reject")}
-                                                    </VBtn>
+                                                    </PgButton>
                                                 </ThemedView>
                                             </ThemedView>
                                         )}
@@ -992,9 +992,9 @@ const OperatorCaseDetailPage = dc(() => {
                                 {timeline.value.length === 0 ? (
                                     <EmptyState title={t("No timeline events recorded")} icon="mdi-timeline-clock-outline" />
                                 ) : (
-                                    <VTimeline density="compact" side="end">
+                                    <PgTimeline density="compact" side="end">
                                         {timeline.value.map((item, index) => (
-                                            <VTimelineItem
+                                            <PgTimelineItem
                                                 key={`${item.at}-${index}`}
                                                 dotColor={item.tone === "error" ? "error" : item.tone === "success" ? "success" : "primary"}
                                                 size="x-small"
@@ -1005,19 +1005,19 @@ const OperatorCaseDetailPage = dc(() => {
                                                         {formatDateTime(item.at)} · {item.detail}
                                                     </ThemedText>
                                                 </ThemedView>
-                                            </VTimelineItem>
+                                            </PgTimelineItem>
                                         ))}
-                                    </VTimeline>
+                                    </PgTimeline>
                                 )}
                             </SurfaceCardText>
                         </SurfaceCard>
 
-                        <VExpansionPanels multiple>
-                            <VExpansionPanel value="step-logs">
-                                <VExpansionPanelTitle>
+                        <PgExpansionPanels multiple>
+                            <PgExpansionPanel value="step-logs">
+                                <PgExpansionPanelTitle>
                                     {t("Gateway step logs")} ({(detail.value.attempt?.stepLogs ?? []).length})
-                                </VExpansionPanelTitle>
-                                <VExpansionPanelText>
+                                </PgExpansionPanelTitle>
+                                <PgExpansionPanelText>
                                     {(detail.value.attempt?.stepLogs ?? []).length === 0 ? (
                                         <EmptyState title={t("No step logs recorded")} icon="mdi-script-text-outline" />
                                     ) : (
@@ -1042,14 +1042,14 @@ const OperatorCaseDetailPage = dc(() => {
                                             </SurfaceCard>
                                         ))
                                     )}
-                                </VExpansionPanelText>
-                            </VExpansionPanel>
+                                </PgExpansionPanelText>
+                            </PgExpansionPanel>
 
-                            <VExpansionPanel value="inbound-events">
-                                <VExpansionPanelTitle>
+                            <PgExpansionPanel value="inbound-events">
+                                <PgExpansionPanelTitle>
                                     {t("Inbound webhooks")} ({(detail.value.attempt?.inboundEvents ?? []).length})
-                                </VExpansionPanelTitle>
-                                <VExpansionPanelText>
+                                </PgExpansionPanelTitle>
+                                <PgExpansionPanelText>
                                     {(detail.value.attempt?.inboundEvents ?? []).length === 0 ? (
                                         <EmptyState title={t("No inbound events recorded")} icon="mdi-webhook" />
                                     ) : (
@@ -1082,14 +1082,14 @@ const OperatorCaseDetailPage = dc(() => {
                                             </SurfaceCard>
                                         ))
                                     )}
-                                </VExpansionPanelText>
-                            </VExpansionPanel>
+                                </PgExpansionPanelText>
+                            </PgExpansionPanel>
 
-                            <VExpansionPanel value="related">
-                                <VExpansionPanelTitle>
+                            <PgExpansionPanel value="related">
+                                <PgExpansionPanelTitle>
                                     {t("Adjustments and disputes")} ({(detail.value.attempt?.adjustments ?? []).length + (detail.value.attempt?.disputes ?? []).length})
-                                </VExpansionPanelTitle>
-                                <VExpansionPanelText>
+                                </PgExpansionPanelTitle>
+                                <PgExpansionPanelText>
                                     {(detail.value.attempt?.adjustments ?? []).map((adjustment) => {
                                         const row = adjustment as Record<string, unknown>;
                                         return (
@@ -1109,14 +1109,14 @@ const OperatorCaseDetailPage = dc(() => {
                                     {(detail.value.attempt?.adjustments ?? []).length === 0 && (detail.value.attempt?.disputes ?? []).length === 0 && (
                                         <EmptyState title={t("No adjustments or disputes")} icon="mdi-scale-balance" />
                                     )}
-                                </VExpansionPanelText>
-                            </VExpansionPanel>
+                                </PgExpansionPanelText>
+                            </PgExpansionPanel>
 
-                            <VExpansionPanel value="audit">
-                                <VExpansionPanelTitle>
+                            <PgExpansionPanel value="audit">
+                                <PgExpansionPanelTitle>
                                     {t("Audit trail")} ({(detail.value.auditTrail ?? []).length})
-                                </VExpansionPanelTitle>
-                                <VExpansionPanelText>
+                                </PgExpansionPanelTitle>
+                                <PgExpansionPanelText>
                                     {(detail.value.auditTrail ?? []).map((audit) => (
                                         <ThemedView
                                             key={audit.id}
@@ -1138,21 +1138,21 @@ const OperatorCaseDetailPage = dc(() => {
                                     {(detail.value.auditTrail ?? []).length === 0 && (
                                         <EmptyState title={t("No audit entries recorded")} icon="mdi-history" />
                                     )}
-                                </VExpansionPanelText>
-                            </VExpansionPanel>
-                        </VExpansionPanels>
+                                </PgExpansionPanelText>
+                            </PgExpansionPanel>
+                        </PgExpansionPanels>
 
-                        <VExpansionPanels>
-                            <VExpansionPanel value="technical-identifiers">
-                                <VExpansionPanelTitle>{t("Technical identifiers")}</VExpansionPanelTitle>
-                                <VExpansionPanelText>
+                        <PgExpansionPanels>
+                            <PgExpansionPanel value="technical-identifiers">
+                                <PgExpansionPanelTitle>{t("Technical identifiers")}</PgExpansionPanelTitle>
+                                <PgExpansionPanelText>
                                     <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
                                         {t("Raw database and audit identifiers. Start with the case context above; use these only when cross-referencing logs or support tickets.")}
                                     </ThemedText>
                                     <DescriptionList columns={2} items={identifierItems.value} />
-                                </VExpansionPanelText>
-                            </VExpansionPanel>
-                        </VExpansionPanels>
+                                </PgExpansionPanelText>
+                            </PgExpansionPanel>
+                        </PgExpansionPanels>
 
                     </>
                 )}
@@ -1191,7 +1191,7 @@ const OperatorCaseDetailPage = dc(() => {
                     {t("This creates a Maker-Checker proposal. A different checker must approve it before the attempt or ledger changes.")}
                 </VAlert>
                 <FormField label={t("Resolution action")} required>
-                    <VSelect
+                    <PgAutocomplete
                         items={actionOptions.value}
                         modelValue={resolveAction.value}
                         onUpdate:modelValue={(value: string) => (resolveAction.value = value)}
@@ -1204,7 +1204,7 @@ const OperatorCaseDetailPage = dc(() => {
                             hint={t("Required. The gateway or bank reference that proves the payment.")}
                             required
                         >
-                            <VTextField
+                            <PgTextField
                                 modelValue={providerReference.value}
                                 onUpdate:modelValue={(value: string) => (providerReference.value = value)}
                             />
@@ -1213,7 +1213,7 @@ const OperatorCaseDetailPage = dc(() => {
                             label={t("Settled amount")}
                             hint={t("Must equal the charged amount. Use the reconciliation adjustment flow for a mismatch.")}
                         >
-                            <VTextField
+                            <PgTextField
                                 modelValue={settledAmount.value}
                                 onUpdate:modelValue={(value: string) => (settledAmount.value = value)}
                             />
@@ -1223,14 +1223,14 @@ const OperatorCaseDetailPage = dc(() => {
                 {!isAttemptCase.value && resolveAction.value === "CLOSE_CASE" && (
                     <>
                         <FormField label={t("Resolution outcome")} hint={t("What happened to the source condition?")} required>
-                            <VSelect
+                            <PgAutocomplete
                                 items={RESOLUTION_CODE_OPTIONS}
                                 modelValue={resolutionCode.value}
                                 onUpdate:modelValue={(value: string) => (resolutionCode.value = value)}
                             />
                         </FormField>
                         <FormField label={t("Evidence reference")} hint={t("Optional filing, backup, report or ticket reference.")}>
-                            <VTextField
+                            <PgTextField
                                 modelValue={resolutionReference.value}
                                 onUpdate:modelValue={(value: string) => (resolutionReference.value = value)}
                             />
@@ -1242,14 +1242,14 @@ const OperatorCaseDetailPage = dc(() => {
                     hint={t("Minimum 3 characters. This becomes part of the permanent case record.")}
                     required
                 >
-                    <VTextarea
+                    <PgTextarea
                         modelValue={resolveReason.value}
                         onUpdate:modelValue={(value: string) => (resolveReason.value = value)}
                         rows={3}
                     />
                 </FormField>
                 <FormField label={t("Additional notes")} hint={t("Optional evidence notes for the checker.")}>
-                    <VTextarea
+                    <PgTextarea
                         modelValue={resolveNotes.value}
                         onUpdate:modelValue={(value: string) => (resolveNotes.value = value)}
                         rows={2}
@@ -1259,7 +1259,7 @@ const OperatorCaseDetailPage = dc(() => {
                     <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                         <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Resolution checklist")}</ThemedText>
                         {resolutionChecks.value.map((check) => (
-                            <VCheckbox
+                            <PgCheckbox
                                 key={check.key}
                                 modelValue={resolveChecklist.value[check.key] === true}
                                 onUpdate:modelValue={(value: unknown) => (resolveChecklist.value = { ...resolveChecklist.value, [check.key]: Boolean(value) })}

@@ -1,13 +1,13 @@
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VBtn } from "@/components/vael/VuetifyShim";
+import {PgAlert, PgButton} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { StateView } from "@/components/StateView";
+import {SlideOverDrawer} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {StateView} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -124,9 +124,9 @@ export const InboundEventDrawer = defineComponent({
                         <StatusBadge status={event.env} label={event.env} toneOverride={event.env === "LIVE" ? "warning" : "info"} showDot={false} />
                     </div>
                     {event.verificationError && (
-                        <div role="alert" style={{ padding: "10px 12px", borderRadius: "var(--pg-radius-sm)", backgroundColor: "var(--pg-status-danger-bg)", border: "1px solid var(--pg-status-danger-border)", color: "var(--pg-status-danger-text)", fontSize: "13px" }}>
+                        <PgAlert tone="danger" density="compact">
                             {event.verificationError}
-                        </div>
+                        </PgAlert>
                     )}
                     <DescriptionList
                         items={[
@@ -168,12 +168,12 @@ export const InboundEventDrawer = defineComponent({
                     footer: () => (
                         <>
                             {detail.value?.attemptId && (
-                                <VBtn variant="tonal" prependIcon="mdi-credit-card-outline" onClick={() => emit("openAttempt", detail.value!.attemptId)}>{t("Open attempt")}</VBtn>
+                                <PgButton variant="tonal" prependIcon="mdi-credit-card-outline" onClick={() => emit("openAttempt", detail.value!.attemptId)}>{t("Open attempt")}</PgButton>
                             )}
                             {detail.value && (
-                                <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyDiagnostics()}>{t("Copy diagnostics")}</VBtn>
+                                <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyDiagnostics()}>{t("Copy diagnostics")}</PgButton>
                             )}
-                            <VBtn variant="text" onClick={() => emit("close")}>{t("Close")}</VBtn>
+                            <PgButton variant="text" onClick={() => emit("close")}>{t("Close")}</PgButton>
                         </>
                     ),
                 }}

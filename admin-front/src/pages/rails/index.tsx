@@ -3,21 +3,21 @@ import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VSelect, VSwitch, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import type { TableHeader } from "@/components/Table/types";
+import {VAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { useOpenQuery } from "@/composables/useOpenQuery";
@@ -25,12 +25,12 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { SectionFields } from "@/components/SectionFields";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { LogoAssetPicker } from "@/components/builders/LogoAssetPicker";
 import { hasOneOfAuthorities } from "@/state/user";
 type RailField = {
@@ -694,10 +694,10 @@ const RailsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Rails")} subtitle={t("Customer payment methods, collection modes, and catalog fields.")}>(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
-                            <VBtn color="primary" variant="flat" prependIcon={"mdi-plus"} onClick={() => openCreateRail()}>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</PgButton>
+                            <PgButton color="primary" variant="flat" prependIcon={"mdi-plus"} onClick={() => openCreateRail()}>
                                 {t("Add Rail")}
-                            </VBtn>
+                            </PgButton>
                         </ThemedView>
                     )</PageHeader>
 
@@ -792,14 +792,14 @@ const RailsPage = dc(() => {
                     footer: () => (
                         <>
                             {editingFieldIndex.value !== null && (
-                                <VBtn variant="text" onClick={() => resetFieldForm()}>
+                                <PgButton variant="text" onClick={() => resetFieldForm()}>
                                     {t("Cancel")}
-                                </VBtn>
+                                </PgButton>
                             )}
-                            <VBtn variant="outlined" disabled={actionLoading.value} onClick={closeRailConfigDialog}>
+                            <PgButton variant="outlined" disabled={actionLoading.value} onClick={closeRailConfigDialog}>
                                 {t("Close")}
-                            </VBtn>
-                            <VBtn
+                            </PgButton>
+                            <PgButton
                                 color="primary"
                                 variant="flat"
                                 {...{ type: "submit" }}
@@ -807,7 +807,7 @@ const RailsPage = dc(() => {
                                 disabled={!fieldForm.value.code.trim() || !fieldForm.value.label.trim() || !railFieldChecklistComplete.value}
                             >
                                 {editingFieldIndex.value === null ? t("Add") : t("Save")}
-                            </VBtn>
+                            </PgButton>
                         </>
                     ),
                 }}
@@ -840,8 +840,8 @@ const RailsPage = dc(() => {
                             <MetaPill size="x-small" variant="tonal">{field.type}</MetaPill>
                             {field.required && <StatusBadge status="REQUIRED" label={t("Required")} toneOverride="warning" showDot={false} />}
                             {field.sensitive && <StatusBadge status="SENSITIVE" label={t("Sensitive")} toneOverride="danger" showDot={false} />}
-                            <VBtn size="small" variant="text" icon="mdi-pencil" onClick={() => editField(index)} />
-                            <VBtn
+                            <PgButton size="small" variant="text" icon="mdi-pencil" onClick={() => editField(index)} />
+                            <PgButton
                                 size="small"
                                 variant="text"
                                 icon="mdi-delete-outline"
@@ -857,19 +857,19 @@ const RailsPage = dc(() => {
                 </ThemedText>
                 <SectionFields title={t("Field details")}>
                     <FormField label={t("Field Key")} required sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             modelValue={fieldForm.value.code}
                             onUpdate:modelValue={(v: string) => (fieldForm.value.code = v)}
                         />
                     </FormField>
                     <FormField label={t("Label (English)")} required>
-                        <VTextField
+                        <PgTextField
                             modelValue={fieldForm.value.label}
                             onUpdate:modelValue={(v: string) => (fieldForm.value.label = v)}
                         />
                     </FormField>
                     <FormField label={t("Input Type")}>
-                        <VSelect
+                        <PgAutocomplete
                             items={PUBLIC_TYPES}
                             modelValue={fieldForm.value.type}
                             onUpdate:modelValue={(v: string) => (fieldForm.value.type = v)}
@@ -878,31 +878,31 @@ const RailsPage = dc(() => {
                 </SectionFields>
                 <SectionFields title={t("Validation and requirements")}>
                     <FormField label={t("Regex")}>
-                        <VTextField
+                        <PgTextField
                             modelValue={fieldForm.value.pattern}
                             onUpdate:modelValue={(v: string) => (fieldForm.value.pattern = v)}
                         />
                     </FormField>
                     <FormField label={t("Min")}>
-                        <VTextField
+                        <PgTextField
                             type="number"
                             modelValue={fieldForm.value.minLength}
                             onUpdate:modelValue={(v: string) => (fieldForm.value.minLength = v)}
                         />
                     </FormField>
                     <FormField label={t("Max")}>
-                        <VTextField
+                        <PgTextField
                             type="number"
                             modelValue={fieldForm.value.maxLength}
                             onUpdate:modelValue={(v: string) => (fieldForm.value.maxLength = v)}
                         />
                     </FormField>
-                    <VSwitch
+                    <PgSwitch
                         label={t("Required")}
                         modelValue={fieldForm.value.required}
                         onUpdate:modelValue={(v: any) => (fieldForm.value.required = !!v)}
                     />
-                    <VSwitch
+                    <PgSwitch
                         label={t("Sensitive")}
                         modelValue={fieldForm.value.sensitive}
                         onUpdate:modelValue={(v: any) => (fieldForm.value.sensitive = !!v)}
@@ -952,10 +952,10 @@ const RailsPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <>
-                            <VBtn variant="outlined" disabled={savingRail.value} onClick={() => (editOpen.value = false)}>
+                            <PgButton variant="outlined" disabled={savingRail.value} onClick={() => (editOpen.value = false)}>
                                 {t("Cancel")}
-                            </VBtn>
-                            <VBtn
+                            </PgButton>
+                            <PgButton
                                 color="primary"
                                 variant="flat"
                                 {...{ type: "submit" }}
@@ -963,45 +963,45 @@ const RailsPage = dc(() => {
                                 disabled={(!railEditForm.value.nameEn.trim() && !railEditForm.value.nameAr.trim()) || !railEditChecklistComplete.value}
                             >
                                 {t("Save")}
-                            </VBtn>
+                            </PgButton>
                         </>
                     ),
                 }}
             >
                 <SectionFields title={t("Rail settings")}>
                     <FormField label={t("Label (English)")}>
-                        <VTextField
+                        <PgTextField
                             modelValue={railEditForm.value.nameEn}
                             onUpdate:modelValue={(v: string) => (railEditForm.value.nameEn = v)}
                         />
                     </FormField>
                     <FormField label={t("Label (Arabic)")}>
-                        <VTextField
+                        <PgTextField
                             modelValue={railEditForm.value.nameAr}
                             onUpdate:modelValue={(v: string) => (railEditForm.value.nameAr = v)}
                         />
                     </FormField>
                     <FormField label={t("Minimum amount")} sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             modelValue={railEditForm.value.minAmount}
                             onUpdate:modelValue={(v: string) => (railEditForm.value.minAmount = v)}
                         />
                     </FormField>
                     <FormField label={t("Maximum amount")} sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             modelValue={railEditForm.value.maxAmount}
                             onUpdate:modelValue={(v: string) => (railEditForm.value.maxAmount = v)}
                         />
                     </FormField>
                     <FormField label={t("Display order")}>
-                        <VTextField
+                        <PgTextField
                             type="number"
                             modelValue={railEditForm.value.displayOrder}
                             onUpdate:modelValue={(v: string) => (railEditForm.value.displayOrder = v)}
                         />
                     </FormField>
                     <div style={{ display: "flex", alignItems: "center" }}>
-                        <VSwitch
+                        <PgSwitch
                             label={t("Active")}
                             modelValue={railEditForm.value.active}
                             onUpdate:modelValue={(v: any) => (railEditForm.value.active = !!v)}
@@ -1015,14 +1015,14 @@ const RailsPage = dc(() => {
                         />
                     </div>
                     <FormField label={t("Instructions (English)")} style={{ gridColumn: "span 2" }}>
-                        <VTextarea
+                        <PgTextarea
                             rows={2}
                             modelValue={railEditForm.value.instructionsEn}
                             onUpdate:modelValue={(v: string) => (railEditForm.value.instructionsEn = v)}
                         />
                     </FormField>
                     <FormField label={t("Instructions (Arabic)")} style={{ gridColumn: "span 2" }}>
-                        <VTextarea
+                        <PgTextarea
                             rows={2}
                             modelValue={railEditForm.value.instructionsAr}
                             onUpdate:modelValue={(v: string) => (railEditForm.value.instructionsAr = v)}
@@ -1052,10 +1052,10 @@ const RailsPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <>
-                            <VBtn variant="outlined" disabled={creating.value} onClick={() => (createOpen.value = false)}>
+                            <PgButton variant="outlined" disabled={creating.value} onClick={() => (createOpen.value = false)}>
                                 {t("Cancel")}
-                            </VBtn>
-                            <VBtn
+                            </PgButton>
+                            <PgButton
                                 color="primary"
                                 variant="flat"
                                 {...{ type: "submit" }}
@@ -1063,26 +1063,26 @@ const RailsPage = dc(() => {
                                 disabled={!railForm.value.code.trim() || !railForm.value.name.trim()}
                             >
                                 {t("Create")}
-                            </VBtn>
+                            </PgButton>
                         </>
                     ),
                 }}
             >
                 <SectionFields title={t("Rail profile")}>
                     <FormField label={t("Rail Code")} hint="lowercase letters, digits, - and _" required sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             modelValue={railForm.value.code}
                             onUpdate:modelValue={(v: string) => (railForm.value.code = v)}
                         />
                     </FormField>
                     <FormField label={t("Label (English)")} required>
-                        <VTextField
+                        <PgTextField
                             modelValue={railForm.value.name}
                             onUpdate:modelValue={(v: string) => (railForm.value.name = v)}
                         />
                     </FormField>
                     <FormField label={t("Type")}>
-                        <VSelect
+                        <PgAutocomplete
                             items={["REDIRECT", "EMBEDDED", "QR", "PUSH", "TRANSFER", "CASH"]}
                             modelValue={railForm.value.collectionMode}
                             onUpdate:modelValue={(v: string) => (railForm.value.collectionMode = v)}

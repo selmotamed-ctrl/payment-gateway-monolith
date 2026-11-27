@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { computed } from "vue";
-import { VAlert } from "@/components/vael/VuetifyShim";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {VAlert} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 import { postHostedAction } from "@/utils/api";
 import { resolveCheckoutOrigin } from "@/utils/security";
 

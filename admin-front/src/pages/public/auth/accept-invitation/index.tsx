@@ -1,5 +1,5 @@
 import { dc } from "@/utils/dc";
-import { VAlert, VBtn, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { computed, ref } from "vue";
 import { useRoute } from "vue-router";
@@ -9,8 +9,8 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { setLocale } from "@/plugins/localization";
 import router from "@/router";
 import AuthLayout from "@/layouts/auth";
-import { FormField } from "@/components/ui/FormField";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {FormField} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
 
 /**
  * Public page where an invited staff member accepts the invitation emailed to them. They choose their own
@@ -90,14 +90,14 @@ const AcceptInvitationPage = dc(() => {
                             <VAlert type="success" variant="tonal" density="compact">
                                 {t("Invitation accepted. Your account becomes active once a second administrator approves it.")}
                             </VAlert>
-                            <VBtn block size="large" onClick={() => void router.push({ name: "Login" })}>
+                            <PgButton block size="large" onClick={() => void router.push({ name: "Login" })}>
                                 {t("Back to sign in")}
-                            </VBtn>
+                            </PgButton>
                         </>
                     ) : (
                         <>
                             <FormField label={t("Invitation code")} required>
-                                <VTextField
+                                <PgTextField
                                     aria-label={t("Invitation code")}
                                     autocomplete="off"
                                     modelValue={token.value}
@@ -106,7 +106,7 @@ const AcceptInvitationPage = dc(() => {
                                 />
                             </FormField>
                             <FormField label={t("New password")} required hint={t("At least 12 characters")}>
-                                <VTextField
+                                <PgTextField
                                     aria-label={t("New password")}
                                     type={showPassword.value ? "text" : "password"}
                                     autocomplete="new-password"
@@ -118,7 +118,7 @@ const AcceptInvitationPage = dc(() => {
                                 />
                             </FormField>
                             <FormField label={t("Confirm password")} required>
-                                <VTextField
+                                <PgTextField
                                     aria-label={t("Confirm password")}
                                     type={showConfirmation.value ? "text" : "password"}
                                     autocomplete="new-password"
@@ -131,7 +131,7 @@ const AcceptInvitationPage = dc(() => {
                                 />
                             </FormField>
                             <FormField label={t("Phone for SMS codes (optional)")} hint={t("Email is the primary channel. Add a phone to receive the same code by SMS.")}>
-                                <VTextField
+                                <PgTextField
                                     aria-label={t("Phone for SMS codes (optional)")}
                                     autocomplete="tel"
                                     modelValue={phone.value}
@@ -147,22 +147,22 @@ const AcceptInvitationPage = dc(() => {
                                     </div>
                                 ))}
                             </div>
-                            <VBtn block size="large" loading={loading.value} disabled={!canSubmit.value} onClick={() => void submit()}>
+                            <PgButton block size="large" loading={loading.value} disabled={!canSubmit.value} onClick={() => void submit()}>
                                 {t("Accept invitation")}
-                            </VBtn>
-                            <VBtn variant="text" size="small" onClick={() => void router.push({ name: "Login" })}>
+                            </PgButton>
+                            <PgButton variant="text" size="small" onClick={() => void router.push({ name: "Login" })}>
                                 {t("Back to sign in")}
-                            </VBtn>
+                            </PgButton>
                         </>
                     )}
 
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <VBtn variant="text" size="small" onClick={() => setLocale("ar")}>
+                        <PgButton variant="text" size="small" onClick={() => setLocale("ar")}>
                             العربية
-                        </VBtn>
-                        <VBtn variant="text" size="small" onClick={() => setLocale("en")}>
+                        </PgButton>
+                        <PgButton variant="text" size="small" onClick={() => setLocale("en")}>
                             English
-                        </VBtn>
+                        </PgButton>
                     </div>
                 </div>
             </SurfaceCard>

@@ -2,26 +2,26 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { StateView } from "@/components/StateView";
-import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
-import { ApiTable } from "@/components/Table/ApiTable";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues, type TableFilter } from "@/components/Table/filters";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {VAlert, PgButton, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { SandboxBanner } from "@/features/sandbox/SandboxBanner";
+import {ApiTable} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues, type TableFilter} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import { SectionFields } from "@/components/SectionFields";
+import {SectionFields} from "@pg/ui";
 import { adminSandbox, type AdminSandboxMerchantRow } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -234,7 +234,7 @@ const AdminSandboxMerchantsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={t("Sandbox Merchants")} subtitle={t("The merchant portfolio in the isolated sandbox plane.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => { hook.value?.refreshAsIs(); void loadSummary(); }}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn></div></PageHeader>
+            <PageHeader title={t("Sandbox Merchants")} subtitle={t("The merchant portfolio in the isolated sandbox plane.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => { hook.value?.refreshAsIs(); void loadSummary(); }}>{t("Refresh")}</PgButton><PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</PgButton></div></PageHeader>
             <SandboxBanner />
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             <StateView loading={loading.value && !summary.value} minHeight="180px">
@@ -284,7 +284,7 @@ const AdminSandboxMerchantsPage = dc(() => {
             </FormModal>
             <FormModal modelValue={Boolean(resetTarget.value)} onUpdate:modelValue={(v: any) => { if (!v) resetTarget.value = null; }} title={t("Reset merchant sandbox")} size="sm" loading={Boolean(busy.value)} submitLabel={t("Reset sandbox")} onSubmit={() => void reset()}>
                 <SectionFields title={t("Confirmation")}>
-                    <FormField label={t("Type RESET to confirm")} required><VTextField modelValue={resetConfirm.value} onUpdate:modelValue={(v: string) => (resetConfirm.value = v)} hideDetails /></FormField>
+                    <FormField label={t("Type RESET to confirm")} required><PgTextField modelValue={resetConfirm.value} onUpdate:modelValue={(v: string) => (resetConfirm.value = v)} hideDetails /></FormField>
                     <p class="text-caption text-medium-emphasis">{t("This resets")} {resetTarget.value?.tradeName}. {t("Live data is never touched.")}</p>
                 </SectionFields>
                 <FormChecklist

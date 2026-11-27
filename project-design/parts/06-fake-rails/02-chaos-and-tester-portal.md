@@ -13,7 +13,7 @@ code:
   - fake-rails-front/src/**
   - fake-rails-front/src/utils/theme/index.ts
   - fake-rails-front/src/state/theme.ts
-  - fake-rails-front/src/components/ThemeMenu/index.tsx
+  - packages/ui/src/patterns/PgThemeControls.tsx
 design_sources:
   - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md#5-probabilistic-chaos-failure-injection-engine
   - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md#6-single-user-tester-portal-dashboard-architecture-fake-rails-front
@@ -384,3 +384,10 @@ The Fake Rails tester portal applies the same overlay text-color rule as the oth
 ## v2 tester surfaces (2026-11-13)
 
 The portal gains account and checkout-helper routes: `GET/POST/PATCH /portal-api/accounts*`, `GET /portal-api/checkout-helper/:reference` and `POST /portal-api/checkout-helper/:reference/simulate-action`. They expose balances, holds, daily limits, statuses, OTPs and the push/QR approve/decline/variance/duplicate/tampered actions. The same routes are mounted at `/control/*` for the Sandbox core, protected by `x-fake-rails-control-token` when configured; production refuses the control plane without the token.
+
+## 2026 Fintech Vapor design system (`@pg/ui`)
+
+The tester portal consumes the shared `@pg/ui` primitives through `src/uiConfig.tsx` (`PgProvider`, `PgApp`,
+`PgPage`, `PgCard`, `PgTable`, `PgButton`, `PgTextField`, `PgAutocomplete`, `PgCheckbox`, `PgAlert`,
+`PgStatusBadge`, `PgDialog`, `PgDrawer`). The local shim/provider, `ui/*`, `ScreenContainer`, `SectionFields`,
+`ThemeMenu` and legacy stylesheets are deleted. The UI gate (`bun run ui:audit`) passes with zero violations.

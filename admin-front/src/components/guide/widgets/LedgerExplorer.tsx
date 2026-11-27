@@ -3,6 +3,7 @@ import { defineComponent } from "@/utils/dc";
 import { loadData, type LedgerData } from "@/content/guide";
 import { simulateLedgerEvent } from "./engine/ledger";
 import { useGuideLocale } from "./useGuideLocale";
+import { PgAutocomplete, PgTextField } from "@pg/ui";
 
 export const LedgerExplorer = defineComponent({
     name: "LedgerExplorer",
@@ -60,37 +61,39 @@ export const LedgerExplorer = defineComponent({
                 ) : (
                     <>
                         <div class="guide-tool__grid">
-                            <label class="guide-field">
+                            <div class="guide-field">
                                 <span>{L("Link amount A", "مبلغ الرابط A")}</span>
-                                <input value={amount.value} onInput={(event) => (amount.value = (event.target as HTMLInputElement).value)} />
-                            </label>
-                            <label class="guide-field">
+                                <PgTextField density="compact" modelValue={amount.value} onUpdate:modelValue={(value: string) => (amount.value = value)} />
+                            </div>
+                            <div class="guide-field">
                                 <span>{L("Commission rate %", "نسبة العمولة %")}</span>
-                                <input value={rate.value} onInput={(event) => (rate.value = (event.target as HTMLInputElement).value)} />
-                            </label>
-                            <label class="guide-field">
+                                <PgTextField density="compact" modelValue={rate.value} onUpdate:modelValue={(value: string) => (rate.value = value)} />
+                            </div>
+                            <div class="guide-field">
                                 <span>{L("Gateway fee", "رسوم البوابة")}</span>
-                                <input value={fee.value} onInput={(event) => (fee.value = (event.target as HTMLInputElement).value)} />
-                            </label>
-                            <label class="guide-field">
+                                <PgTextField density="compact" modelValue={fee.value} onUpdate:modelValue={(value: string) => (fee.value = value)} />
+                            </div>
+                            <div class="guide-field">
                                 <span>{L("Provider fee", "رسوم المزوّد")}</span>
-                                <input value={provFee.value} onInput={(event) => (provFee.value = (event.target as HTMLInputElement).value)} />
-                            </label>
-                            <label class="guide-field">
+                                <PgTextField density="compact" modelValue={provFee.value} onUpdate:modelValue={(value: string) => (provFee.value = value)} />
+                            </div>
+                            <div class="guide-field">
                                 <span>{L("Wallet start (E15)", "رصيد المحفظة (E15)")}</span>
-                                <input value={walletStart.value} onInput={(event) => (walletStart.value = (event.target as HTMLInputElement).value)} />
-                            </label>
+                                <PgTextField density="compact" modelValue={walletStart.value} onUpdate:modelValue={(value: string) => (walletStart.value = value)} />
+                            </div>
                         </div>
-                        <label class="guide-field">
+                        <div class="guide-field">
                             <span>{L("Journal event", "حدث القيد")}</span>
-                            <select value={selectedEventId.value} onChange={(event) => (selectedEventId.value = (event.target as HTMLSelectElement).value)}>
-                                {data.value.events.map((entry) => (
-                                    <option key={entry.id} value={entry.id}>
-                                        {entry.id} — {entry.title}
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
+                            <PgAutocomplete
+                                density="compact"
+                                searchable={false}
+                                clearable={false}
+                                multiple={false}
+                                items={data.value.events.map((entry) => ({ value: entry.id, label: `${entry.id} — ${entry.title}` }))}
+                                modelValue={selectedEventId.value}
+                                onUpdate:modelValue={(value: string) => (selectedEventId.value = value)}
+                            />
+                        </div>
                         {result.value ? (
                             <div class="guide-ledger" aria-live="polite">
                                 {result.value.entries.map((entry, entryIndex) => (

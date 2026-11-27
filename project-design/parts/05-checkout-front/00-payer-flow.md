@@ -6,12 +6,12 @@ confidence: high
 last_verified: 2026-11-23
 verified_against: 5a24f6f+working-tree
 code:
-  - checkout-front/src/components/sandbox/SandboxCheckoutInspector.tsx
+  - checkout-front/src/features/sandbox/SandboxCheckoutInspector.tsx
   - checkout-front/src/router/index.ts
   - checkout-front/src/layouts/checkout.tsx
   - checkout-front/src/utils/theme/index.ts
   - checkout-front/src/state/theme.ts
-  - checkout-front/src/components/ThemeMenu/index.tsx
+  - packages/ui/src/patterns/PgThemeControls.tsx
   - checkout-front/src/pages/pay/[linkKey]/index.tsx
   - checkout-front/src/components/rail-cards/index.tsx
   - checkout-front/src/components/rail-fields/index.tsx
@@ -381,3 +381,11 @@ or canary `visibleRails` list from core. See `core.route-health`.
 ## Second-pass slot error message (2026-11-25)
 
 `PAYMENT_LINK_SLOT_UNAVAILABLE` now maps to the bilingual **Payment in progress** message, matching the Guide's description of a second payer trying a reserved link.
+
+## 2026 Fintech Vapor design system (`@pg/ui`)
+
+The payer flow uses the shared `@pg/ui` primitives (`PgProvider`, `PgPage`, `PgCard`, `PgButton`, `PgTextField`,
+`PgAutocomplete`, `PgAlert`, `PgDialog`, `PgDrawer`, `PgOtpInput`, `PgStatusBadge`, `PgMoneyText`) through
+`src/uiConfig.tsx`. The local `components/vael/VuetifyShim`, `components/ui/*` and legacy stylesheets are deleted;
+checkout-specific renderers/rail fields/sandbox inspector remain feature components under `src/components`.
+The UI gate (`bun run ui:audit`) passes with zero violations.

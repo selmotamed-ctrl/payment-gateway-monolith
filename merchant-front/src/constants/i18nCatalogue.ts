@@ -1102,4 +1102,5 @@ export const appCatalogue: Record<string, [string, string]> = {
     'The sign-in link is invalid.': ['The sign-in link is invalid.', 'رابط الدخول غير صالح.'],
     'Google sign-in failed. Please try again or use your email and password.': ['Google sign-in failed. Please try again or use your email and password.', 'فشل تسجيل الدخول عبر Google. حاول مرة أخرى أو استخدم بريدك وكلمة المرور.'],
     'Register with your name and email, or continue with Google.': ['Register with your name and email, or continue with Google.', 'سجّل باسمك وبريدك الإلكتروني، أو تابع عبر Google.'],
+    "Order #": ["Order #", "طلب #"],
 };

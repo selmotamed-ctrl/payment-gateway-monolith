@@ -1,8 +1,8 @@
 import { onMounted, ref, computed } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { RouterLink } from "vue-router/experimental/vapor";
-import { PageHeader } from "@/components/ui/PageHeader";
-import ScreenContainer from "@/components/ScreenContainer";
+import {PageHeader} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
 import { BookCard } from "@/components/guide/BookCard";
 import { ReadingPath } from "@/components/guide/ReadingPath";
 import { StuckPanel } from "@/components/guide/StuckPanel";

@@ -1,10 +1,10 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VCard, VCardText, VChip, VDialog, VList, VListItem, VTextField } from "@/components/vael/VuetifyShim";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
+import {PgCard, PgCardText, PgChip, PgDialog, PgList, PgListItem, PgTextField} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StatusChip} from "@pg/ui";
 import { searchGuide } from "@/content/guide/search";
 import type { GuideSearchEntry } from "@/content/guide/types";
 
@@ -60,16 +60,16 @@ export const GlobalGuideSearchModal = dc(
         };
 
         return () => (
-            <VDialog
+            <PgDialog
                 modelValue={props.modelValue}
                 onUpdate:modelValue={(value: boolean) => setOpen(value)}
                 maxWidth="820px"
                 scrollable
                 transition="dialog-top-transition"
             >
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                        <VTextField
+                <PgCard>
+                    <PgCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <PgTextField
                             modelValue={query.value}
                             onUpdate:modelValue={(value: string) => {
                                 query.value = value ?? "";
@@ -93,9 +93,9 @@ export const GlobalGuideSearchModal = dc(
                             </ThemedView>
                         </ThemedView>
                         <div style={{ maxHeight: "62vh", overflowY: "auto" }}>
-                            <VList density="compact">
+                            <PgList density="compact">
                                 {results.value.map((entry, index) => (
-                                    <VListItem
+                                    <PgListItem
                                         key={entry.id}
                                         active={index === selected.value}
                                         onClick={() => choose(entry)}
@@ -103,9 +103,9 @@ export const GlobalGuideSearchModal = dc(
                                     >
                                         <ThemedView style={{ gap: "4px" }}>
                                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                                <VChip size="x-small" color={KIND_TONE[entry.kind] ?? "primary"} variant="tonal">
+                                                <PgChip size="x-small" color={KIND_TONE[entry.kind] ?? "primary"} variant="tonal">
                                                     {entry.kind}
-                                                </VChip>
+                                                </PgChip>
                                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "14px" }}>
                                                     {isArabic() ? entry.titleAr : entry.titleEn}
                                                 </ThemedText>
@@ -114,20 +114,20 @@ export const GlobalGuideSearchModal = dc(
                                                 {(isArabic() && entry.bodyAr ? entry.bodyAr : entry.bodyEn).replace(/\s+/g, " ").slice(0, 190)}
                                             </ThemedText>
                                         </ThemedView>
-                                    </VListItem>
+                                    </PgListItem>
                                 ))}
                                 {results.value.length === 0 ? (
-                                    <VListItem>
+                                    <PgListItem>
                                         <ThemedText style={{ opacity: 0.7 }}>
                                             {isArabic() ? "لا نتائج. جرّب UNKNOWN أو GATEWAY_CLEARING أو RB-03 أو EC-126." : "No results. Try UNKNOWN, GATEWAY_CLEARING, RB-03, or EC-126."}
                                         </ThemedText>
-                                    </VListItem>
+                                    </PgListItem>
                                 ) : null}
-                            </VList>
+                            </PgList>
                         </div>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+                    </PgCardText>
+                </PgCard>
+            </PgDialog>
         );
     },
     { props: ["modelValue", "onUpdate:modelValue", "onSelect"] as any },

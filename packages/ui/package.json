@@ -1,0 +1,41 @@
+{
+  "name": "@pg/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Payment Gateway 2026 Fintech Vapor design system (single source of truth for all four portals).",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./tokens": "./src/tokens/index.css",
+    "./tokens/fintech-2026.css": "./src/tokens/fintech-2026.css",
+    "./tokens/layout-policy.css": "./src/tokens/layout-policy.css",
+    "./tokens/components.css": "./src/tokens/components.css",
+    "./testing": "./src/testing/governanceAudit.ts"
+  },
+  "scripts": {
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@mdi/js": "7.4.47",
+    "@vue/runtime-vapor": "3.6.0-rc.16",
+    "decimal.js": "^10.6.0",
+    "vael-ui": "0.5.8",
+    "vue": "3.6.0-rc.16",
+    "vue-i18n": "^11.1.12",
+    "vue-jsx": "3.3.0-rc.7",
+    "vue-router": "5.5.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.11",
+    "@vue/tsconfig": "^0.8.1",
+    "typescript": "~5.9.0",
+    "vite": "npm:rolldown-vite@7.3.1",
+    "vitest": "^5.0.5",
+    "vue-tsc": "3.3.14"
+  }
+}

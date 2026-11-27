@@ -2,27 +2,27 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { type MetricItem } from "@/components/ui/MetricStrip";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions, type RowActionItem } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import { statusTone } from "@/components/Table/statusTone";
-import { inboundEventFilters } from "@/components/Table/registry/ledgerOps";
-import type { TableHeader } from "@/components/Table/types";
+import {PgButton} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {type MetricItem} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions, type RowActionItem} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import {statusTone} from "@pg/ui";
+import { inboundEventFilters } from "@/tables/registry/ledgerOps";
+import type { TableHeader } from "@pg/ui";
 import { JournalEntryDrawer } from "@/components/ledger/JournalEntryDrawer";
 import { LedgerRefLink } from "@/components/ledger/LedgerRefLink";
 import { formatDateTime } from "@/components/ledger/format";
@@ -498,9 +498,9 @@ const TransactionsPage = dc(() => {
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Transactions")} subtitle={t("Every payment attempt and provider callback across all merchants.")} badge={t("Operations")} badgeTone="info">(
-                        <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>
+                        <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>
                             {t("Refresh")}
-                        </VBtn>
+                        </PgButton>
                     )</PageHeader>
                 <SegmentedTabs
                     modelValue={tab.value}

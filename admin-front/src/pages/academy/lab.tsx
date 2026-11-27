@@ -7,8 +7,8 @@ import { LabRunner } from "@/components/academy/lab/LabRunner";
 import type { LabScore } from "@/components/academy/labScoring";
 import { Callout } from "@/components/academy/ui/Callout";
 import { useAcademyProgress } from "@/components/academy/useAcademyProgress";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { PageHeader, type BreadcrumbItem } from "@/components/ui/PageHeader";
+import {EmptyState} from "@pg/ui";
+import {PageHeader, type BreadcrumbItem} from "@pg/ui";
 import { loadLabs, loadMeta, loadModules, type Lab, type Module } from "@/content/academy";
 
 export const AdminAcademyLabPage = defineComponent({
@@ -85,7 +85,7 @@ export const AdminAcademyLabPage = defineComponent({
                     {loading.value ? (
                         <Skeleton rows={3} split />
                     ) : failed.value ? (
-                        <Callout tone="danger" role="alert">
+                        <Callout tone="danger">
                             {t("The Academy content could not be loaded. Reload the page.")}
                         </Callout>
                     ) : !current ? (

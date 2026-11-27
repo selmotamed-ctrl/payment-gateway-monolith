@@ -2,7 +2,7 @@ import { computed, onMounted, ref, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { RouterLink } from "vue-router/experimental/vapor";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
+import {PgButton, PgIcon} from "@pg/ui";
 import { AcademyShell, Skeleton, useAcademyData, userRole } from "@/components/academy/AcademyShell";
 import { BadgeChip } from "@/components/academy/BadgeChip";
 import { ProgressRing } from "@/components/academy/ProgressRing";
@@ -14,11 +14,11 @@ import { ProgressBar } from "@/components/academy/ui/ProgressBar";
 import { trackIcon } from "@/components/academy/ui/trackMeta";
 import { useAcademyProgress } from "@/components/academy/useAcademyProgress";
 import { useEligibility } from "@/components/academy/useEligibility";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { PageHeader } from "@/components/ui/PageHeader";
+import {EmptyState} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
 import { showSnackBar } from "@/utils/snackBar";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {SurfaceCard} from "@pg/ui";
 import { roleTrackFor, type TrackId } from "@/content/academy";
 import type { AcademyBadge } from "@/content/academy/apiTypes";
 
@@ -183,10 +183,10 @@ export const AdminAcademyPage = defineComponent({
                                     </Callout>
                                 )}
                                 <div class="ac-learner-cta">
-                                    <VBtn class="ac-learner-cta__btn" color="primary" variant="flat" size="large" height="auto" to={{ name: s.route.name, params: s.route.params }}>
+                                    <PgButton class="ac-learner-cta__btn" color="primary" variant="flat" size="large" height="auto" to={{ name: s.route.name, params: s.route.params }}>
                                         {label(s.kind, title)}
-                                        <VIcon end class="ac-flip" icon="mdi-arrow-right" size={18} aria-hidden="true" />
-                                    </VBtn>
+                                        <PgIcon end class="ac-flip" icon="mdi-arrow-right" size={18} aria-hidden="true" />
+                                    </PgButton>
                                     {s.kind === "exam" && s.locked && <span class="ac-muted">{t("The exam is locked: see what is missing on the track page.")}</span>}
                                 </div>
                             </div>
@@ -222,9 +222,9 @@ export const AdminAcademyPage = defineComponent({
                                                     {isActive ? (
                                                         <MetaPill color="info">{t("Active")}</MetaPill>
                                                     ) : (
-                                                        <VBtn size="small" variant="outlined" height={32} aria-label={`${t("Make active")}: ${entry.title}`} onClick={() => switchTrack(entry.id)}>
+                                                        <PgButton size="small" variant="outlined" height={32} aria-label={`${t("Make active")}: ${entry.title}`} onClick={() => switchTrack(entry.id)}>
                                                             {t("Make active")}
-                                                        </VBtn>
+                                                        </PgButton>
                                                     )}
                                                 </div>
                                             </li>
@@ -285,7 +285,7 @@ export const AdminAcademyPage = defineComponent({
                                                 <li key={link.name} class="ac-step ac-learner-linkrow">
                                                     <RouterLink class="ac-step__title ac-learner-linkrow__a" to={{ name: link.name }}>
                                                         <span>{link.text}</span>
-                                                        <VIcon class="ac-flip" icon="mdi-chevron-right" size={18} aria-hidden="true" />
+                                                        <PgIcon class="ac-flip" icon="mdi-chevron-right" size={18} aria-hidden="true" />
                                                     </RouterLink>
                                                 </li>
                                             ))}
@@ -301,9 +301,9 @@ export const AdminAcademyPage = defineComponent({
                 <AcademyShell
                     header={() => (
                         <PageHeader title={t("My learning")} subtitle={t("Learn, check, do, prove: one next step at a time.")}>(
-                                <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyLearningSummary()}>
+                                <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyLearningSummary()}>
                                     {t("Copy learning summary")}
-                                </VBtn>
+                                </PgButton>
                             )</PageHeader>
                     )}
                 >

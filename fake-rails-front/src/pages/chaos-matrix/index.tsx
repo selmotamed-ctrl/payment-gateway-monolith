@@ -1,9 +1,9 @@
 import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
-import { VAlert, VCol, VRow } from "@/components/vael/VuetifyShim";
+import {VAlert, PgCol, PgRow} from "@pg/ui";
 import PortalLayout from "@/layouts/portal";
 import RailChaosCard from "@/components/RailChaosCard";
-import { TableRowActions } from "@/components/Table/TableRowActions";
+import {TableRowActions} from "@pg/ui";
 import { api } from "@/utils/api";
 
 interface Descriptor {
@@ -66,9 +66,9 @@ const ChaosMatrixPage = dc(() => {
         />
         {message.value ? <VAlert type="success" variant="tonal" density="compact">{message.value}</VAlert> : null}
       </div>
-      <VRow>
+      <PgRow>
         {rails.value.map((rail) => (
-          <VCol key={rail.railCode} cols={12} md={6} lg={4}>
+          <PgCol key={rail.railCode} cols={12} md={6} lg={4}>
             {scenarios.value[rail.railCode]
               ? (
                 <RailChaosCard
@@ -80,9 +80,9 @@ const ChaosMatrixPage = dc(() => {
                 />
               )
               : null}
-          </VCol>
+          </PgCol>
         ))}
-      </VRow>
+      </PgRow>
     </PortalLayout>
   );
 });

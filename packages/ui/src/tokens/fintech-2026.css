@@ -1,0 +1,271 @@
+/* ============================================================================
+ * @pg/ui — 2026 Fintech Design System tokens ("Calm Precision")
+ *
+ * Inspired by Mercury (breathable whitespace), Stripe (tabular financial
+ * clarity) and Linear (crisp 1px hairlines, refined neutral focus rings).
+ *
+ * Never hardcode a colour in application TSX. Use these semantic tokens.
+ * ========================================================================== */
+
+:root {
+  /* === Surfaces (calm layered hierarchy) === */
+  --pg-bg-canvas: #f7f8fa;
+  --pg-bg-surface: #ffffff;
+  --pg-bg-surface-subtle: #f3f4f6;
+  --pg-bg-surface-hover: #f9fafb;
+  --pg-bg-surface-active: #f1f5f9;
+  --pg-bg-elevated: #ffffff;
+  --pg-bg-overlay: rgba(15, 23, 42, 0.48);
+  --pg-bg-glass: rgba(255, 255, 255, 0.88);
+
+  /* === Ink (WCAG AA+ contrast) === */
+  --pg-ink-primary: #0f172a;
+  --pg-ink-secondary: #475569;
+  --pg-ink-muted: #64748b;
+  --pg-ink-faint: #94a3b8;
+  --pg-ink-on-accent: #ffffff;
+
+  /* === Hairline borders & neutral focus (NO blue glow) === */
+  --pg-border-subtle: #e5e7eb;
+  --pg-border-default: #d1d5db;
+  --pg-border-strong: #9ca3af;
+  --pg-border-focus: #0f172a;
+  --pg-focus-ring: 0 0 0 3px rgba(15, 23, 42, 0.08);
+  --pg-focus-ring-danger: 0 0 0 3px rgba(220, 38, 38, 0.14);
+
+  /* === Brand & primary action accents === */
+  --pg-accent-primary: #0f172a;
+  --pg-accent-primary-hover: #1e293b;
+  --pg-accent-brand: #4f46e5;
+  --pg-accent-brand-hover: #4338ca;
+  --pg-accent-brand-soft: rgba(79, 70, 229, 0.08);
+  /* Backwards-compatible aliases used by older page styles. */
+  --pg-accent-interactive: var(--pg-accent-brand);
+  --pg-accent-interactive-soft: var(--pg-accent-brand-soft);
+
+  /* === Unified semantic status tokens === */
+  --pg-status-success-bg: #f0fdf4;
+  --pg-status-success-text: #166534;
+  --pg-status-success-border: #bbf7d0;
+  --pg-status-success-dot: #16a34a;
+
+  --pg-status-warning-bg: #fffbeb;
+  --pg-status-warning-text: #92400e;
+  --pg-status-warning-border: #fde68a;
+  --pg-status-warning-dot: #d97706;
+
+  --pg-status-danger-bg: #fef2f2;
+  --pg-status-danger-text: #991b1b;
+  --pg-status-danger-border: #fecaca;
+  --pg-status-danger-dot: #dc2626;
+
+  --pg-status-info-bg: #eff6ff;
+  --pg-status-info-text: #1e40af;
+  --pg-status-info-border: #bfdbfe;
+  --pg-status-info-dot: #2563eb;
+
+  --pg-status-neutral-bg: #f3f4f6;
+  --pg-status-neutral-text: #374151;
+  --pg-status-neutral-border: #e5e7eb;
+  --pg-status-neutral-dot: #6b7280;
+
+  /* === Radii === */
+  --pg-radius-xs: 6px;
+  --pg-radius-sm: 8px;
+  --pg-radius-md: 12px;
+  --pg-radius-lg: 16px;
+  --pg-radius-pill: 9999px;
+
+  /* === Shadows (soft, layered, zero harshness) === */
+  --pg-shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --pg-shadow-sm: 0 2px 6px -1px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.03);
+  --pg-shadow-popover: 0 12px 32px -8px rgba(15, 23, 42, 0.16), 0 4px 12px -4px rgba(15, 23, 42, 0.08);
+  --pg-shadow-modal: 0 24px 48px -12px rgba(15, 23, 42, 0.22), 0 8px 20px -8px rgba(15, 23, 42, 0.10);
+
+  /* === Spacious 2026 layout & container spacing policy === */
+  --pg-space-page-desktop: 28px 36px 56px 36px;
+  --pg-space-page-mobile: 20px 16px 40px 16px;
+  --pg-space-section: 28px;
+  --pg-space-card-pad: 24px;
+  --pg-space-card-header: 18px 24px;
+  --pg-space-card-footer: 14px 24px;
+  --pg-space-dialog-header: 20px 24px;
+  --pg-space-dialog-body: 24px;
+  --pg-space-dialog-footer: 16px 24px;
+  --pg-space-form-gap: 20px;
+  --pg-space-inline-gap: 12px;
+  --pg-control-h-sm: 36px;
+  --pg-control-h-md: 40px;
+  --pg-control-h-lg: 44px;
+
+  /* Compatibility: legacy padding tokens now follow the 2026 policy. */
+  --pg-pad-screen-desktop: var(--pg-space-page-desktop);
+  --pg-pad-screen-mobile: var(--pg-space-page-mobile);
+  --pg-pad-card-header: var(--pg-space-card-header);
+  --pg-pad-card-body: var(--pg-space-card-pad);
+  --pg-pad-card-footer: var(--pg-space-card-footer);
+  --pg-pad-table-toolbar: 14px 20px;
+  --pg-pad-table-filters: 16px 20px;
+  --pg-pad-table-chips: 8px 20px;
+  --pg-pad-table-footer: 12px 20px;
+
+  /* === Typography === */
+  --pg-font-sans-ltr: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --pg-font-sans-rtl: "Cairo", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --pg-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* === Z-index scale === */
+  --pg-z-sticky: 20;
+  --pg-z-header: 30;
+  --pg-z-drawer: 40;
+  --pg-z-modal: 1000;
+  --pg-z-popover: 1200;
+  --pg-z-tooltip: 1300;
+  --pg-z-toast: 1500;
+
+  --pg-shadow-menu: var(--pg-shadow-popover);
+
+  /* vael-ui bridge: our components inherit the 2026 palette. */
+  --ui-surface: var(--pg-bg-surface);
+  --ui-muted: var(--pg-bg-surface-subtle);
+  --ui-muted-hover: var(--pg-bg-surface-hover);
+  --ui-text: var(--pg-ink-primary);
+  --ui-text-muted: var(--pg-ink-muted);
+  --ui-border: var(--pg-border-subtle);
+  --ui-border-strong: var(--pg-border-default);
+  --ui-primary: var(--pg-accent-primary);
+  --ui-primary-hover: var(--pg-accent-primary-hover);
+  --ui-info: var(--pg-status-info-dot);
+  --ui-danger: var(--pg-status-danger-dot);
+  --ui-success: var(--pg-status-success-dot);
+  --ui-warning: var(--pg-status-warning-dot);
+  --ui-radius: var(--pg-radius-sm);
+  --ui-radius-surface: var(--pg-radius-md);
+  --ui-panel-shadow: var(--pg-shadow-popover);
+  --ui-overlay: var(--pg-bg-overlay);
+
+  /* Vuetify-style RGB triplets kept for legacy selectors. */
+  --v-theme-primary: 15 23 42;
+  --v-theme-on-primary: 255 255 255;
+  --v-theme-secondary: 79 70 229;
+  --v-theme-background: 247 248 250;
+  --v-theme-surface: 255 255 255;
+  --v-theme-on-surface: 15 23 42;
+  --v-theme-on-background: 15 23 42;
+  --v-theme-error: 220 38 38;
+  --v-theme-success: 22 163 74;
+  --v-theme-warning: 217 119 6;
+  --v-theme-info: 37 99 235;
+}
+
+[data-theme="dark"],
+.v-theme--dark {
+  --pg-bg-canvas: #09090b;
+  --pg-bg-surface: #111114;
+  --pg-bg-surface-subtle: #18181d;
+  --pg-bg-surface-hover: #1e1e24;
+  --pg-bg-surface-active: #27272f;
+  --pg-bg-elevated: #16161b;
+  --pg-bg-overlay: rgba(0, 0, 0, 0.72);
+  --pg-bg-glass: rgba(17, 17, 20, 0.88);
+
+  --pg-ink-primary: #f4f4f5;
+  --pg-ink-secondary: #a1a1aa;
+  --pg-ink-muted: #71717a;
+  --pg-ink-faint: #52525b;
+  --pg-ink-on-accent: #09090b;
+
+  --pg-border-subtle: #242429;
+  --pg-border-default: #32323a;
+  --pg-border-strong: #464652;
+  --pg-border-focus: #e4e4e7;
+  --pg-focus-ring: 0 0 0 3px rgba(244, 244, 245, 0.12);
+  --pg-focus-ring-danger: 0 0 0 3px rgba(248, 113, 113, 0.18);
+
+  --pg-accent-primary: #f4f4f5;
+  --pg-accent-primary-hover: #ffffff;
+  --pg-accent-brand: #6366f1;
+  --pg-accent-brand-hover: #818cf8;
+  --pg-accent-brand-soft: rgba(99, 102, 241, 0.16);
+  --pg-accent-interactive: var(--pg-accent-brand);
+  --pg-accent-interactive-soft: var(--pg-accent-brand-soft);
+
+  --pg-status-success-bg: rgba(22, 163, 74, 0.14);
+  --pg-status-success-text: #4ade80;
+  --pg-status-success-border: rgba(74, 222, 128, 0.28);
+  --pg-status-success-dot: #22c55e;
+
+  --pg-status-warning-bg: rgba(217, 119, 6, 0.14);
+  --pg-status-warning-text: #fbbf24;
+  --pg-status-warning-border: rgba(251, 191, 36, 0.28);
+  --pg-status-warning-dot: #f59e0b;
+
+  --pg-status-danger-bg: rgba(220, 38, 38, 0.14);
+  --pg-status-danger-text: #f87171;
+  --pg-status-danger-border: rgba(248, 113, 113, 0.28);
+  --pg-status-danger-dot: #ef4444;
+
+  --pg-status-info-bg: rgba(37, 99, 235, 0.16);
+  --pg-status-info-text: #60a5fa;
+  --pg-status-info-border: rgba(96, 165, 250, 0.28);
+  --pg-status-info-dot: #3b82f6;
+
+  --pg-status-neutral-bg: rgba(161, 161, 170, 0.10);
+  --pg-status-neutral-text: #d4d4d8;
+  --pg-status-neutral-border: #2e2e36;
+  --pg-status-neutral-dot: #a1a1aa;
+
+  --pg-shadow-popover: 0 18px 40px -10px rgba(0, 0, 0, 0.72), 0 4px 12px rgba(0, 0, 0, 0.45);
+  --pg-shadow-modal: 0 28px 64px -12px rgba(0, 0, 0, 0.80);
+  --pg-shadow-menu: var(--pg-shadow-popover);
+
+  --ui-overlay: var(--pg-bg-overlay);
+
+  --v-theme-primary: 244 244 245;
+  --v-theme-on-primary: 9 9 11;
+  --v-theme-secondary: 129 140 248;
+  --v-theme-background: 9 9 11;
+  --v-theme-surface: 17 17 20;
+  --v-theme-on-surface: 244 244 245;
+  --v-theme-on-background: 244 244 245;
+  --v-theme-error: 248 113 113;
+  --v-theme-success: 74 222 128;
+  --v-theme-warning: 251 191 36;
+  --v-theme-info: 96 165 250;
+}
+
+/* === Base canvas & typography === */
+html,
+body,
+#app {
+  background-color: var(--pg-bg-canvas);
+  color: var(--pg-ink-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html[dir="ltr"] body,
+html[dir="ltr"] .v-application {
+  font-family: var(--pg-font-sans-ltr);
+  letter-spacing: -0.005em;
+  /* Plus Jakarta Sans has a wide word space; this brings it in line with Inter. */
+  word-spacing: 0.07em;
+}
+
+html[dir="rtl"] body {
+  font-family: var(--pg-font-sans-rtl);
+  letter-spacing: 0;
+  line-height: 1.65;
+}
+
+.pg-tabular,
+.pg-money,
+.pg-metric-value,
+.pg-table td.pg-tabular {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* Native controls must never inherit the OS blue focus glow. */
+:where(input, textarea, select, button):focus-visible {
+  outline: none;
+}

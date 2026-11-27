@@ -1,22 +1,25 @@
 import { safePreviewMime } from "@/utils/safeBlob";
 import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
+import { createIf } from "@vue/runtime-vapor";
+
+const branch = createIf as any;
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn, VCheckbox, VSelect, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
+import {VAlert, PgButton, PgCheckbox, PgAutocomplete, PgFileUpload, PgTextField, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities, user } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { useSafeguard } from "@/components/guide/useSafeguard";
-import { statusTone } from "@/components/Table/statusTone";
+import {statusTone} from "@pg/ui";
 import {
     COLUMN_HELP,
     DOCUMENT_TYPES,
@@ -37,14 +40,14 @@ import type {
     KybDocument,
 } from "./types";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { DescriptionList, type DescriptionItem } from "@/components/ui/DescriptionList";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
-import { EmptyState } from "@/components/ui/EmptyState";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {DescriptionList, type DescriptionItem} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
 import { describeAuditChange } from "@/utils/auditSummary";
 const parse = (payload: unknown): JoinRequestDetail => {
     const source = (payload ?? {}) as Record<string, unknown>;
@@ -167,7 +170,7 @@ const JoinRequestDetailPage = dc(() => {
     const ownerForm = ref<OwnerForm>(emptyOwner());
     const editingOwnerId = ref<string | null>(null);
 
-    const docFileInput = ref<HTMLInputElement | null>(null);
+    const docFile = ref<File | null>(null);
     const docType = ref("COMMERCIAL_REGISTRY");
     const docExpiresOn = ref("");
     const uploadOpen = ref(false);
@@ -536,7 +539,7 @@ const JoinRequestDetailPage = dc(() => {
     };
 
     const uploadDocument = () => {
-        const file = docFileInput.value?.files?.[0];
+        const file = docFile.value;
         if (!file) {
             showSnackBar({ type: "warning", message: t("Choose a PDF, PNG or JPEG document") });
             return;
@@ -549,7 +552,7 @@ const JoinRequestDetailPage = dc(() => {
             await api.post(urlsMap.joinRequestDocuments(requestId.value), form);
             uploadOpen.value = false;
             docExpiresOn.value = "";
-            if (docFileInput.value) docFileInput.value.value = "";
+            docFile.value = null;
         }, t("Document uploaded and scanned"));
     };
 
@@ -631,7 +634,7 @@ const JoinRequestDetailPage = dc(() => {
 
     const sections = computed(() => {
         if (!detail.value) return [];
-        const entry = detail.value;
+        const entry = detail.value!;
         return [
             {
                 title: t("Business"),
@@ -692,36 +695,38 @@ const JoinRequestDetailPage = dc(() => {
         }`;
 
     return () => {
-        if (loading.value) {
-            return (
+        const entry = detail.value!;
+        return branch(
+            () => loading.value,
+            () => (
                 <ScreenContainer>
                     <StateView loading onRetry={() => void load()} />
                 </ScreenContainer>
-            );
-        }
-        if (error.value || !detail.value) {
-            return (
-                <ScreenContainer>
-                    <StateView error={error.value ?? "Join request not found"} onRetry={() => void load()} />
-                </ScreenContainer>
-            );
-        }
-        const entry = detail.value;
+            ),
+            () =>
+                branch(
+                    () => Boolean(error.value || !entry),
+                    () => (
+                        <ScreenContainer>
+                            <StateView error={error.value ?? "Join request not found"} onRetry={() => void load()} />
+                        </ScreenContainer>
+                    ),
+                    () => (() => {
         return (
             <ScreenContainer>
                 <ThemedView style={{ gap: "18px" }}>
                     <PageHeader title={merchant.value?.tradeName || t("Join request")} subtitle={t("Inspect merchant and owner evidence, keep the review checklist current, and record a defensible decision.")} badge={entry.fourEyesRequired ? t("Four eyes") : t("KYB review")} badgeTone={entry.fourEyesRequired ? "warning" : "info"}>(
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                                <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "JoinRequests" })}>
+                                <PgButton variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "JoinRequests" })}>
                                     {t("Queue")}
-                                </VBtn>
-                                <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
+                                </PgButton>
+                                <PgButton variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
                                     {t("Refresh")}
-                                </VBtn>
+                                </PgButton>
                                 {isEditable.value && (
-                                    <VBtn color="primary" prependIcon="mdi-pencil-outline" onClick={openProfileEdit}>
+                                    <PgButton color="primary" prependIcon="mdi-pencil-outline" onClick={openProfileEdit}>
                                         {t("Edit profile")}
-                                    </VBtn>
+                                    </PgButton>
                                 )}
                             </ThemedView>
                         )</PageHeader>
@@ -782,15 +787,15 @@ const JoinRequestDetailPage = dc(() => {
                                 {canCheck.value ? (
                                     <ThemedView style={{ gap: "10px" }}>
                                         <FormField label={t("Checker notes or rejection reason")}>
-                                            <VTextField v-model={checkerNotes.value} />
+                                            <PgTextField v-model={checkerNotes.value} />
                                         </FormField>
                                         <ThemedView style={{ flexDirection: "row", gap: "10px" }}>
-                                            <VBtn color="success" loading={actionLoading.value} onClick={() => void checkerDecision(true)}>
+                                            <PgButton color="success" loading={actionLoading.value} onClick={() => void checkerDecision(true)}>
                                                 {t("Approve and execute")}
-                                            </VBtn>
-                                            <VBtn color="error" variant="tonal" loading={actionLoading.value} onClick={() => void checkerDecision(false)}>
+                                            </PgButton>
+                                            <PgButton color="error" variant="tonal" loading={actionLoading.value} onClick={() => void checkerDecision(false)}>
                                                 {t("Reject approval")}
-                                            </VBtn>
+                                            </PgButton>
                                         </ThemedView>
                                     </ThemedView>
                                 ) : (
@@ -911,9 +916,9 @@ const JoinRequestDetailPage = dc(() => {
                                     <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{COLUMN_HELP.screening}</ThemedText>
                                 </ThemedView>
                                 {canWrite.value && ["SUBMITTED", "IN_REVIEW", "INFO_REQUESTED"].includes(entry.status) && (
-                                    <VBtn size="small" variant="tonal" prependIcon="mdi-radar" loading={actionLoading.value} onClick={retryScreening}>
+                                    <PgButton size="small" variant="tonal" prependIcon="mdi-radar" loading={actionLoading.value} onClick={retryScreening}>
                                         {t("Retry screening")}
-                                    </VBtn>
+                                    </PgButton>
                                 )}
                             </ThemedView>
                             {!entry.screening ? (
@@ -967,9 +972,9 @@ const JoinRequestDetailPage = dc(() => {
                                     </ThemedText>
                                 </ThemedView>
                                 {canWrite.value && !isFinal.value && (
-                                    <VBtn size="small" variant="tonal" prependIcon="mdi-account-plus-outline" onClick={() => openOwner()}>
+                                    <PgButton size="small" variant="tonal" prependIcon="mdi-account-plus-outline" onClick={() => openOwner()}>
                                         {t("Add owner")}
-                                    </VBtn>
+                                    </PgButton>
                                 )}
                             </ThemedView>
                             {activeOwners.value.length === 0 && (
@@ -990,8 +995,8 @@ const JoinRequestDetailPage = dc(() => {
                                                 {owner.pepDeclared && <StatusBadge status="PEP" label="PEP" toneOverride="danger" />}
                                                 {canWrite.value && !isFinal.value && (
                                                     <>
-                                                        <VBtn size="x-small" variant="text" onClick={() => openOwner(owner)}>{t("Edit")}</VBtn>
-                                                        <VBtn size="x-small" variant="text" color="error" onClick={() => removeOwner(owner)}>{t("Remove")}</VBtn>
+                                                        <PgButton size="x-small" variant="text" onClick={() => openOwner(owner)}>{t("Edit")}</PgButton>
+                                                        <PgButton size="x-small" variant="text" color="error" onClick={() => removeOwner(owner)}>{t("Remove")}</PgButton>
                                                     </>
                                                 )}
                                             </ThemedView>
@@ -1018,9 +1023,9 @@ const JoinRequestDetailPage = dc(() => {
                                     <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{COLUMN_HELP.documents}</ThemedText>
                                 </ThemedView>
                                 {canWrite.value && isEditable.value && (
-                                    <VBtn size="small" variant="tonal" prependIcon="mdi-upload" onClick={() => (uploadOpen.value = true)}>
+                                    <PgButton size="small" variant="tonal" prependIcon="mdi-upload" onClick={() => (uploadOpen.value = true)}>
                                         {t("Upload document")}
-                                    </VBtn>
+                                    </PgButton>
                                 )}
                             </ThemedView>
                             <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
@@ -1059,27 +1064,27 @@ const JoinRequestDetailPage = dc(() => {
                                         {document.reviewNotes && <ThemedText style={{ fontSize: "12px" }}>{document.reviewNotes}</ThemedText>}
                                         <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                                             {document.avStatus === "CLEAN" && (
-                                                <VBtn size="x-small" variant="text" prependIcon="mdi-eye-outline" onClick={() => void previewDocument(document)}>
+                                                <PgButton size="x-small" variant="text" prependIcon="mdi-eye-outline" onClick={() => void previewDocument(document)}>
                                                     {t("Preview")}
-                                                </VBtn>
+                                                </PgButton>
                                             )}
                                             {canWrite.value && canReviewDocument(document) && (
-                                                <VBtn size="x-small" variant="text" prependIcon="mdi-file-check-outline" onClick={() => openReview(document)}>
+                                                <PgButton size="x-small" variant="text" prependIcon="mdi-file-check-outline" onClick={() => openReview(document)}>
                                                     {t("Review")}
-                                                </VBtn>
+                                                </PgButton>
                                             )}
-                                            <VBtn
+                                            <PgButton
                                                 size="x-small"
                                                 variant="text"
                                                 prependIcon="mdi-file-search-outline"
                                                 onClick={() => openKybDocument(document)}
                                             >
                                                 {t("KYB details")}
-                                            </VBtn>
+                                            </PgButton>
                                             {canWrite.value && isEditable.value && (
-                                                <VBtn size="x-small" variant="text" color="error" onClick={() => removeDocument(document)}>
+                                                <PgButton size="x-small" variant="text" color="error" onClick={() => removeDocument(document)}>
                                                     {t("Delete")}
-                                                </VBtn>
+                                                </PgButton>
                                             )}
                                         </ThemedView>
                                     </SurfaceCardText>
@@ -1099,13 +1104,13 @@ const JoinRequestDetailPage = dc(() => {
                                         </ThemedText>
                                     </ThemedView>
                                     {canChecklist.value && (
-                                        <VBtn size="small" color="primary" loading={actionLoading.value} disabled={!checklistComplete.value} onClick={saveChecklist}>
+                                        <PgButton size="small" color="primary" loading={actionLoading.value} disabled={!checklistComplete.value} onClick={saveChecklist}>
                                             {t("Save checklist")}
-                                        </VBtn>
+                                        </PgButton>
                                     )}
                                 </ThemedView>
                                 {(entry.checklistKeys ?? []).map((key) => (
-                                    <VCheckbox
+                                    <PgCheckbox
                                         key={key}
                                         label={t(key)}
                                         modelValue={Boolean(checklist.value[key])}
@@ -1125,34 +1130,34 @@ const JoinRequestDetailPage = dc(() => {
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Actions")}</ThemedText>
                                 <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
                                     {canAssign.value && (
-                                        <VBtn variant="tonal" prependIcon="mdi-account-check-outline" loading={actionLoading.value} onClick={assignToMe}>
+                                        <PgButton variant="tonal" prependIcon="mdi-account-check-outline" loading={actionLoading.value} onClick={assignToMe}>
                                             {t("Assign to me")}
-                                        </VBtn>
+                                        </PgButton>
                                     )}
                                     {canSubmit.value && (
-                                        <VBtn variant="tonal" color="primary" prependIcon="mdi-send-check-outline" loading={actionLoading.value} onClick={submit}>
+                                        <PgButton variant="tonal" color="primary" prependIcon="mdi-send-check-outline" loading={actionLoading.value} onClick={submit}>
                                             {t("Submit for review")}
-                                        </VBtn>
+                                        </PgButton>
                                     )}
                                     {canRequestInfo.value && (
-                                        <VBtn variant="tonal" color="warning" prependIcon="mdi-message-alert-outline" onClick={() => (infoOpen.value = true)}>
+                                        <PgButton variant="tonal" color="warning" prependIcon="mdi-message-alert-outline" onClick={() => (infoOpen.value = true)}>
                                             {t("Request information")}
-                                        </VBtn>
+                                        </PgButton>
                                     )}
                                     {canDecide.value && (
                                         <>
-                                            <VBtn color="success" prependIcon="mdi-check-decagram-outline" disabled={!readiness.value?.ready} onClick={() => { decision.value = "APPROVED"; decisionOpen.value = true; }}>
+                                            <PgButton color="success" prependIcon="mdi-check-decagram-outline" disabled={!readiness.value?.ready} onClick={() => { decision.value = "APPROVED"; decisionOpen.value = true; }}>
                                                 {t("Approve")}
-                                            </VBtn>
-                                            <VBtn color="error" variant="tonal" prependIcon="mdi-close-octagon-outline" onClick={() => { decision.value = "REJECTED"; decisionOpen.value = true; }}>
+                                            </PgButton>
+                                            <PgButton color="error" variant="tonal" prependIcon="mdi-close-octagon-outline" onClick={() => { decision.value = "REJECTED"; decisionOpen.value = true; }}>
                                                 {t("Reject")}
-                                            </VBtn>
+                                            </PgButton>
                                         </>
                                     )}
                                     {canWithdraw.value && (
-                                        <VBtn variant="text" color="error" onClick={() => { withdrawReason.value = ""; withdrawChecklist.value = {}; withdrawOpen.value = true; }}>
+                                        <PgButton variant="text" color="error" onClick={() => { withdrawReason.value = ""; withdrawChecklist.value = {}; withdrawOpen.value = true; }}>
                                             {t("Withdraw")}
-                                        </VBtn>
+                                        </PgButton>
                                     )}
                                 </ThemedView>
                                 {detail.value?.onboardingChannel === "ADMIN_ASSISTED" && detail.value?.submittedBy?.id === currentUserId.value && (
@@ -1177,50 +1182,50 @@ const JoinRequestDetailPage = dc(() => {
                 >
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "12px" }}>
                         <FormField label={t("Legal name")}>
-                            <VTextField v-model={profileForm.value.legalName} />
+                            <PgTextField v-model={profileForm.value.legalName} />
                         </FormField>
                         <FormField label={t("Trade name")}>
-                            <VTextField v-model={profileForm.value.tradeName} />
+                            <PgTextField v-model={profileForm.value.tradeName} />
                         </FormField>
                         <FormField label={t("Country code")}>
-                            <VTextField v-model={profileForm.value.country} />
+                            <PgTextField v-model={profileForm.value.country} />
                         </FormField>
                         <FormField label={t("Business category")}>
-                            <VTextField v-model={profileForm.value.businessCategory} />
+                            <PgTextField v-model={profileForm.value.businessCategory} />
                         </FormField>
                         <FormField label={t("Registration number")}>
-                            <VTextField v-model={profileForm.value.registrationNumber} />
+                            <PgTextField v-model={profileForm.value.registrationNumber} />
                         </FormField>
                         <FormField label={t("Tax ID")}>
-                            <VTextField v-model={profileForm.value.taxId} />
+                            <PgTextField v-model={profileForm.value.taxId} />
                         </FormField>
                         <FormField label={t("Contact phone")}>
-                            <VTextField v-model={profileForm.value.contactPhone} />
+                            <PgTextField v-model={profileForm.value.contactPhone} />
                         </FormField>
                         <FormField label={t("Contact email")}>
-                            <VTextField v-model={profileForm.value.contactEmail} />
+                            <PgTextField v-model={profileForm.value.contactEmail} />
                         </FormField>
                         <FormField label={t("Expected monthly volume")}>
-                            <VTextField v-model={profileForm.value.expectedMonthlyVolume} />
+                            <PgTextField v-model={profileForm.value.expectedMonthlyVolume} />
                         </FormField>
                         <FormField label={t("Currency")}>
-                            <VTextField v-model={profileForm.value.currency} />
+                            <PgTextField v-model={profileForm.value.currency} />
                         </FormField>
                         <FormField label={t("Website URL")}>
-                            <VTextField v-model={profileForm.value.websiteUrl} />
+                            <PgTextField v-model={profileForm.value.websiteUrl} />
                         </FormField>
                         <FormField label={t("Payout bank")}>
-                            <VTextField v-model={profileForm.value.payoutBankName} />
+                            <PgTextField v-model={profileForm.value.payoutBankName} />
                         </FormField>
                         <FormField label={t("Payout account / IBAN")}>
-                            <VTextField v-model={profileForm.value.payoutAccount} />
+                            <PgTextField v-model={profileForm.value.payoutAccount} />
                         </FormField>
                     </div>
                     <FormField label={t("Registered address")}>
-                        <VTextField v-model={profileForm.value.registeredAddress} />
+                        <PgTextField v-model={profileForm.value.registeredAddress} />
                     </FormField>
                     <FormField label={t("Business use description")}>
-                        <VTextarea v-model={profileForm.value.businessUseDescription} rows={3} autoGrow />
+                        <PgTextarea v-model={profileForm.value.businessUseDescription} rows={3} autoGrow />
                     </FormField>
                 </FormModal>
 
@@ -1239,31 +1244,31 @@ const JoinRequestDetailPage = dc(() => {
                     </VAlert>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
                         <FormField label={t("Full name (Arabic)")} required>
-                            <VTextField v-model={ownerForm.value.fullName} />
+                            <PgTextField v-model={ownerForm.value.fullName} />
                         </FormField>
                         <FormField label={t("Full name (English)")}>
-                            <VTextField v-model={ownerForm.value.fullNameEn} />
+                            <PgTextField v-model={ownerForm.value.fullNameEn} />
                         </FormField>
                         <FormField label={t("Identity type")}>
-                            <VSelect v-model={ownerForm.value.identityType} items={["NATIONAL_ID", "PASSPORT"]} />
+                            <PgAutocomplete v-model={ownerForm.value.identityType} items={["NATIONAL_ID", "PASSPORT"]} />
                         </FormField>
                         <FormField label={editingOwnerId.value ? t("New identity number (optional)") : t("Identity number")} required={!editingOwnerId.value}>
-                            <VTextField v-model={ownerForm.value.identityNumber} />
+                            <PgTextField v-model={ownerForm.value.identityNumber} />
                         </FormField>
                         <FormField label={t("Nationality")}>
-                            <VTextField v-model={ownerForm.value.nationality} />
+                            <PgTextField v-model={ownerForm.value.nationality} />
                         </FormField>
                         <FormField label={t("Date of birth (YYYY-MM-DD)")}>
-                            <VTextField v-model={ownerForm.value.dateOfBirth} />
+                            <PgTextField v-model={ownerForm.value.dateOfBirth} />
                         </FormField>
                         <FormField label={t("Ownership percent")}>
-                            <VTextField v-model={ownerForm.value.ownershipPercent} />
+                            <PgTextField v-model={ownerForm.value.ownershipPercent} />
                         </FormField>
                         <FormField label={t("Role")}>
-                            <VSelect v-model={ownerForm.value.role} items={["OWNER", "DIRECTOR", "SIGNATORY", "CONTROLLER"]} />
+                            <PgAutocomplete v-model={ownerForm.value.role} items={["OWNER", "DIRECTOR", "SIGNATORY", "CONTROLLER"]} />
                         </FormField>
                     </div>
-                    <VCheckbox v-model={ownerForm.value.pepDeclared} label={t("Declared PEP")} density="compact" hideDetails />
+                    <PgCheckbox v-model={ownerForm.value.pepDeclared} label={t("Declared PEP")} density="compact" hideDetails />
                 </FormModal>
 
                 <FormModal
@@ -1277,17 +1282,17 @@ const JoinRequestDetailPage = dc(() => {
                     loading={actionLoading.value}
                 >
                     <FormField label={t("Document type")} required>
-                        <VSelect v-model={docType.value} items={DOCUMENT_TYPES} />
+                        <PgAutocomplete v-model={docType.value} items={DOCUMENT_TYPES} />
                     </FormField>
                     <FormField label={t("Expiry date (YYYY-MM-DD, optional)")}>
-                        <VTextField v-model={docExpiresOn.value} />
+                        <PgTextField v-model={docExpiresOn.value} />
                     </FormField>
                     <FormField
                         label={t("KYB document file")}
                         hint={t("PDF, PNG or JPEG up to 10 MiB. The file is magic-byte checked, malware scanned and encrypted before storage.")}
                         required
                     >
-                        <input ref={docFileInput} type="file" accept="application/pdf,image/png,image/jpeg" />
+                        <PgFileUpload modelValue={docFile.value} onUpdate:modelValue={(value: File | File[] | null) => (docFile.value = Array.isArray(value) ? (value[0] ?? null) : value)} accept="application/pdf,image/png,image/jpeg" multiple={false} hideDetails />
                     </FormField>
                 </FormModal>
 
@@ -1304,13 +1309,13 @@ const JoinRequestDetailPage = dc(() => {
                 >
                     <ThemedText style={{ fontSize: "13px" }}>{reviewTarget.value?.docType} · {reviewTarget.value?.originalFileName}</ThemedText>
                     <FormField label={t("Decision")}>
-                        <VSelect v-model={reviewDecision.value} items={[{ title: "Accept", value: "ACCEPTED" }, { title: "Reject", value: "REJECTED" }]} />
+                        <PgAutocomplete v-model={reviewDecision.value} items={[{ title: "Accept", value: "ACCEPTED" }, { title: "Reject", value: "REJECTED" }]} />
                     </FormField>
                     <FormField label={t("Expiry date (YYYY-MM-DD, optional)")}>
-                        <VTextField v-model={reviewExpiresOn.value} />
+                        <PgTextField v-model={reviewExpiresOn.value} />
                     </FormField>
                     <FormField label={t("Review notes")}>
-                        <VTextarea v-model={reviewNotes.value} rows={3} autoGrow />
+                        <PgTextarea v-model={reviewNotes.value} rows={3} autoGrow />
                     </FormField>
                 </FormModal>
 
@@ -1325,14 +1330,14 @@ const JoinRequestDetailPage = dc(() => {
                     loading={actionLoading.value}
                 >
                     <FormField label={t("Requested items (comma separated)")} required>
-                        <VTextField v-model={infoItems.value} />
+                        <PgTextField v-model={infoItems.value} />
                     </FormField>
                     <FormField
                         label={t("Message")}
                         hint={t("The onboarding SLA is paused while the request is in INFO_REQUESTED.")}
                         required
                     >
-                        <VTextarea v-model={infoMessage.value} rows={4} autoGrow />
+                        <PgTextarea v-model={infoMessage.value} rows={4} autoGrow />
                     </FormField>
                 </FormModal>
 
@@ -1352,16 +1357,16 @@ const JoinRequestDetailPage = dc(() => {
                     )}
                     {decision.value === "APPROVED" && (
                         <FormField label={t("Activation risk tier")}>
-                            <VSelect v-model={decisionRiskTier.value} items={["LOW", "STANDARD", "HIGH"]} />
+                            <PgAutocomplete v-model={decisionRiskTier.value} items={["LOW", "STANDARD", "HIGH"]} />
                         </FormField>
                     )}
                     {decision.value === "REJECTED" && (
                         <FormField label={t("Reason code")} required>
-                            <VSelect v-model={decisionReason.value} items={REJECTION_REASONS} />
+                            <PgAutocomplete v-model={decisionReason.value} items={REJECTION_REASONS} />
                         </FormField>
                     )}
                     <FormField label={t("Decision notes")} required={decision.value === "REJECTED"}>
-                        <VTextarea v-model={decisionNotes.value} rows={4} autoGrow />
+                        <PgTextarea v-model={decisionNotes.value} rows={4} autoGrow />
                     </FormField>
                 </FormModal>
 
@@ -1378,7 +1383,7 @@ const JoinRequestDetailPage = dc(() => {
                 >
                     <ThemedText>{t("The request will be closed as withdrawn. A pending checker approval is cancelled.")}</ThemedText>
                     <FormField label={t("Withdrawal reason")} required>
-                        <VTextarea modelValue={withdrawReason.value} onUpdate:modelValue={(value: string) => (withdrawReason.value = value)} rows={3} autoGrow />
+                        <PgTextarea modelValue={withdrawReason.value} onUpdate:modelValue={(value: string) => (withdrawReason.value = value)} rows={3} autoGrow />
                     </FormField>
                     <FormChecklist
                         checks={[...WITHDRAW_CHECKS]}
@@ -1392,6 +1397,7 @@ const JoinRequestDetailPage = dc(() => {
                 </FormModal>
             </ScreenContainer>
         );
+        })()));
     };
 });
 

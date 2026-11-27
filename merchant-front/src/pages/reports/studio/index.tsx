@@ -2,13 +2,13 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import { VAlert, VBtn, VBtnToggle, VFileInput, VSwitch, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { ThemedView } from "@/components/ThemedView";
-import { DataTable } from "@/components/Table/DataTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { MetaPill, MonoRef, PageHeader, StatusBadge, SurfaceCard } from "@/components/ui";
+import {VAlert, PgButton, PgBtnToggle, PgFileUpload, PgSwitch, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {MetaPill, MonoRef, PageHeader, StatusBadge, SurfaceCard} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -357,12 +357,12 @@ const MerchantReportStudioPage = dc(() => {
       <ThemedView style={{ gap: "18px" }}>
         <PageHeader title={t("Report Studio")} subtitle={t("Author your own merchant reports with the AI transcript, verify them and publish")}>(
             <div class="d-flex flex-wrap ga-2">
-              <VBtn variant="tonal" prependIcon="mdi-download" loading={busy.value} onClick={() => void downloadTranscript()}>
+              <PgButton variant="tonal" prependIcon="mdi-download" loading={busy.value} onClick={() => void downloadTranscript()}>
                 {t("Download AI transcript")}
-              </VBtn>
-              <VBtn variant="tonal" prependIcon="mdi-file-chart-outline" onClick={() => void loadVersions()}>
+              </PgButton>
+              <PgButton variant="tonal" prependIcon="mdi-file-chart-outline" onClick={() => void loadVersions()}>
                 {t("Refresh")}
-              </VBtn>
+              </PgButton>
             </div>
           )</PageHeader>
 
@@ -402,14 +402,14 @@ const MerchantReportStudioPage = dc(() => {
           }}
         >
           <div class="d-flex flex-column ga-3">
-            <VFileInput
+            <PgFileUpload
               label={t("Report spec (.json)")}
               {...{ accept: "application/json,.json" }}
               modelValue={null}
               onUpdate:modelValue={(files: File | File[] | null) => void readFile(files)}
             />
             {assetsEnabled.value ? (
-              <VFileInput
+              <PgFileUpload
                 label={t("Asset bundle (.zip, optional, max 2 MB)")}
                 {...{ accept: "application/zip,.zip" }}
                 modelValue={zipFile.value}
@@ -420,7 +420,7 @@ const MerchantReportStudioPage = dc(() => {
                 {t("Assets are disabled by platform policy: required_assets must be empty and no .zip can be uploaded.")}
               </div>
             )}
-            <VTextarea
+            <PgTextarea
               modelValue={specJson.value}
               onUpdate:modelValue={(value: string) => (specJson.value = value)}
               label={t("Spec JSON")}
@@ -431,15 +431,15 @@ const MerchantReportStudioPage = dc(() => {
               style={{ direction: "ltr", fontFamily: "var(--pg-font-mono)" }}
             />
             <div class="d-flex flex-wrap ga-2">
-              <VBtn color="primary" loading={busy.value} disabled={!canVerify.value || !engineEnabled.value} onClick={() => void verify()}>
+              <PgButton color="primary" loading={busy.value} disabled={!canVerify.value || !engineEnabled.value} onClick={() => void verify()}>
                 {t("Verify Spec (5 Layers)")}
-              </VBtn>
-              <VBtn variant="tonal" loading={busy.value} disabled={!canSave.value || !engineEnabled.value} onClick={() => void save(false)}>
+              </PgButton>
+              <PgButton variant="tonal" loading={busy.value} disabled={!canSave.value || !engineEnabled.value} onClick={() => void save(false)}>
                 {t("Save as Verified")}
-              </VBtn>
-              <VBtn variant="tonal" loading={busy.value} disabled={!canSave.value || !engineEnabled.value} onClick={() => void save(true)}>
+              </PgButton>
+              <PgButton variant="tonal" loading={busy.value} disabled={!canSave.value || !engineEnabled.value} onClick={() => void save(true)}>
                 {t("Publish")}
-              </VBtn>
+              </PgButton>
             </div>
           </div>
         </SurfaceCard>
@@ -471,7 +471,7 @@ const MerchantReportStudioPage = dc(() => {
                 </div>
               )}
               {verification.value.aiRepairPrompt && (
-                <VBtn
+                <PgButton
                   size="small"
                   variant="tonal"
                   prependIcon="mdi-content-copy"
@@ -483,7 +483,7 @@ const MerchantReportStudioPage = dc(() => {
                   }}
                 >
                   {t("Copy AI Repair Prompt")}
-                </VBtn>
+                </PgButton>
               )}
             </div>
           </SurfaceCard>
@@ -496,7 +496,7 @@ const MerchantReportStudioPage = dc(() => {
             v-slots={{
               headerActions: () => (
                 <div class="d-flex flex-wrap align-center ga-2">
-                  <VBtnToggle
+                  <PgBtnToggle
                     modelValue={previewMode.value}
                     onUpdate:modelValue={(next: unknown) => {
                       const value = Array.isArray(next) ? next[0] : next;
@@ -509,21 +509,21 @@ const MerchantReportStudioPage = dc(() => {
                     variant="outlined"
                     divided
                   >
-                    <VBtn value="MOCK" size="small" prependIcon="mdi-flask-outline">{t("Mock data")}</VBtn>
-                    <VBtn value="LIVE" size="small" prependIcon="mdi-database-outline">{t("Live sample")}</VBtn>
-                  </VBtnToggle>
-                  <VBtn size="small" variant="tonal" prependIcon="mdi-eye-outline" loading={previewLoading.value} disabled={!canSave.value} onClick={() => void runPreview()}>
+                    <PgButton value="MOCK" size="small" prependIcon="mdi-flask-outline">{t("Mock data")}</PgButton>
+                    <PgButton value="LIVE" size="small" prependIcon="mdi-database-outline">{t("Live sample")}</PgButton>
+                  </PgBtnToggle>
+                  <PgButton size="small" variant="tonal" prependIcon="mdi-eye-outline" loading={previewLoading.value} disabled={!canSave.value} onClick={() => void runPreview()}>
                     {t("Generate preview")}
-                  </VBtn>
+                  </PgButton>
                   {previewBundle.value && (
                     <>
                       <MetaPill color={previewMode.value === "MOCK" ? "warning" : "info"}>
                         {previewMode.value === "MOCK" ? t("Mock data") : t("Live sample")}
                       </MetaPill>
                       <MetaPill color="info">{`${previewPages.value} ${t("pages")}`}</MetaPill>
-                      <VBtn size="small" variant="tonal" prependIcon="mdi-printer-outline" onClick={() => previewRef.value?.printClientSideVectorPdf?.()}>
+                      <PgButton size="small" variant="tonal" prependIcon="mdi-printer-outline" onClick={() => previewRef.value?.printClientSideVectorPdf?.()}>
                         {t("Print")}
-                      </VBtn>
+                      </PgButton>
                     </>
                   )}
                 </div>
@@ -534,14 +534,14 @@ const MerchantReportStudioPage = dc(() => {
               <div class="d-flex flex-column ga-3">
                 <div class="d-flex flex-wrap ga-2">
                   {Object.keys(previewBundle.value.spec.i18n.locales).map((locale) => (
-                    <VBtn
+                    <PgButton
                       key={locale}
                       size="small"
                       variant={previewLocale.value === locale ? "flat" : "tonal"}
                       onClick={() => (previewLocale.value = locale)}
                     >
                       {locale.toUpperCase()}
-                    </VBtn>
+                    </PgButton>
                   ))}
                 </div>
                 <ReportPagedPreviewSurface

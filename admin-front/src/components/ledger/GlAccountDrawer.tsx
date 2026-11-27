@@ -1,18 +1,18 @@
 import Decimal from "decimal.js";
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VAlert, VBtn, VTextarea, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgTextarea, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { StatusBadge, formatHumanStatus } from "@/components/ui/StatusBadge";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { StateView } from "@/components/StateView";
+import {SlideOverDrawer} from "@pg/ui";
+import {StatusBadge, formatHumanStatus} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {StateView} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { hasOneOfAuthorities } from "@/state/user";
@@ -304,9 +304,9 @@ export const GlAccountDrawer = defineComponent({
                                                 {canRollup.value && (
                                                     <td style={{ textAlign: "end" }}>
                                                         {shard.status !== "OK" && (
-                                                            <VBtn size="x-small" variant="tonal" color="error" prependIcon="mdi-wrench-outline" onClick={() => (repairShard.value = shard.shardId)}>
+                                                            <PgButton size="x-small" variant="tonal" color="error" prependIcon="mdi-wrench-outline" onClick={() => (repairShard.value = shard.shardId)}>
                                                                 {t("Repair")}
-                                                            </VBtn>
+                                                            </PgButton>
                                                         )}
                                                     </td>
                                                 )}
@@ -359,17 +359,17 @@ export const GlAccountDrawer = defineComponent({
                         default: body,
                         footer: () => (
                             <>
-                                <VBtn variant="text" prependIcon="mdi-refresh" onClick={() => {
+                                <PgButton variant="text" prependIcon="mdi-refresh" onClick={() => {
                                     if (props.accountId) void load(props.accountId, true);
                                     linesTable.value?.refresh();
-                                }}>{t("Refresh")}</VBtn>
+                                }}>{t("Refresh")}</PgButton>
                                 {canRollup.value && snapshot.value && (
-                                    <VBtn variant="text" prependIcon="mdi-table-split-cell" onClick={openScale}>{t("Set shard count")}</VBtn>
+                                    <PgButton variant="text" prependIcon="mdi-table-split-cell" onClick={openScale}>{t("Set shard count")}</PgButton>
                                 )}
                                 {canRollup.value && snapshot.value && (
-                                    <VBtn variant="tonal" color="primary" prependIcon="mdi-database-sync-outline" onClick={openRollup}>{t("Run checkpoint rollup")}</VBtn>
+                                    <PgButton variant="tonal" color="primary" prependIcon="mdi-database-sync-outline" onClick={openRollup}>{t("Run checkpoint rollup")}</PgButton>
                                 )}
-                                <VBtn variant="text" onClick={() => emit("close")}>{t("Close")}</VBtn>
+                                <PgButton variant="text" onClick={() => emit("close")}>{t("Close")}</PgButton>
                             </>
                         ),
                     }}
@@ -400,7 +400,7 @@ export const GlAccountDrawer = defineComponent({
                         {t("A shard whose lines do not add up to its balance is not advanced and the action names that shard. Payments are not blocked. The action is audited.")}
                     </VAlert>
                     <FormField label={t("Reason")} required hint={t("At least 10 characters; written to the audit log")}>
-                        <VTextarea
+                        <PgTextarea
                             modelValue={rollupReason.value}
                             onUpdate:modelValue={(value: string) => void (rollupReason.value = value)}
                             rows={3}
@@ -423,7 +423,7 @@ export const GlAccountDrawer = defineComponent({
                         {t("Widening adds shards for new postings. Narrowing only changes where new postings go; existing shards keep their balances and checkpoints. Nothing is moved. The action is audited.")}
                     </VAlert>
                     <FormField label={t("Shard count")} required hint={t("1 to 256")}>
-                        <VTextField
+                        <PgTextField
                             modelValue={scaleWidth.value}
                             onUpdate:modelValue={(value: string) => void (scaleWidth.value = Number(value))}
                             type="number"
@@ -431,7 +431,7 @@ export const GlAccountDrawer = defineComponent({
                         />
                     </FormField>
                     <FormField label={t("Reason")} required hint={t("At least 10 characters; written to the audit log")}>
-                        <VTextarea
+                        <PgTextarea
                             modelValue={scaleReason.value}
                             onUpdate:modelValue={(value: string) => void (scaleReason.value = value)}
                             rows={3}

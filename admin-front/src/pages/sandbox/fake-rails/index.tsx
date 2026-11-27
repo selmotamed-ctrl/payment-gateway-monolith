@@ -1,31 +1,31 @@
 import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { StateView } from "@/components/StateView";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
-import SandboxResourceTable from "@/components/sandbox/SandboxResourceTable";
-import { accountFilters, ACCOUNT_STATUS } from "@/components/sandbox/sandboxFilters";
-import { DataTable } from "@/components/Table/DataTable";
-import type { TableHeader } from "@/components/Table/types";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {VAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {StateView} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import { SandboxBanner } from "@/features/sandbox/SandboxBanner";
+import { SandboxResourceTable } from "@/features/sandbox/SandboxResourceTable";
+import { accountFilters, ACCOUNT_STATUS } from "@/features/sandbox/sandboxFilters";
+import { DataTable } from "@/tables/DataTable";
+import type { TableHeader } from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import { SectionFields } from "@/components/SectionFields";
+import {SectionFields} from "@pg/ui";
 import { sandboxFakeRails, type FakeRailsAccountRow, type FakeRailsScenario, type FakeRailsTransactionRow } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -395,7 +395,7 @@ const AdminFakeRailsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={t("Fake Rails Accounts & Clearing")} subtitle={t("Global test customers, balances, states, chaos and synthetic settlements.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => load()}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!accountsSummary.value} onClick={() => void copyFakeRailsSummary()}>{t("Copy summary")}</VBtn><VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportAccounts()}>{t("Export summary")}</VBtn></div></PageHeader>
+            <PageHeader title={t("Fake Rails Accounts & Clearing")} subtitle={t("Global test customers, balances, states, chaos and synthetic settlements.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => load()}>{t("Refresh")}</PgButton><PgButton variant="tonal" prependIcon="mdi-content-copy" disabled={!accountsSummary.value} onClick={() => void copyFakeRailsSummary()}>{t("Copy summary")}</PgButton><PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportAccounts()}>{t("Export summary")}</PgButton></div></PageHeader>
             <SandboxBanner />
             <div class="mb-4"><SegmentedTabs modelValue={tab.value} tabs={[{ label: t("Accounts"), value: "ACCOUNTS" }, { label: t("Clearing"), value: "CLEARING" }, { label: t("Chaos"), value: "CHAOS" }, { label: t("Transactions"), value: "TRANSACTIONS" }, { label: t("Webhooks"), value: "WEBHOOKS" }]} onUpdate:modelValue={(value: string) => (tab.value = value as Tab)} /></div>
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
@@ -403,8 +403,8 @@ const AdminFakeRailsPage = dc(() => {
                 {tab.value === "ACCOUNTS" ? <div class="d-flex flex-column ga-4">
                     <SummaryExportCard title={t("Test account health")} metrics={accountMetrics.value} checks={[...EXPORT_CHECKS]} checklist={exportChecklist.value} onUpdate:checklist={(value: Record<string, boolean>) => (exportChecklist.value = value)} showChecklists={showChecklists} checklistComplete={exportChecklistComplete.value} exportLoading={exportLoading.value} exportDisabled={!exportChecklistComplete.value} exportLabel={t("Export summary")} onExport={() => void exportAccounts()}>
                         <div class="d-flex flex-wrap ga-2">
-                            <VBtn variant="tonal" onClick={() => { resetChecklist.value = {}; resetAccountsOpen.value = true; }}>{t("Reset accounts to defaults")}</VBtn>
-                            <VBtn color="primary" prependIcon="mdi-plus" onClick={() => { createError.value = ""; createOpen.value = true; }}>{t("Create test account")}</VBtn>
+                            <PgButton variant="tonal" onClick={() => { resetChecklist.value = {}; resetAccountsOpen.value = true; }}>{t("Reset accounts to defaults")}</PgButton>
+                            <PgButton color="primary" prependIcon="mdi-plus" onClick={() => { createError.value = ""; createOpen.value = true; }}>{t("Create test account")}</PgButton>
                         </div>
                     </SummaryExportCard>
                     <SandboxResourceTable<FakeRailsAccountRow> title={t("Fake Rails accounts")} url="/v1/admin/sandbox/fake-rails/accounts" listKey="accounts" headers={accountHeaders} filters={accountFilters()} pageSize={20} showNumber={true} onRefreshReady={(next) => (accountsRefresh.value = next)} />
@@ -412,11 +412,11 @@ const AdminFakeRailsPage = dc(() => {
                 {tab.value === "CLEARING" ? <div class="d-flex flex-column ga-4">
                     <SurfaceCard title={t("Settlement statements")}>
                         <div class="d-flex flex-wrap ga-2 align-center">
-                            <VTextField density="compact" variant="outlined" hideDetails label={t("Gateway")} modelValue={statementGateway.value} onUpdate:modelValue={(v: string) => (statementGateway.value = v)} />
-                            <VTextField type="date" density="compact" variant="outlined" hideDetails label={t("From")} modelValue={statementFrom.value} onUpdate:modelValue={(v: string) => (statementFrom.value = v)} />
-                            <VTextField type="date" density="compact" variant="outlined" hideDetails label={t("To")} modelValue={statementTo.value} onUpdate:modelValue={(v: string) => (statementTo.value = v)} />
-                            <VBtn color="primary" loading={busy.value === "statement"} onClick={() => void generateClearing()}>{t("Generate")}</VBtn>
-                            <VBtn variant="tonal" loading={busy.value === "settle"} onClick={() => void settle()}>{t("Settle pools")}</VBtn>
+                            <PgTextField density="compact" variant="outlined" hideDetails label={t("Gateway")} modelValue={statementGateway.value} onUpdate:modelValue={(v: string) => (statementGateway.value = v)} />
+                            <PgTextField type="date" density="compact" variant="outlined" hideDetails label={t("From")} modelValue={statementFrom.value} onUpdate:modelValue={(v: string) => (statementFrom.value = v)} />
+                            <PgTextField type="date" density="compact" variant="outlined" hideDetails label={t("To")} modelValue={statementTo.value} onUpdate:modelValue={(v: string) => (statementTo.value = v)} />
+                            <PgButton color="primary" loading={busy.value === "statement"} onClick={() => void generateClearing()}>{t("Generate")}</PgButton>
+                            <PgButton variant="tonal" loading={busy.value === "settle"} onClick={() => void settle()}>{t("Settle pools")}</PgButton>
                         </div>
                         {clearingRows.value.length > 0 ? <div class="mt-3"><DataTable title={t("Generated settlement lines")} data={clearingRows.value} headers={[{ key: "ourReference", label: "Our reference", value: (row) => String(row.ourReference ?? "") }, { key: "providerReference", label: "Provider reference", value: (row) => String(row.providerReference ?? "") }, { key: "amountLyd", label: "Amount", value: (row) => String(row.amountLyd ?? "") }, { key: "gatewayFeeLyd", label: "Fee", value: (row) => String(row.gatewayFeeLyd ?? "") }]} loading={false} showNumber={false} xlsx={false} noElevation={true} numberOfItemsPerPage={10} /></div> : null}
                     </SurfaceCard>
@@ -452,23 +452,23 @@ const AdminFakeRailsPage = dc(() => {
             </SlideOverDrawer>
             <FormModal modelValue={createOpen.value} onUpdate:modelValue={(v: any) => (createOpen.value = v)} title={t("Create test account")} size="md" loading={creating.value} errorMessage={createError.value} submitLabel={t("Create")} onSubmit={() => void createAccount()}>
                 <SectionFields title={t("Account details")}>
-                    <FormField label={t("Rail code")} required><VTextField modelValue={createForm.value.railCode} onUpdate:modelValue={(v: string) => (createForm.value.railCode = v)} hideDetails /></FormField>
-                    <FormField label={t("Gateway code")} required><VTextField modelValue={createForm.value.gatewayCode} onUpdate:modelValue={(v: string) => (createForm.value.gatewayCode = v)} hideDetails /></FormField>
-                    <FormField label={t("Instrument type")}><VSelect items={["MOBILE_WALLET", "BANK_ACCOUNT", "CARD", "VOUCHER"].map((value) => ({ title: value.replaceAll("_", " "), value }))} modelValue={createForm.value.instrumentType} onUpdate:modelValue={(v: string) => (createForm.value.instrumentType = v)} hideDetails /></FormField>
-                    <FormField label={t("Identifier")} required><VTextField modelValue={createForm.value.identifier} onUpdate:modelValue={(v: string) => (createForm.value.identifier = v)} hideDetails /></FormField>
-                    <FormField label={t("Holder name")} required><VTextField modelValue={createForm.value.holderName} onUpdate:modelValue={(v: string) => (createForm.value.holderName = v)} hideDetails /></FormField>
-                    <FormField label="PIN / CVV"><VTextField modelValue={createForm.value.secretPin} onUpdate:modelValue={(v: string) => (createForm.value.secretPin = v)} hideDetails /></FormField>
-                    <FormField label={t("Expiry")}><VTextField modelValue={createForm.value.expiry} onUpdate:modelValue={(v: string) => (createForm.value.expiry = v)} hideDetails /></FormField>
-                    <FormField label={t("Available balance")}><VTextField type="number" modelValue={createForm.value.availableBalanceLyd} onUpdate:modelValue={(v: string) => (createForm.value.availableBalanceLyd = v)} hideDetails /></FormField>
-                    <FormField label={t("Daily limit")}><VTextField type="number" modelValue={createForm.value.dailyLimitLyd} onUpdate:modelValue={(v: string) => (createForm.value.dailyLimitLyd = v)} hideDetails /></FormField>
+                    <FormField label={t("Rail code")} required><PgTextField modelValue={createForm.value.railCode} onUpdate:modelValue={(v: string) => (createForm.value.railCode = v)} hideDetails /></FormField>
+                    <FormField label={t("Gateway code")} required><PgTextField modelValue={createForm.value.gatewayCode} onUpdate:modelValue={(v: string) => (createForm.value.gatewayCode = v)} hideDetails /></FormField>
+                    <FormField label={t("Instrument type")}><PgAutocomplete items={["MOBILE_WALLET", "BANK_ACCOUNT", "CARD", "VOUCHER"].map((value) => ({ title: value.replaceAll("_", " "), value }))} modelValue={createForm.value.instrumentType} onUpdate:modelValue={(v: string) => (createForm.value.instrumentType = v)} hideDetails /></FormField>
+                    <FormField label={t("Identifier")} required><PgTextField modelValue={createForm.value.identifier} onUpdate:modelValue={(v: string) => (createForm.value.identifier = v)} hideDetails /></FormField>
+                    <FormField label={t("Holder name")} required><PgTextField modelValue={createForm.value.holderName} onUpdate:modelValue={(v: string) => (createForm.value.holderName = v)} hideDetails /></FormField>
+                    <FormField label="PIN / CVV"><PgTextField modelValue={createForm.value.secretPin} onUpdate:modelValue={(v: string) => (createForm.value.secretPin = v)} hideDetails /></FormField>
+                    <FormField label={t("Expiry")}><PgTextField modelValue={createForm.value.expiry} onUpdate:modelValue={(v: string) => (createForm.value.expiry = v)} hideDetails /></FormField>
+                    <FormField label={t("Available balance")}><PgTextField type="number" modelValue={createForm.value.availableBalanceLyd} onUpdate:modelValue={(v: string) => (createForm.value.availableBalanceLyd = v)} hideDetails /></FormField>
+                    <FormField label={t("Daily limit")}><PgTextField type="number" modelValue={createForm.value.dailyLimitLyd} onUpdate:modelValue={(v: string) => (createForm.value.dailyLimitLyd = v)} hideDetails /></FormField>
                 </SectionFields>
             </FormModal>
             <FormModal modelValue={Boolean(editScenario.value)} onUpdate:modelValue={(v: any) => { if (!v) editScenario.value = null; }} title={t("Edit rail scenario")} size="sm" loading={Boolean(busy.value)} submitLabel={t("Save")} onSubmit={() => void saveScenario()}>
                 <SectionFields title={t("Chaos")}>
-                    <FormField label={t("Failure %")}><VTextField type="number" modelValue={scenarioForm.value.failure} onUpdate:modelValue={(v: string) => (scenarioForm.value.failure = v)} hideDetails /></FormField>
-                    <FormField label={t("Minimum latency (ms)")}><VTextField type="number" modelValue={scenarioForm.value.latencyMin} onUpdate:modelValue={(v: string) => (scenarioForm.value.latencyMin = v)} hideDetails /></FormField>
-                    <FormField label={t("Maximum latency (ms)")}><VTextField type="number" modelValue={scenarioForm.value.latencyMax} onUpdate:modelValue={(v: string) => (scenarioForm.value.latencyMax = v)} hideDetails /></FormField>
-                    <FormField label={t("Auto-approve after seconds")}><VTextField type="number" modelValue={scenarioForm.value.autoApprove} onUpdate:modelValue={(v: string) => (scenarioForm.value.autoApprove = v)} hideDetails /></FormField>
+                    <FormField label={t("Failure %")}><PgTextField type="number" modelValue={scenarioForm.value.failure} onUpdate:modelValue={(v: string) => (scenarioForm.value.failure = v)} hideDetails /></FormField>
+                    <FormField label={t("Minimum latency (ms)")}><PgTextField type="number" modelValue={scenarioForm.value.latencyMin} onUpdate:modelValue={(v: string) => (scenarioForm.value.latencyMin = v)} hideDetails /></FormField>
+                    <FormField label={t("Maximum latency (ms)")}><PgTextField type="number" modelValue={scenarioForm.value.latencyMax} onUpdate:modelValue={(v: string) => (scenarioForm.value.latencyMax = v)} hideDetails /></FormField>
+                    <FormField label={t("Auto-approve after seconds")}><PgTextField type="number" modelValue={scenarioForm.value.autoApprove} onUpdate:modelValue={(v: string) => (scenarioForm.value.autoApprove = v)} hideDetails /></FormField>
                 </SectionFields>
                 <FormChecklist
                     checks={[...SCENARIO_CHECKS]}

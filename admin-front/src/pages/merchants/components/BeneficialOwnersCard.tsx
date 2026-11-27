@@ -1,14 +1,14 @@
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn, VCheckbox, VSelect, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgCheckbox, PgAutocomplete, PgTextField} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import {TableRowActions} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
 import { showSnackBar } from "@/utils/snackBar";
 import {
     OWNER_IDENTITY_TYPES,
@@ -134,14 +134,14 @@ export const BeneficialOwnersCard = defineComponent({
                         </div>
                         <div style={{ display: "inline-flex", gap: "6px", flexWrap: "wrap" }}>
                             {inactiveCount.value > 0 && (
-                                <VBtn size="small" variant="text" onClick={() => (showInactive.value = !showInactive.value)}>
+                                <PgButton size="small" variant="text" onClick={() => (showInactive.value = !showInactive.value)}>
                                     {showInactive.value ? t("Hide deactivated") : `${t("Show deactivated")} (${inactiveCount.value})`}
-                                </VBtn>
+                                </PgButton>
                             )}
                             {editable.value && (
-                                <VBtn size="small" variant="tonal" prependIcon="mdi-account-plus-outline" onClick={() => openForm()}>
+                                <PgButton size="small" variant="tonal" prependIcon="mdi-account-plus-outline" onClick={() => openForm()}>
                                     {t("Add beneficial owner")}
-                                </VBtn>
+                                </PgButton>
                             )}
                         </div>
                     </div>
@@ -208,13 +208,13 @@ export const BeneficialOwnersCard = defineComponent({
                     </VAlert>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
                         <FormField label={t("Full name (Arabic)")} required error={field("fullName")}>
-                            <VTextField modelValue={form.value.fullName} onUpdate:modelValue={(value: string) => (form.value.fullName = value)} hideDetails />
+                            <PgTextField modelValue={form.value.fullName} onUpdate:modelValue={(value: string) => (form.value.fullName = value)} hideDetails />
                         </FormField>
                         <FormField label={t("Full name (English)")} error={field("fullNameEn")}>
-                            <VTextField modelValue={form.value.fullNameEn} onUpdate:modelValue={(value: string) => (form.value.fullNameEn = value)} {...{ dir: "ltr" }} hideDetails />
+                            <PgTextField modelValue={form.value.fullNameEn} onUpdate:modelValue={(value: string) => (form.value.fullNameEn = value)} {...{ dir: "ltr" }} hideDetails />
                         </FormField>
                         <FormField label={t("Identity type")}>
-                            <VSelect
+                            <PgAutocomplete
                                 modelValue={form.value.identityType}
                                 onUpdate:modelValue={(value: OwnerForm["identityType"]) => (form.value.identityType = value)}
                                 items={OWNER_IDENTITY_TYPES.map((type) => ({ title: t(type), value: type }))}
@@ -226,7 +226,7 @@ export const BeneficialOwnersCard = defineComponent({
                             required={!editingId.value}
                             error={field("identityNumber")}
                         >
-                            <VTextField
+                            <PgTextField
                                 modelValue={form.value.identityNumber}
                                 onUpdate:modelValue={(value: string) => (form.value.identityNumber = value)}
                                 type={revealIdentity.value ? "text" : "password"}
@@ -238,16 +238,16 @@ export const BeneficialOwnersCard = defineComponent({
                             />
                         </FormField>
                         <FormField label={t("Nationality")} hint={t("Two-letter country code")} error={field("nationality")}>
-                            <VTextField modelValue={form.value.nationality} onUpdate:modelValue={(value: string) => (form.value.nationality = value)} {...{ maxlength: 2 }} {...{ dir: "ltr" }} hideDetails />
+                            <PgTextField modelValue={form.value.nationality} onUpdate:modelValue={(value: string) => (form.value.nationality = value)} {...{ maxlength: 2 }} {...{ dir: "ltr" }} hideDetails />
                         </FormField>
                         <FormField label={t("Date of birth (YYYY-MM-DD)")} error={field("dateOfBirth")}>
-                            <VTextField modelValue={form.value.dateOfBirth} onUpdate:modelValue={(value: string) => (form.value.dateOfBirth = value)} placeholder="1980-01-31" {...{ dir: "ltr" }} hideDetails />
+                            <PgTextField modelValue={form.value.dateOfBirth} onUpdate:modelValue={(value: string) => (form.value.dateOfBirth = value)} placeholder="1980-01-31" {...{ dir: "ltr" }} hideDetails />
                         </FormField>
                         <FormField label={t("Ownership percent")} error={field("ownershipPercent")}>
-                            <VTextField modelValue={form.value.ownershipPercent} onUpdate:modelValue={(value: string) => (form.value.ownershipPercent = value)} {...{ dir: "ltr" }} hideDetails />
+                            <PgTextField modelValue={form.value.ownershipPercent} onUpdate:modelValue={(value: string) => (form.value.ownershipPercent = value)} {...{ dir: "ltr" }} hideDetails />
                         </FormField>
                         <FormField label={t("Role")}>
-                            <VSelect
+                            <PgAutocomplete
                                 modelValue={form.value.role}
                                 onUpdate:modelValue={(value: OwnerForm["role"]) => (form.value.role = value)}
                                 items={OWNER_ROLES.map((role) => ({ title: t(role), value: role }))}
@@ -255,7 +255,7 @@ export const BeneficialOwnersCard = defineComponent({
                             />
                         </FormField>
                     </div>
-                    <VCheckbox
+                    <PgCheckbox
                         modelValue={form.value.pepDeclared}
                         onUpdate:modelValue={(value: boolean | null) => (form.value.pepDeclared = value === true)}
                         label={t("Declared PEP")}

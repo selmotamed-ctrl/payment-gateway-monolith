@@ -2,27 +2,27 @@ import { buildCheckoutUrl } from "@/utils/security/checkoutUrl";
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VTextField } from "@/components/vael/VuetifyShim";
+import {PgButton, PgTextField} from "@pg/ui";
 import QRCode from "qrcode";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { StateView } from "@/components/StateView";
-import { DataTable } from "@/components/Table/DataTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { SectionFields } from "@/components/SectionFields";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { copyToClipboard } from "@/utils/common";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
 type PaymentLink = {
     id: string;
     linkKey: string;
@@ -268,7 +268,7 @@ const LinksPage = dc(() => {
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Payment Links")} subtitle={t("Create, track, and expire customer payment links.")}>(
-                        <VBtn
+                        <PgButton
                             variant="tonal"
                             onClick={() => {
                                 form.value = {
@@ -285,7 +285,7 @@ const LinksPage = dc(() => {
                             }}
                         >
                             {t("Create")}
-                        </VBtn>
+                        </PgButton>
                     )</PageHeader>
 
                 {error.value ? (
@@ -317,28 +317,28 @@ const LinksPage = dc(() => {
             >
                 <SectionFields title={t("Payment Link")}>
                     <FormField label={t("Description")} required>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.description}
                             onUpdate:modelValue={(v: string) => (form.value.description = v)}
                             hideDetails
                         />
                     </FormField>
                     <FormField label={t("Amount")} required style={{ minWidth: "170px" }}>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.amount}
                             onUpdate:modelValue={(v: string) => (form.value.amount = v)}
                             hideDetails
                         />
                     </FormField>
                     <FormField label={t("Currency")} required style={{ minWidth: "130px" }}>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.currency}
                             onUpdate:modelValue={(v: string) => (form.value.currency = v.toUpperCase())}
                             hideDetails
                         />
                     </FormField>
                     <FormField label={t("Use Count")} style={{ minWidth: "140px" }}>
-                        <VTextField
+                        <PgTextField
                             type="number"
                             modelValue={form.value.useCount}
                             onUpdate:modelValue={(v: any) => (form.value.useCount = Number(v))}
@@ -346,7 +346,7 @@ const LinksPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Expiry")} style={{ minWidth: "200px" }}>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.expiresAt}
                             onUpdate:modelValue={(v: string) => (form.value.expiresAt = v)}
                             hideDetails
@@ -355,14 +355,14 @@ const LinksPage = dc(() => {
                 </SectionFields>
                 <SectionFields title={t("Settings")}>
                     <FormField label={t("Redirect URL")}>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.redirectUrl}
                             onUpdate:modelValue={(v: string) => (form.value.redirectUrl = v)}
                             hideDetails
                         />
                     </FormField>
                     <FormField label={t("Rail Whitelist")} hint={t("Comma separated, empty means all rails.")}>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.railWhitelist}
                             onUpdate:modelValue={(v: string) => (form.value.railWhitelist = v)}
                             hideDetails

@@ -1,9 +1,9 @@
 import { computed, ref, watch, type PropType, type VNodeChild, createSlot } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VTextarea } from "@/components/vael/VuetifyShim";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
+import {VAlert, PgTextarea} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
 import { REASON_MAX_LENGTH, reasonProblem, reasonProblemMessage, type GovernanceMode } from "../commerceGovernance";
 
 /**
@@ -70,7 +70,7 @@ export const ReasonModal = defineComponent({
                     hint={t("At least 10 characters. Recorded in the audit trail.")}
                     error={touched.value && problem.value ? t(reasonProblemMessage(problem.value)) : ""}
                 >
-                    <VTextarea
+                    <PgTextarea
                         modelValue={reason.value}
                         onUpdate:modelValue={(value: string) => (reason.value = value)}
                         rows={3}

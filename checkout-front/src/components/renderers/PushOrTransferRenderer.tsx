@@ -1,10 +1,10 @@
 import { dc } from "@/utils/dc";
 import { computed } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VFileInput } from "@/components/vael/VuetifyShim";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { DescriptionList, FormField, MonoRef, type DescriptionItem } from "@/components/ui";
+import {VAlert, PgFileUpload} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {DescriptionList, FormField, MonoRef, type DescriptionItem} from "@pg/ui";
 import type { PushOrTransferClientAction } from "./types";
 
 export type PushOrTransferRendererProps = {
@@ -67,7 +67,7 @@ export const PushOrTransferRenderer = dc(
 
                     {props.action.proof_upload_allowed && (
                         <FormField label={t("Submit Proof")}>
-                            <VFileInput
+                            <PgFileUpload
                                 aria-label={t("Submit Proof")}
                                 modelValue={null}
                                 onUpdate:modelValue={(v: File | File[] | null) => {

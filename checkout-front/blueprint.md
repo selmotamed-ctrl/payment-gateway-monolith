@@ -347,6 +347,14 @@ or canary `visibleRails` list from core. See `core.route-health`.
 
 `PAYMENT_LINK_SLOT_UNAVAILABLE` now maps to the bilingual **Payment in progress** message, matching the Guide's description of a second payer trying a reserved link.
 
+## 2026 Fintech Vapor design system (`@pg/ui`)
+
+The payer flow uses the shared `@pg/ui` primitives (`PgProvider`, `PgPage`, `PgCard`, `PgButton`, `PgTextField`,
+`PgAutocomplete`, `PgAlert`, `PgDialog`, `PgDrawer`, `PgOtpInput`, `PgStatusBadge`, `PgMoneyText`) through
+`src/uiConfig.tsx`. The local `components/vael/VuetifyShim`, `components/ui/*` and legacy stylesheets are deleted;
+checkout-specific renderers/rail fields/sandbox inspector remain feature components under `src/components`.
+The UI gate (`bun run ui:audit`) passes with zero violations.
+
 ## Checkout Help Center
 
 > Status: `partial` · Last verified: 2026-11-03

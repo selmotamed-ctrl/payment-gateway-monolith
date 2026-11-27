@@ -1,4 +1,4 @@
-import type { StatusTone } from "@/components/StatusChip";
+import type { StatusTone } from "@pg/ui";
 
 export const APPROVAL_STATE_HELP: Record<string, { label: string; meaning: string; tone: StatusTone }> = {
     DRAFT: { label: "Draft", meaning: "The maker has not submitted the request to the checker queue yet.", tone: "neutral" },

@@ -1,17 +1,20 @@
 import { dc } from "@/utils/dc";
+import { createIf } from "@vue/runtime-vapor";
 import { computed, ref, watch } from "vue";
+
+const branch = createIf as any;
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
+import {VAlert, PgButton, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
 import CollapsibleSection, { type SectionCommand } from "@/components/CollapsibleSection";
-import { ApiTable } from "@/components/Table/ApiTable";
-import type { TableHeader } from "@/components/Table/types";
-import { statusTone } from "@/components/Table/statusTone";
+import {ApiTable} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {statusTone} from "@pg/ui";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities, user } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
@@ -58,21 +61,21 @@ import {
     walletFilters,
 } from "./merchantTableFilters";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {FormModal} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import { FormField } from "@/components/ui/FormField";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { MetricStrip } from "@/components/ui/MetricStrip";
-import { DescriptionList, type DescriptionItem } from "@/components/ui/DescriptionList";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { JsonDiffViewer } from "@/components/ui/JsonDiffViewer";
-import { TableRowActions } from "@/components/Table/TableRowActions";
+import {FormField} from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {MetricStrip} from "@pg/ui";
+import {DescriptionList, type DescriptionItem} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {JsonDiffViewer} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
 import { JournalEntryDrawer } from "@/components/ledger/JournalEntryDrawer";
 import { walletActionsFor, type WalletAction } from "@/pages/wallets/walletActions";
 import { ApplicationDetailDrawer } from "./components/ApplicationDetailDrawer";
@@ -338,7 +341,7 @@ const MerchantDetailPage = dc(() => {
     };
 
     const copyMerchantSummary = async () => {
-        const entry = merchant.value;
+        const entry = merchant.value!;
         if (!entry) return;
         const summary = {
             id: entry.id,
@@ -411,7 +414,7 @@ const MerchantDetailPage = dc(() => {
         if (restricted) return <RestrictedValue />;
         if (!id) return <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>;
         return (
-            <VBtn
+            <PgButton
                 size="x-small"
                 variant="text"
                 style={{ textTransform: "none", paddingInline: "4px", minWidth: "0" }}
@@ -421,7 +424,7 @@ const MerchantDetailPage = dc(() => {
                 }}
             >
                 <span dir="ltr" style={{ fontFamily: "var(--pg-font-mono)", fontSize: "11.5px" }}>{id.slice(0, 8)}</span>
-            </VBtn>
+            </PgButton>
         );
     };
 
@@ -445,7 +448,7 @@ const MerchantDetailPage = dc(() => {
     };
 
     const sections = computed(() => {
-        const entry = merchant.value;
+        const entry = merchant.value!;
         if (!entry) return [];
         const status = merchantStatusHelp(entry.status);
         const sensitiveVisible = !entry.redactedFields.includes("taxId");
@@ -608,9 +611,9 @@ const MerchantDetailPage = dc(() => {
                 headerTooltip: COLUMN_HELP.transactionReference,
                 value: (row) => row.reference,
                 Value: ({ row }: { row: MerchantTransaction }) => (
-                    <VBtn size="x-small" variant="text" style={{ padding: "0", textTransform: "none", minWidth: "0" }} onClick={() => openTransaction(row)}>
+                    <PgButton size="x-small" variant="text" style={{ padding: "0", textTransform: "none", minWidth: "0" }} onClick={() => openTransaction(row)}>
                         <ThemedText style={{ fontSize: "12px", direction: "ltr", fontWeight: 600 }}>{row.reference}</ThemedText>
-                    </VBtn>
+                    </PgButton>
                 ),
             },
             {
@@ -713,7 +716,7 @@ const MerchantDetailPage = dc(() => {
                 value: (row) => row.name,
                 Value: ({ row }: { row: MerchantApplicationRow }) => (
                     <ThemedView style={{ gap: "2px" }}>
-                        <VBtn
+                        <PgButton
                             size="small"
                             variant="text"
                             style={{ paddingInline: "2px", textTransform: "none", justifyContent: "flex-start", fontWeight: 600 }}
@@ -722,7 +725,7 @@ const MerchantDetailPage = dc(() => {
                             }}
                         >
                             {row.name}
-                        </VBtn>
+                        </PgButton>
                         <MonoRef value={row.id} truncate={14} />
                     </ThemedView>
                 ),
@@ -810,7 +813,7 @@ const MerchantDetailPage = dc(() => {
             headerTooltip: COLUMN_HELP.walletId,
             value: (row) => row.id,
             Value: ({ row }: { row: MerchantWalletRow }) => (
-                <VBtn
+                <PgButton
                     size="small"
                     variant="text"
                     style={{ paddingInline: "2px", textTransform: "none", justifyContent: "flex-start" }}
@@ -819,7 +822,7 @@ const MerchantDetailPage = dc(() => {
                     }}
                 >
                     <MonoRef value={row.id} truncate={14} />
-                </VBtn>
+                </PgButton>
             ),
         },
         { key: "currency", label: "Currency", sortKey: "currency", value: (row) => row.currency },
@@ -947,42 +950,43 @@ const MerchantDetailPage = dc(() => {
     const show = (tab: MerchantDetailTab) => activeTab.value === "all" || activeTab.value === tab;
 
     return () => {
-        if (loading.value) {
-            return <ScreenContainer><StateView loading onRetry={() => void load()} /></ScreenContainer>;
-        }
-        if (error.value || !merchant.value) {
-            return <ScreenContainer><StateView error={error.value ?? "Merchant not found"} onRetry={() => void load()} /></ScreenContainer>;
-        }
-        const entry = merchant.value;
-        return (
+        const entry = merchant.value!;
+        return branch(
+            () => loading.value,
+            () => <ScreenContainer><StateView loading onRetry={() => void load()} /></ScreenContainer>,
+            () =>
+                branch(
+                    () => Boolean(error.value || !entry),
+                    () => <ScreenContainer><StateView error={error.value ?? "Merchant not found"} onRetry={() => void load()} /></ScreenContainer>,
+                    () => (
             <ScreenContainer>
                 <ThemedView style={{ gap: "18px" }}>
-                    <PageHeader title={entry.displayName || entry.tradeName || t("Merchant")} subtitle={t("Inspect the merchant profile, payment activity, compliance evidence and governed change history.")} v-slots={{ actions: () => <VBtn variant="tonal">SLOT TEST</VBtn> }}>(
+                    <PageHeader title={entry.displayName || entry.tradeName || t("Merchant")} subtitle={t("Inspect the merchant profile, payment activity, compliance evidence and governed change history.")} v-slots={{ actions: () => <PgButton variant="tonal">SLOT TEST</PgButton> }}>(
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                                <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "Merchants" })}>{t("Queue")}</VBtn>
+                                <PgButton variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "Merchants" })}>{t("Queue")}</PgButton>
                                 {activeTab.value === "all" && (
                                     <>
-                                        <VBtn variant="text" prependIcon="mdi-unfold-more-horizontal" onClick={() => setAllSections(true)}>{t("Expand all")}</VBtn>
-                                        <VBtn variant="text" prependIcon="mdi-unfold-less-horizontal" onClick={() => setAllSections(false)}>{t("Collapse all")}</VBtn>
+                                        <PgButton variant="text" prependIcon="mdi-unfold-more-horizontal" onClick={() => setAllSections(true)}>{t("Expand all")}</PgButton>
+                                        <PgButton variant="text" prependIcon="mdi-unfold-less-horizontal" onClick={() => setAllSections(false)}>{t("Collapse all")}</PgButton>
                                     </>
                                 )}
-                                <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
-                                <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyMerchantSummary()}>{t("Copy summary")}</VBtn>
-                                <VBtn variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => { summaryExportChecklist.value = {}; summaryExportOpen.value = true; }}>{t("Export summary")}</VBtn>
+                                <PgButton variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</PgButton>
+                                <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyMerchantSummary()}>{t("Copy summary")}</PgButton>
+                                <PgButton variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => { summaryExportChecklist.value = {}; summaryExportOpen.value = true; }}>{t("Export summary")}</PgButton>
                                 {canWrite.value && (
                                     <>
-                                        <VBtn variant="tonal" prependIcon="mdi-pencil-outline" onClick={() => openEdit("DESCRIPTIVE")}>{t("Edit descriptive")}</VBtn>
-                                        <VBtn variant="tonal" prependIcon="mdi-file-document-edit-outline" onClick={() => openEdit("SENSITIVE")}>{t("Propose sensitive change")}</VBtn>
+                                        <PgButton variant="tonal" prependIcon="mdi-pencil-outline" onClick={() => openEdit("DESCRIPTIVE")}>{t("Edit descriptive")}</PgButton>
+                                        <PgButton variant="tonal" prependIcon="mdi-file-document-edit-outline" onClick={() => openEdit("SENSITIVE")}>{t("Propose sensitive change")}</PgButton>
                                     </>
                                 )}
                                 {canWrite.value && entry.status === "ACTIVE" && (
-                                    <VBtn color="error" variant="tonal" onClick={() => openAction("SUSPEND")}>{t("Suspend")}</VBtn>
+                                    <PgButton color="error" variant="tonal" onClick={() => openAction("SUSPEND")}>{t("Suspend")}</PgButton>
                                 )}
                                 {canWrite.value && entry.status === "SUSPENDED" && (
-                                    <VBtn color="success" variant="tonal" onClick={() => openAction("REINSTATE")}>{t("Reinstate")}</VBtn>
+                                    <PgButton color="success" variant="tonal" onClick={() => openAction("REINSTATE")}>{t("Reinstate")}</PgButton>
                                 )}
                                 {canWrite.value && ["ACTIVE", "SUSPENDED"].includes(entry.status) && (
-                                    <VBtn color="error" variant="text" onClick={() => openAction("CLOSE")}>{t("Close")}</VBtn>
+                                    <PgButton color="error" variant="text" onClick={() => openAction("CLOSE")}>{t("Close")}</PgButton>
                                 )}
                             </ThemedView>
                         )</PageHeader>
@@ -1223,7 +1227,7 @@ const MerchantDetailPage = dc(() => {
                                             <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{formatDateTime(change.createdAt)} · {change.mode}</ThemedText>
                                             {change.payloadDiffJson && <JsonDiffViewer diff={change.payloadDiffJson} />}
                                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                                                <VBtn
+                                                <PgButton
                                                     size="x-small"
                                                     variant="text"
                                                     prependIcon="mdi-open-in-new"
@@ -1232,9 +1236,9 @@ const MerchantDetailPage = dc(() => {
                                                     }}
                                                 >
                                                     {t("Open in Approvals")}
-                                                </VBtn>
+                                                </PgButton>
                                                 {change.makerUserId === currentUserId.value && ["DRAFT", "PENDING_REVIEW"].includes(change.state) && (
-                                                    <VBtn size="x-small" variant="text" color="error" onClick={() => openWithdraw(change)}>{t("Withdraw")}</VBtn>
+                                                    <PgButton size="x-small" variant="text" color="error" onClick={() => openWithdraw(change)}>{t("Withdraw")}</PgButton>
                                                 )}
                                             </ThemedView>
                                         </SurfaceCardText>
@@ -1254,7 +1258,7 @@ const MerchantDetailPage = dc(() => {
                                         <StatusBadge status={amlCase.severity} label={amlCase.severity} toneOverride={asBadgeTone(statusTone(amlCase.severity))} />
                                         <ThemedText style={{ fontSize: "12px" }}>{amlCase.triggerReason}</ThemedText>
                                         <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{formatDateTime(amlCase.createdAt)}</ThemedText>
-                                        <VBtn
+                                        <PgButton
                                             size="x-small"
                                             variant="text"
                                             prependIcon="mdi-open-in-new"
@@ -1263,7 +1267,7 @@ const MerchantDetailPage = dc(() => {
                                             }}
                                         >
                                             {t("Open case")}
-                                        </VBtn>
+                                        </PgButton>
                                     </ThemedView>
                                 ))}
                             </SurfaceCardText>
@@ -1275,16 +1279,16 @@ const MerchantDetailPage = dc(() => {
                             <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Join requests")}</ThemedText>
-                                    <VBtn size="small" variant="text" onClick={() => void router.push({ name: "JoinRequests" })}>{t("Open queue")}</VBtn>
+                                    <PgButton size="small" variant="text" onClick={() => void router.push({ name: "JoinRequests" })}>{t("Open queue")}</PgButton>
                                 </ThemedView>
                                 {(entry.joinRequests ?? []).map((row) => (
                                     <ThemedView key={row.id} style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                                         <StatusBadge status={row.status} label={row.status} toneOverride={asBadgeTone(statusTone(row.status))} />
                                         <ThemedText style={{ fontSize: "12px", direction: "ltr" }}>{row.id}</ThemedText>
                                         <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{formatDateTime(row.createdAt)}</ThemedText>
-                                        <VBtn size="x-small" variant="text" onClick={() => void router.push({ name: "JoinRequestDetail", params: { id: row.id } })}>
+                                        <PgButton size="x-small" variant="text" onClick={() => void router.push({ name: "JoinRequestDetail", params: { id: row.id } })}>
                                             {t("Open")}
-                                        </VBtn>
+                                        </PgButton>
                                     </ThemedView>
                                 ))}
                             </SurfaceCardText>
@@ -1308,7 +1312,7 @@ const MerchantDetailPage = dc(() => {
                                     </ThemedView>
                                     <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                         {canKyb.value && (
-                                            <VBtn
+                                            <PgButton
                                                 size="small"
                                                 variant="tonal"
                                                 prependIcon="mdi-file-sync-outline"
@@ -1317,9 +1321,9 @@ const MerchantDetailPage = dc(() => {
                                                 }}
                                             >
                                                 {t("Request KYB revalidation")}
-                                            </VBtn>
+                                            </PgButton>
                                         )}
-                                        <VBtn size="small" variant="text" onClick={() => void router.push({ name: "KybReview" })}>{t("Open KYB review")}</VBtn>
+                                        <PgButton size="small" variant="text" onClick={() => void router.push({ name: "KybReview" })}>{t("Open KYB review")}</PgButton>
                                     </ThemedView>
                                 </ThemedView>
                                 {(entry.kybDocuments ?? []).length === 0 ? (
@@ -1330,7 +1334,7 @@ const MerchantDetailPage = dc(() => {
                                             <StatusBadge status={document.status} label={document.status} toneOverride={asBadgeTone(statusTone(document.status))} />
                                             <StatusBadge status={document.avStatus} label={document.avStatus} toneOverride={asBadgeTone(statusTone(document.avStatus))} />
                                             <ThemedText style={{ fontSize: "12px" }}>{document.docType} · {document.originalFileName || document.id}</ThemedText>
-                                            <VBtn size="x-small" variant="text" onClick={() => void router.push({ name: "KybReviewDetail", params: { id: document.id } })}>{t("Open")}</VBtn>
+                                            <PgButton size="x-small" variant="text" onClick={() => void router.push({ name: "KybReviewDetail", params: { id: document.id } })}>{t("Open")}</PgButton>
                                         </ThemedView>
                                     ))
                                 )}
@@ -1422,7 +1426,7 @@ const MerchantDetailPage = dc(() => {
                         <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                             <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Field history")}</ThemedText>
-                                <VBtn size="small" variant="text" onClick={() => (historyOpen.value = true)}>{t("View all")}</VBtn>
+                                <PgButton size="small" variant="text" onClick={() => (historyOpen.value = true)}>{t("View all")}</PgButton>
                             </ThemedView>
                             {entry.fieldHistory.length === 0 && <ThemedText style={{ opacity: 0.6 }}>{t("No field changes recorded")}</ThemedText>}
                             {entry.fieldHistory.slice(0, 8).map((change) => (
@@ -1532,7 +1536,7 @@ const MerchantDetailPage = dc(() => {
                 >
                     <ThemedText style={{ fontSize: "13px" }}>{withdrawTarget.value?.id}</ThemedText>
                     <FormField label={t("Withdrawal reason (optional)")}>
-                        <VTextarea v-model={withdrawReason.value} rows={3} autoGrow />
+                        <PgTextarea v-model={withdrawReason.value} rows={3} autoGrow />
                     </FormField>
                 </FormModal>
                 <SlideOverDrawer
@@ -1576,7 +1580,7 @@ const MerchantDetailPage = dc(() => {
                             />
                 </SlideOverDrawer>
             </ScreenContainer>
-        );
+        )));
     };
 }, { rerender: true });
 

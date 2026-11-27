@@ -1,9 +1,9 @@
 import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VTextField } from "@/components/vael/VuetifyShim";
+import {PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
-import { FormField } from "@/components/ui/FormField";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {FormField} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 import { RepeatableRows } from "./RepeatableRows";
 import { WINDOW_ERROR_MESSAGES } from "./messages";
 import {
@@ -58,10 +58,10 @@ export const MaintenanceWindowsBuilder = defineComponent({
                                 return (
                                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "10px 12px", alignItems: "start" }}>
                                         <FormField label={t("Start (UTC)")} error={errorFor(index, "start")}>
-                                            <VTextField type="datetime-local" modelValue={row.start} onUpdate:modelValue={(value: string) => patchRow(index, { start: value })} readonly={props.readonly} density="compact" hideDetails />
+                                            <PgTextField type="datetime-local" modelValue={row.start} onUpdate:modelValue={(value: string) => patchRow(index, { start: value })} readonly={props.readonly} density="compact" hideDetails />
                                         </FormField>
                                         <FormField label={t("End (UTC)")} error={errorFor(index, "end")}>
-                                            <VTextField type="datetime-local" modelValue={row.end} onUpdate:modelValue={(value: string) => patchRow(index, { end: value })} readonly={props.readonly} density="compact" hideDetails />
+                                            <PgTextField type="datetime-local" modelValue={row.end} onUpdate:modelValue={(value: string) => patchRow(index, { end: value })} readonly={props.readonly} density="compact" hideDetails />
                                         </FormField>
                                         {state && (
                                             <div>

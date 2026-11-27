@@ -1,6 +1,6 @@
 import { GOOGLE_REDIRECT_PATHS, isAllowedIdentityRedirect, parseIdentityHosts } from "@/utils/security/identityRedirect";
 import { dc } from "@/utils/dc";
-import { VAlert, VBtn, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { computed, ref } from "vue";
 import { api } from "@/state/api";
@@ -13,8 +13,8 @@ import router from "@/router";
 import { RouterLink } from "vue-router/experimental/vapor";
 import { useRoute } from "vue-router";
 import AuthLayout from "@/layouts/auth";
-import { FormField } from "@/components/ui/FormField";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {FormField} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
 import MaintenanceScreen from "@/components/communication/MaintenanceScreen";
 import { appInfo, loadAppStatus } from "@/state/app";
 
@@ -180,7 +180,7 @@ const LoginPage = dc(() => {
                                     {mfaMessage.value}
                                 </VAlert>
                                 <FormField label={t("Verification Code")} required>
-                                    <VTextField
+                                    <PgTextField
                                         aria-label={t("Verification Code")}
                                         prependInnerIcon="mdi-shield-key-outline"
                                         autocomplete="one-time-code"
@@ -190,7 +190,7 @@ const LoginPage = dc(() => {
                                         hideDetails
                                     />
                                 </FormField>
-                                <VBtn
+                                <PgButton
                                     block
                                     size="large"
                                     loading={loading.value}
@@ -199,12 +199,12 @@ const LoginPage = dc(() => {
                                     style={{ height: "38px" }}
                                 >
                                     {t("Verify")}
-                                </VBtn>
+                                </PgButton>
                                 <div style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
-                                    <VBtn variant="text" size="small" onClick={() => void resend()}>
+                                    <PgButton variant="text" size="small" onClick={() => void resend()}>
                                         {t("Resend Code")}
-                                    </VBtn>
-                                    <VBtn
+                                    </PgButton>
+                                    <PgButton
                                         variant="text"
                                         size="small"
                                         onClick={() => {
@@ -215,13 +215,13 @@ const LoginPage = dc(() => {
                                         }}
                                     >
                                         {t("Back")}
-                                    </VBtn>
+                                    </PgButton>
                                 </div>
                             </>
                         ) : (
                             <>
                                 <FormField label={t("Email")} required>
-                                    <VTextField
+                                    <PgTextField
                                         aria-label={t("Email")}
                                         prependInnerIcon="mdi-account-outline"
                                         autocomplete="username"
@@ -233,7 +233,7 @@ const LoginPage = dc(() => {
                                 </FormField>
 
                                 <FormField label={t("Password")} required>
-                                    <VTextField
+                                    <PgTextField
                                         aria-label={t("Password")}
                                         prependInnerIcon="mdi-lock-outline"
                                         type={showPassword.value ? "text" : "password"}
@@ -246,7 +246,7 @@ const LoginPage = dc(() => {
                                     />
                                 </FormField>
 
-                                <VBtn
+                                <PgButton
                                     block
                                     size="large"
                                     loading={loading.value}
@@ -255,10 +255,10 @@ const LoginPage = dc(() => {
                                     style={{ height: "38px" }}
                                 >
                                     {t("Login")}
-                                </VBtn>
+                                </PgButton>
 
                                 {googleEnabled.value && (
-                                    <VBtn
+                                    <PgButton
                                         block
                                         variant="tonal"
                                         prependIcon="mdi-google"
@@ -267,7 +267,7 @@ const LoginPage = dc(() => {
                                         style={{ height: "38px" }}
                                     >
                                         {t("Login With Google")}
-                                    </VBtn>
+                                    </PgButton>
                                 )}
                             </>
                         )}
@@ -290,12 +290,12 @@ const LoginPage = dc(() => {
                                 </RouterLink>
                             </div>
                             <div style={{ display: "flex", gap: "4px" }}>
-                                <VBtn variant="text" size="small" onClick={() => setLocale("ar")}>
+                                <PgButton variant="text" size="small" onClick={() => setLocale("ar")}>
                                     العربية
-                                </VBtn>
-                                <VBtn variant="text" size="small" onClick={() => setLocale("en")}>
+                                </PgButton>
+                                <PgButton variant="text" size="small" onClick={() => setLocale("en")}>
                                     English
-                                </VBtn>
+                                </PgButton>
                             </div>
                         </div>
                     </div>

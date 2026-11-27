@@ -1,9 +1,9 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VExpansionPanel, VExpansionPanelText, VExpansionPanelTitle, VExpansionPanels } from "@/components/vael/VuetifyShim";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
+import {PgExpansionPanel, PgExpansionPanelText, PgExpansionPanelTitle, PgExpansionPanels} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
 import { areHelpPanelsVisible } from "@/constants/env";
 import { KYB_HELP_SECTIONS } from "../kybReviewHelp";
 
@@ -14,24 +14,24 @@ const KybHelpPanel = dc(() => {
         return () => null;
     }
     return () => (
-        <VExpansionPanels modelValue={open.value} onUpdate:modelValue={(value: unknown) => (open.value = (value as number[]) ?? [])} variant="accordion">
+        <PgExpansionPanels modelValue={open.value} onUpdate:modelValue={(value: unknown) => (open.value = (value as number[]) ?? [])} variant="accordion">
             {KYB_HELP_SECTIONS.map((section, index) => (
-                <VExpansionPanel key={section.title} value={index}>
-                    <VExpansionPanelTitle>
+                <PgExpansionPanel key={section.title} value={index}>
+                    <PgExpansionPanelTitle>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center" }}>
                             <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>
                                 {t(section.title)}
                             </ThemedText>
                         </ThemedView>
-                    </VExpansionPanelTitle>
-                    <VExpansionPanelText>
+                    </PgExpansionPanelTitle>
+                    <PgExpansionPanelText>
                         <ThemedText style={{ fontSize: "12px", lineHeight: 1.65, opacity: 0.8 }}>
                             {t(section.body)}
                         </ThemedText>
-                    </VExpansionPanelText>
-                </VExpansionPanel>
+                    </PgExpansionPanelText>
+                </PgExpansionPanel>
             ))}
-        </VExpansionPanels>
+        </PgExpansionPanels>
     );
 });
 

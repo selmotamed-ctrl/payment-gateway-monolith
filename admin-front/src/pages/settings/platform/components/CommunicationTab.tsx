@@ -1,16 +1,16 @@
 import { defineComponent } from "@/utils/dc";
 import { onMounted, ref, type PropType } from "vue";
-import { VAlert, VBtn, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
-import { FormField } from "@/components/ui/FormField";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { StateView } from "@/components/StateView";
+import {FormField} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {StateView} from "@pg/ui";
 
 type ChannelStatus = {
     enabled: boolean;
@@ -115,9 +115,9 @@ export const CommunicationTab = defineComponent({
                         <MetaPill size="x-small" variant="tonal">{channel.source}</MetaPill>
                         {channel.enabled ? null : <MetaPill size="x-small" variant="text">{t("Disabled")}</MetaPill>}
                         <div style={{ flex: 1 }} />
-                        <VBtn size="small" variant="tonal" onClick={() => props.onEdit(settingKey)}>
+                        <PgButton size="small" variant="tonal" onClick={() => props.onEdit(settingKey)}>
                             {t("Edit setting")}
-                        </VBtn>
+                        </PgButton>
                     </div>
                     {channel.missingFields.length > 0 ? (
                         <VAlert type="warning" variant="tonal" density="compact">
@@ -161,7 +161,7 @@ export const CommunicationTab = defineComponent({
                             "communication.email",
                             () => (
                                 <>
-                                    <VTextField
+                                    <PgTextField
                                         modelValue={testEmail.value}
                                         onUpdate:modelValue={(value: string) => (testEmail.value = value)}
                                         label={t("Send test email to")}
@@ -170,14 +170,14 @@ export const CommunicationTab = defineComponent({
                                         hideDetails
                                         style={{ minInlineSize: "220px" }}
                                     />
-                                    <VBtn
+                                    <PgButton
                                         variant="tonal"
                                         loading={sending.value === "email"}
                                         disabled={!testEmail.value.includes("@") || !status.value?.email.configured}
                                         onClick={() => void sendEmail()}
                                     >
                                         {t("Send test email")}
-                                    </VBtn>
+                                    </PgButton>
                                 </>
                             ),
                         )}
@@ -187,7 +187,7 @@ export const CommunicationTab = defineComponent({
                             "communication.sms",
                             () => (
                                 <>
-                                    <VTextField
+                                    <PgTextField
                                         modelValue={testSms.value}
                                         onUpdate:modelValue={(value: string) => (testSms.value = value)}
                                         label={t("Send test SMS to")}
@@ -195,14 +195,14 @@ export const CommunicationTab = defineComponent({
                                         hideDetails
                                         style={{ minInlineSize: "220px" }}
                                     />
-                                    <VBtn
+                                    <PgButton
                                         variant="tonal"
                                         loading={sending.value === "sms"}
                                         disabled={!testSms.value.trim() || !status.value?.sms.configured}
                                         onClick={() => void sendSms()}
                                     >
                                         {t("Send test SMS")}
-                                    </VBtn>
+                                    </PgButton>
                                 </>
                             ),
                         )}
@@ -213,9 +213,9 @@ export const CommunicationTab = defineComponent({
                             () => <span style={{ fontSize: "12px", opacity: 0.7 }}>{t("Google sign-in has no delivery test.")}</span>,
                         )}
                         <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                            <VBtn variant="text" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
+                            <PgButton variant="text" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
                                 {t("Refresh")}
-                            </VBtn>
+                            </PgButton>
                         </div>
                     </>
                 )}

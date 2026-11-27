@@ -1,56 +1,34 @@
-import { devLog } from "@/utils/devLog";
-import "./styles/globals/app.scss";
+import {PgApp, PgConfirmDialog, PgDetailsDialog, PgProvider} from "@pg/ui";
+import { useRouter } from "vue-router";
 import { RouterView } from "vue-router/experimental/vapor";
 import { dc } from "@/utils/dc";
+import { devLog } from "@/utils/devLog";
 import { confirmDialogInstance } from "./utils/confirm";
-import { AwaitedConfirmationDialog } from "./components/ConfirmDialog";
-import { snackBarInstance } from "./utils/snackBar";
-import { VApp } from "@/components/vael/VuetifyShim";
-import { SnackBar } from "@/components/SnackBar/index";
-import { DetailsFieldsDialog } from "./components/detailsFieldsDialog";
 import { detailsDialogRef } from "./utils/showDetails/idnex";
 import { printProvider, PrintProvider } from "./utils/printJsx";
-import { VaelProvider } from "./components/vael/VaelProvider";
+import { createUiConfig } from "./uiConfig";
+import "./styles/globals/app.scss";
 
 const App = dc(() => {
-    return () => {
-        return (
-            <VApp
-                style={{
-                    height: "100%",
-                    width: "100%",
-                }}
-            >
-                <VaelProvider>
-                <PrintProvider
-                    ref={(r) => {
-                        printProvider.value = r as any;
-                    }}
-                ></PrintProvider>
-                <AwaitedConfirmationDialog
-                    ref={(r) => {
-                        confirmDialogInstance.value = r as any;
-                    }}
-                ></AwaitedConfirmationDialog>
-                <DetailsFieldsDialog
-                    ref={(r) => {
-                        if (r) {
-                            devLog("Setting details dialog ref", r);
-                            detailsDialogRef.value = r as any;
+    const router = useRouter();
+    const config = createUiConfig(router);
+    return () => (
+        <PgProvider config={config}>
+            <PgApp style={{ height: "100%", width: "100%" }}>
+                <PrintProvider ref={(instance) => { printProvider.value = instance as any; }} />
+                <PgConfirmDialog ref={(instance) => { confirmDialogInstance.value = instance as any; }} />
+                <PgDetailsDialog
+                    ref={(instance) => {
+                        if (instance) {
+                            devLog("Setting details dialog ref", instance);
+                            detailsDialogRef.value = instance as any;
                         }
                     }}
-                ></DetailsFieldsDialog>
-                <SnackBar
-                    ref={(r) => {
-                        snackBarInstance.value = r as any;
-                    }}
-                ></SnackBar>
-
+                />
                 <RouterView />
-                </VaelProvider>
-            </VApp>
-        );
-    };
+            </PgApp>
+        </PgProvider>
+    );
 });
 
 export default App;

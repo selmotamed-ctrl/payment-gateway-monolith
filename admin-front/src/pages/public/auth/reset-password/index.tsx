@@ -1,5 +1,5 @@
 import { dc } from "@/utils/dc";
-import { VAlert, VBtn, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { computed, ref } from "vue";
 import { useRoute } from "vue-router";
@@ -8,8 +8,8 @@ import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import router from "@/router";
 import AuthLayout from "@/layouts/auth";
-import { FormField } from "@/components/ui/FormField";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {FormField} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
 
 const ResetPasswordPage = dc(() => {
     const { t } = useLocale();
@@ -53,7 +53,7 @@ const ResetPasswordPage = dc(() => {
                 <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                     {error.value && <VAlert type="error" variant="tonal" density="compact">{error.value}</VAlert>}
                     <FormField label={t("Email")} required>
-                        <VTextField
+                        <PgTextField
                             aria-label={t("Email")}
                             type="email"
                             autocomplete="email"
@@ -63,7 +63,7 @@ const ResetPasswordPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Verification Code")} required>
-                        <VTextField
+                        <PgTextField
                             aria-label={t("Verification Code")}
                             autocomplete="one-time-code"
                             {...{ inputmode: "numeric", maxlength: "6" }}
@@ -73,7 +73,7 @@ const ResetPasswordPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("New password")} required hint={t("At least 12 characters")}>
-                        <VTextField
+                        <PgTextField
                             aria-label={t("New password")}
                             type="password"
                             autocomplete="new-password"
@@ -83,7 +83,7 @@ const ResetPasswordPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Confirm Password")} required>
-                        <VTextField
+                        <PgTextField
                             aria-label={t("Confirm Password")}
                             type="password"
                             autocomplete="new-password"
@@ -92,12 +92,12 @@ const ResetPasswordPage = dc(() => {
                             hideDetails
                         />
                     </FormField>
-                    <VBtn block size="large" loading={loading.value} disabled={!canSubmit.value} onClick={() => void submit()}>
+                    <PgButton block size="large" loading={loading.value} disabled={!canSubmit.value} onClick={() => void submit()}>
                         {t("Reset password")}
-                    </VBtn>
-                    <VBtn variant="text" onClick={() => void router.push({ name: "Login" })}>
+                    </PgButton>
+                    <PgButton variant="text" onClick={() => void router.push({ name: "Login" })}>
                         {t("Back to sign in")}
-                    </VBtn>
+                    </PgButton>
                 </div>
             </SurfaceCard>
         </AuthLayout>

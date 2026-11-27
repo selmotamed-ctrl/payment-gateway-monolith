@@ -2,17 +2,17 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
-import { DescriptionList, type DescriptionItem } from "@/components/ui/DescriptionList";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { statusTone } from "@/components/Table/statusTone";
+import {VAlert, PgButton} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MetricStrip, type MetricItem} from "@pg/ui";
+import {DescriptionList, type DescriptionItem} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {statusTone} from "@pg/ui";
 import { api } from "@/state/api";
 import { areChecklistsVisible } from "@/constants/env";
 import { showSnackBar } from "@/utils/snackBar";
@@ -20,11 +20,11 @@ import { maskEmail } from "@/utils/privacy";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MetaPill } from "@/components/ui/MetaPill";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
 import { describeAuditChange } from "@/utils/auditSummary";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { FormModal } from "@/components/ui/FormModal";
+import {FormChecklist} from "@pg/ui";
+import {FormModal} from "@pg/ui";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 const ACCESS_EXPORT_CHECKS = [
     { key: "USER_SCOPE_VERIFIED", label: "User and role scope verified" },
@@ -319,10 +319,10 @@ const UserDetailPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Admin User")} subtitle={t("Operator identity, authorities, and audited access history.")}>(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "AdminUsers" })}>{t("Back to users")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyAccessSummary()}>{t("Copy access summary")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export access record")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
+                            <PgButton variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "AdminUsers" })}>{t("Back to users")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyAccessSummary()}>{t("Copy access summary")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export access record")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</PgButton>
                         </ThemedView>
                     )</PageHeader>
 
@@ -365,9 +365,9 @@ const UserDetailPage = dc(() => {
                                         complete={resendChecklistComplete.value}
                                         incompleteMessage={t("Complete all invitation checklist items before resending")}
                                     />
-                                    <VBtn size="small" variant="outlined" loading={resendingInvitation.value} disabled={!resendChecklistComplete.value} onClick={() => void resendInvitation()}>
+                                    <PgButton size="small" variant="outlined" loading={resendingInvitation.value} disabled={!resendChecklistComplete.value} onClick={() => void resendInvitation()}>
                                         {t("Resend invitation")}
-                                    </VBtn>
+                                    </PgButton>
                                 </SurfaceCardText>
                             </SurfaceCard>
                         )}
@@ -397,7 +397,7 @@ const UserDetailPage = dc(() => {
                                             <ThemedText style={{ fontSize: "12px", fontWeight: 600, direction: "ltr" }}>{approval.subjectType}</ThemedText>
                                             <StatusBadge status={approval.state} toneOverride={statusTone(approval.state) === "error" ? "danger" : (statusTone(approval.state) as any)} showDot={false} />
                                             <MetaPill size="x-small" variant="tonal">{approval.mode}</MetaPill>
-                                            <VBtn size="x-small" variant="text" onClick={() => void router.push({ name: "Approvals", query: { open: approval.id } })}>{t("Open")}</VBtn>
+                                            <PgButton size="x-small" variant="text" onClick={() => void router.push({ name: "Approvals", query: { open: approval.id } })}>{t("Open")}</PgButton>
                                             <div style={{ flex: 1 }} />
                                             <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(approval.createdAt)}</ThemedText>
                                         </ThemedView>

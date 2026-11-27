@@ -1,10 +1,10 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import Decimal from "decimal.js";
-import { VBtn, VCard, VCardText, VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
+import {PgButton, PgCard, PgCardText, PgAutocomplete, PgTextField} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StatusChip} from "@pg/ui";
 
 type Side = "DEBIT" | "CREDIT";
 type Line = { account: string; side: Side; amount: Decimal };
@@ -85,30 +85,30 @@ export const LedgerTAccountVisualizer = dc(() => {
     const balanced = computed(() => debitTotal.value.equals(creditTotal.value));
 
     return () => (
-        <VCard variant="outlined">
-            <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                <VSelect
+        <PgCard variant="outlined">
+            <PgCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <PgAutocomplete
                     modelValue={event.value}
                     onUpdate:modelValue={(value: string | null) => (event.value = value ?? "confirm")}
                     items={EVENTS}
                     label="Business event"
                 />
                 <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                    <VTextField
+                    <PgTextField
                         modelValue={amountInput.value}
                         onUpdate:modelValue={(value: string) => (amountInput.value = value ?? "")}
                         label="Amount (LYD)"
                         type="number"
                         style={{ flex: "1 1 160px" }}
                     />
-                    <VTextField
+                    <PgTextField
                         modelValue={commissionPercent.value}
                         onUpdate:modelValue={(value: string) => (commissionPercent.value = value ?? "")}
                         label="Commission %"
                         type="number"
                         style={{ flex: "1 1 140px" }}
                     />
-                    <VTextField
+                    <PgTextField
                         modelValue={gatewayFeeInput.value}
                         onUpdate:modelValue={(value: string) => (gatewayFeeInput.value = value ?? "")}
                         label="Gateway fee (LYD)"
@@ -153,11 +153,11 @@ export const LedgerTAccountVisualizer = dc(() => {
                         </tfoot>
                     </table>
                 </div>
-                <VBtn size="small" variant="text" prependIcon="mdi-information-outline" onClick={() => (amountInput.value = "100.0000")}>
+                <PgButton size="small" variant="text" prependIcon="mdi-information-outline" onClick={() => (amountInput.value = "100.0000")}>
                     Reset example to 100.0000 LYD
-                </VBtn>
-            </VCardText>
-        </VCard>
+                </PgButton>
+            </PgCardText>
+        </PgCard>
     );
 });
 

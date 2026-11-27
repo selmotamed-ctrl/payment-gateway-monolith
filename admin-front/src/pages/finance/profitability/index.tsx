@@ -1,15 +1,15 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
-import { LazyEChart as EChart } from "@/components/EChart/lazy";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { LazyEChart as EChart } from "@/charts/EChart/lazy";
+import {StatusBadge} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
@@ -17,15 +17,15 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { formatMoney, formatPlainNumber, toDecimal } from "@/utils/money";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MetricStrip } from "@/components/ui/MetricStrip";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {SurfaceCard} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MetricStrip} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
 const EXPORT_CHECKS = [
     { key: "PROFITABILITY_SCOPE_VERIFIED", label: "Profitability period and scope verified" },
     { key: "MARGIN_AND_COST_REVIEWED", label: "Margin, gateway cost and chargeback figures reviewed" },
@@ -63,11 +63,7 @@ type Profitability = {
     byDay?: { day: string; volume: string; gross: string; cost: string; net: string }[];
 };
 
-const CHART_TEXT = "#64748b";
-const CHART_GRID = "#e2e8f0";
-const CHART_INDIGO = "#4f46e5";
-const CHART_EMERALD = "#059669";
-const CHART_SLATE = "#64748b";
+import { CHART_TEXT, CHART_GRID, CHART_INDIGO, CHART_EMERALD, CHART_SLATE } from "@/charts/palette";
 
 const ProfitabilityPage = dc(() => {
     const { t } = useLocale();
@@ -301,9 +297,9 @@ const ProfitabilityPage = dc(() => {
                                     { value: "last_90d", label: t("Last 90 days") },
                                 ]}
                             />
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!data.value} onClick={() => void copyProfitabilitySummary()}>{t("Copy summary")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export snapshot")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-content-copy" disabled={!data.value} onClick={() => void copyProfitabilitySummary()}>{t("Copy summary")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export snapshot")}</PgButton>
                         </ThemedView>
                     )</PageHeader>
 

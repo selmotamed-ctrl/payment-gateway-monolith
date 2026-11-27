@@ -1,7 +1,7 @@
 import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VSelect, VSwitch, VTextField } from "@/components/vael/VuetifyShim";
+import {PgButton, PgAutocomplete, PgSwitch, PgTextField} from "@pg/ui";
 import {
     ENTRY_TYPES,
     MAX_ENTRIES,
@@ -68,7 +68,7 @@ export const EntriesEditor = defineComponent({
                                 backgroundColor: "var(--pg-bg-surface-subtle)",
                             }}
                         >
-                            <VTextField
+                            <PgTextField
                                 label={t("Key")}
                                 density="compact"
                                 variant="outlined"
@@ -79,7 +79,7 @@ export const EntriesEditor = defineComponent({
                                 errorMessages={error === "KEY_REQUIRED" || error === "KEY_TOO_LONG" || error === "KEY_DUPLICATE" ? [t(ERROR_TEXT[error])] : []}
                                 {...{ maxlength: MAX_KEY_LENGTH, autocomplete: "off" }}
                             />
-                            <VSelect
+                            <PgAutocomplete
                                 label={t("Type")}
                                 density="compact"
                                 variant="outlined"
@@ -89,7 +89,7 @@ export const EntriesEditor = defineComponent({
                                 modelValue={entry.type}
                                 onUpdate:modelValue={(value: string) => update(entry.uid, { type: value as EntryDraft["type"] })}
                             />
-                            <VTextField
+                            <PgTextField
                                 label={entry.isSecret ? t("Secret value") : t("Value")}
                                 density="compact"
                                 variant="outlined"
@@ -101,7 +101,7 @@ export const EntriesEditor = defineComponent({
                                 errorMessages={error === "VALUE_REQUIRED" || error === "VALUE_TOO_LONG" ? [t(ERROR_TEXT[error])] : []}
                                 {...{ maxlength: MAX_VALUE_LENGTH, autocomplete: "new-password" }}
                             />
-                            <VSwitch
+                            <PgSwitch
                                 label={t("Secret")}
                                 density="compact"
                                 hideDetails
@@ -110,7 +110,7 @@ export const EntriesEditor = defineComponent({
                                 modelValue={entry.isSecret}
                                 onUpdate:modelValue={(value: unknown) => update(entry.uid, { isSecret: value === true })}
                             />
-                            <VBtn
+                            <PgButton
                                 icon="mdi-delete-outline"
                                 variant="text"
                                 size="small"
@@ -123,7 +123,7 @@ export const EntriesEditor = defineComponent({
                     );
                 })}
                 <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                    <VBtn
+                    <PgButton
                         variant="tonal"
                         size="small"
                         prependIcon="mdi-plus"
@@ -131,14 +131,14 @@ export const EntriesEditor = defineComponent({
                         onClick={add}
                     >
                         {t("Add entry")}
-                    </VBtn>
+                    </PgButton>
                     {props.showErrors && props.validation?.empty && (
-                        <span role="alert" style={{ fontSize: "12px", color: "var(--pg-status-danger-text)" }}>
+                        <span style={{ fontSize: "12px", color: "var(--pg-status-danger-text)" }}>
                             {t("Add at least one entry")}
                         </span>
                     )}
                     {props.validation?.tooMany && (
-                        <span role="alert" style={{ fontSize: "12px", color: "var(--pg-status-danger-text)" }}>
+                        <span style={{ fontSize: "12px", color: "var(--pg-status-danger-text)" }}>
                             {t("Too many entries")}
                         </span>
                     )}

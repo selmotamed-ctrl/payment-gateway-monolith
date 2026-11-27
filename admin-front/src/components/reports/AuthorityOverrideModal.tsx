@@ -1,8 +1,8 @@
 import { computed, ref, watch, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VCheckbox, VSelect, VTextarea } from "@/components/vael/VuetifyShim";
-import { FormField, FormModal } from "@/components/ui";
+import {VAlert, PgCheckbox, PgAutocomplete, PgTextarea} from "@pg/ui";
+import {FormField, FormModal} from "@pg/ui";
 
 export const OVERRIDE_JUSTIFICATION_MIN = 15;
 
@@ -80,7 +80,7 @@ export const AuthorityOverrideModal = defineComponent({
         onSubmit={submit}
       >
         <FormField label={t("Allowed roles")}>
-          <VSelect
+          <PgAutocomplete
             modelValue={roles.value}
             onUpdate:modelValue={(value: string[]) => (roles.value = value)}
             items={props.roles}
@@ -89,7 +89,7 @@ export const AuthorityOverrideModal = defineComponent({
           />
         </FormField>
         <FormField label={t("Allowed authorities")}>
-          <VSelect
+          <PgAutocomplete
             modelValue={authorities.value}
             onUpdate:modelValue={(value: string[]) => (authorities.value = value)}
             items={props.authorities}
@@ -97,7 +97,7 @@ export const AuthorityOverrideModal = defineComponent({
             chips
           />
         </FormField>
-        <VCheckbox
+        <PgCheckbox
           color="primary"
           hideDetails
           label={t("Allow confidential AML bypass (requires MLRO/Security sign-off)")}
@@ -115,7 +115,7 @@ export const AuthorityOverrideModal = defineComponent({
           hint={t("At least 15 characters. Recorded in the audit trail.")}
           error={touched.value ? justificationProblem.value : ""}
         >
-          <VTextarea
+          <PgTextarea
             modelValue={justification.value}
             onUpdate:modelValue={(value: string) => (justification.value = value)}
             rows={3}

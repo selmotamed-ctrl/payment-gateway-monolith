@@ -1,13 +1,13 @@
 import { computed, onMounted, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VAlert, VBtn, VFileInput, VSelect } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgFileUpload, PgAutocomplete} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
-import { FormField } from "@/components/ui/FormField";
-import { MonoRef } from "@/components/ui/MonoRef";
+import {FormField} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
 import { LOGO_ERROR_MESSAGES } from "./messages";
 import { assetMimeToContentType, formatBytes, validateLogoFile } from "./model/assets";
 
@@ -125,7 +125,7 @@ export const LogoAssetPicker = defineComponent({
             return (
                 <div style={{ display: "flex", flexDirection: "column", gap: "10px", minInlineSize: 0 }}>
                     <FormField label={t("Logo asset")} error={loadError.value}>
-                        <VSelect
+                        <PgAutocomplete
                             modelValue={props.modelValue}
                             onUpdate:modelValue={(value: string | null) => emit("update:modelValue", value ?? null)}
                             items={assets.value.map((asset) => ({ title: `${asset.name} · ${typeLabel(asset)} · ${formatBytes(asset.sizeBytes)}`, value: asset.id }))}
@@ -152,7 +152,7 @@ export const LogoAssetPicker = defineComponent({
                     {props.canRegister && !props.disabled && (
                         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                             <FormField label={t("Register a new logo")} hint={t("PNG or SVG, up to 5 MB.")} error={registerError.value}>
-                                <VFileInput
+                                <PgFileUpload
                                     {...{ accept: "image/png,image/svg+xml" }}
                                     modelValue={null}
                                     prependIcon="mdi-image-plus-outline"
@@ -166,8 +166,8 @@ export const LogoAssetPicker = defineComponent({
                                 {t("The logo is stored in the shared encrypted vault, checked for active content and locked by its catalogue record.")}
                             </VAlert>
                             <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                                <VBtn size="small" variant="text" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Reload assets")}</VBtn>
-                                {selected.value && <VBtn size="small" variant="text" color="error" prependIcon="mdi-delete-outline" onClick={() => void removeSelected()}>{t("Delete selected logo")}</VBtn>}
+                                <PgButton size="small" variant="text" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Reload assets")}</PgButton>
+                                {selected.value && <PgButton size="small" variant="text" color="error" prependIcon="mdi-delete-outline" onClick={() => void removeSelected()}>{t("Delete selected logo")}</PgButton>}
                             </div>
                         </div>
                     )}

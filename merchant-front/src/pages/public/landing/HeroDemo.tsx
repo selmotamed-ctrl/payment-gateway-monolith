@@ -1,9 +1,9 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VIcon } from "@/components/vael/VuetifyShim";
+import {PgIcon} from "@pg/ui";
 import Decimal from "decimal.js";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {StatusBadge} from "@pg/ui";
 import { formatMoney } from "@/utils/money";
 import {
     LANDING_DEMO_AMOUNT,
@@ -154,7 +154,7 @@ export const HeroDemo = defineComponent({
             if (s === 0) {
                 return (
                     <div class="pgl-demo__hint">
-                        <VIcon icon="mdi-gesture-tap" size={18} aria-hidden="true" />
+                        <PgIcon icon="mdi-gesture-tap" size={18} aria-hidden="true" />
                         <span>{t("Choose how to pay")}</span>
                     </div>
                 );
@@ -208,7 +208,7 @@ export const HeroDemo = defineComponent({
                     return (
                         <div class="pgl-demo__push" aria-hidden="true">
                             <div class="pgl-push-card">
-                                <VIcon icon="mdi-bell-ring-outline" size={16} />
+                                <PgIcon icon="mdi-bell-ring-outline" size={16} />
                                 <span>
                                     {t("Approve")} <b class="pgl-tabular">{money(LANDING_DEMO_AMOUNT)}</b>
                                 </span>
@@ -258,7 +258,7 @@ export const HeroDemo = defineComponent({
                             <span class="pgl-dot" />
                             <span class="pgl-dot" />
                             <span class="pgl-demo__url pgl-mono" dir="ltr">
-                                <VIcon icon="mdi-lock-outline" size={12} />
+                                <PgIcon icon="mdi-lock-outline" size={12} />
                                 pay.example.ly/pay/lnk_8F2K…
                             </span>
                         </div>
@@ -270,10 +270,10 @@ export const HeroDemo = defineComponent({
                                 </span>
                                 <div>
                                     <div class="pgl-demo__merchant-name">{t("Al-Waha Electronics")}</div>
-                                    <div class="pgl-demo__merchant-sub">{t("Order #4092")}</div>
+                                    <div class="pgl-demo__merchant-sub">{t("Order #")}{"4092"}</div>
                                 </div>
                                 <span class="pgl-demo__lock" title={t("Price locked on the server")}>
-                                    <VIcon icon="mdi-lock" size={12} aria-hidden="true" />
+                                    <PgIcon icon="mdi-lock" size={12} aria-hidden="true" />
                                     {t("Server-priced")}
                                 </span>
                             </div>
@@ -292,7 +292,7 @@ export const HeroDemo = defineComponent({
                                         aria-pressed={mode.value === item.mode ? "true" : "false"}
                                         onClick={() => selectMode(item.mode)}
                                     >
-                                        <VIcon icon={item.icon} size={15} aria-hidden="true" />
+                                        <PgIcon icon={item.icon} size={15} aria-hidden="true" />
                                         <span>{t(item.label)}</span>
                                     </button>
                                 ))}
@@ -335,7 +335,7 @@ export const HeroDemo = defineComponent({
                         </ul>
                         <div class="pgl-demo__ledger-foot">
                             <span class="pgl-balanced">
-                                <VIcon icon="mdi-scale-balance" size={14} aria-hidden="true" />
+                                <PgIcon icon="mdi-scale-balance" size={14} aria-hidden="true" />
                                 {balanced ? t("Balanced: debits equal credits") : t("Unbalanced")}
                             </span>
                             <span class="pgl-demo__wallet">
@@ -354,10 +354,10 @@ export const HeroDemo = defineComponent({
                             onClick={togglePlay}
                             aria-label={userPaused.value ? t("Play simulation") : t("Pause simulation")}
                         >
-                            <VIcon icon={userPaused.value ? "mdi-play" : "mdi-pause"} size={16} aria-hidden="true" />
+                            <PgIcon icon={userPaused.value ? "mdi-play" : "mdi-pause"} size={16} aria-hidden="true" />
                         </button>
                         <button type="button" class="pgl-icon-btn" onClick={stepForward} aria-label={t("Next step")}>
-                            <VIcon icon={isRtl ? "mdi-skip-previous" : "mdi-skip-next"} size={16} aria-hidden="true" />
+                            <PgIcon icon={isRtl ? "mdi-skip-previous" : "mdi-skip-next"} size={16} aria-hidden="true" />
                         </button>
                         <p id="pgl-demo-caption" class="pgl-demo__caption" aria-live={announce.value ? "polite" : "off"}>
                             <span class="pgl-demo__step pgl-tabular">

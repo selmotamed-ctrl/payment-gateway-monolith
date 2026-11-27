@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { useTheme } from "@/utils/vuetify-compat";
-import { ThemedView } from "@/components/ThemedView";
+import {ThemedView} from "@pg/ui";
 
 type GuideMarkdownProps = {
     source: string;

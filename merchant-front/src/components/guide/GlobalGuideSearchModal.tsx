@@ -1,10 +1,10 @@
 import { computed, nextTick, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VList, VListItem, VTextField } from "@/components/vael/VuetifyShim";
-import { FormModal } from "@/components/ui/FormModal";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {PgList, PgListItem, PgTextField} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 import { MERCHANT_DEVELOPER_CHAPTERS } from "@/content/guide/merchantDeveloperApiGuide";
 import { MERCHANT_OPERATIONS_CHAPTERS } from "@/content/guide/merchantOperationsGuide";
 import type { MerchantChapterRole } from "@/content/guide/types";
@@ -140,7 +140,7 @@ export const GlobalGuideSearchModal = defineComponent({
                 }
                 size="lg"
             >
-                <VTextField
+                <PgTextField
                     id={inputId}
                     modelValue={query.value}
                     onUpdate:modelValue={(value: string | null) => (query.value = value ?? "")}
@@ -161,9 +161,9 @@ export const GlobalGuideSearchModal = defineComponent({
                     </span>
                 </div>
                 <div style={{ maxHeight: "58vh", overflowY: "auto" }}>
-                    <VList density="compact">
+                    <PgList density="compact">
                         {results.value.map((entry, index) => (
-                            <VListItem
+                            <PgListItem
                                 key={entry.id}
                                 active={index === selected.value}
                                 onClick={() => choose(entry)}
@@ -186,18 +186,18 @@ export const GlobalGuideSearchModal = defineComponent({
                                         {entryBody(entry)}
                                     </span>
                                 </div>
-                            </VListItem>
+                            </PgListItem>
                         ))}
                         {results.value.length === 0 && (
-                            <VListItem>
+                            <PgListItem>
                                 <span style={{ fontSize: "13px", color: "var(--pg-ink-muted)" }}>
                                     {isArabic.value
                                         ? "لا نتائج. جرّب KYB أو POS أو pg_live_ أو M-03."
                                         : "No results. Try KYB, POS, pg_live_, or M-03."}
                                 </span>
-                            </VListItem>
+                            </PgListItem>
                         )}
-                    </VList>
+                    </PgList>
                 </div>
             </FormModal>
         );

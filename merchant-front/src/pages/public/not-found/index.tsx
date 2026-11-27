@@ -2,9 +2,9 @@ import { dc } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
 
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { MonoRef } from "@/components/ui/MonoRef";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
 
 const NotFoundPage = dc(() => {
     const { t } = useLocale();

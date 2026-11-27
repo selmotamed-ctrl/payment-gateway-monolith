@@ -24,7 +24,7 @@ code:
   - checkout-back/api/public/pay.ts
   - checkout-back/api/public/inbound.ts
   - checkout-back/lib/corePools.ts
-  - checkout-front/src/components/sandbox/SandboxCheckoutInspector.tsx
+  - checkout-front/src/features/sandbox/SandboxCheckoutInspector.tsx
   - merchant-front/src/pages/sandbox/**
   - admin-front/src/pages/sandbox/**
   - fake-rails-back/engine/accounts/AccountLedgerService.ts

@@ -2,23 +2,23 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VSelect, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { StateView } from "@/components/StateView";
-import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
-import SandboxResourceTable from "@/components/sandbox/SandboxResourceTable";
-import { applicationFilters } from "@/components/sandbox/sandboxFilters";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { SectionFields } from "@/components/SectionFields";
+import {VAlert, PgButton, PgAutocomplete, PgTextField, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { SandboxBanner } from "@/features/sandbox/SandboxBanner";
+import { SandboxResourceTable } from "@/features/sandbox/SandboxResourceTable";
+import { applicationFilters } from "@/features/sandbox/sandboxFilters";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { sandboxGet, sandboxPost, type SandboxApplicationRow, type SandboxSummaryResponse, type SandboxStudioOverview } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -142,7 +142,7 @@ const SandboxApplicationsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={t("Sandbox Applications")} subtitle={t("Applications bound to sandbox wallets and Fake Rails routes.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => { refresh.value?.(); void loadSummary(); }}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn><VBtn color="primary" prependIcon="mdi-plus" onClick={() => { formError.value = ""; createOpen.value = true; }}>{t("Create application")}</VBtn></div></PageHeader>
+            <PageHeader title={t("Sandbox Applications")} subtitle={t("Applications bound to sandbox wallets and Fake Rails routes.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => { refresh.value?.(); void loadSummary(); }}>{t("Refresh")}</PgButton><PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</PgButton><PgButton color="primary" prependIcon="mdi-plus" onClick={() => { formError.value = ""; createOpen.value = true; }}>{t("Create application")}</PgButton></div></PageHeader>
             <SandboxBanner />
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             <StateView loading={loading.value && !summary.value} minHeight="180px">
@@ -153,12 +153,12 @@ const SandboxApplicationsPage = dc(() => {
             </StateView>
             <FormModal modelValue={createOpen.value} onUpdate:modelValue={(v: any) => (createOpen.value = v)} title={t("Create sandbox application")} size="md" loading={creating.value} errorMessage={formError.value} submitLabel={t("Create")} onSubmit={() => void create()}>
                 <SectionFields title={t("Application details")}>
-                    <FormField label={t("Application name")} required><VTextField modelValue={form.value.name} onUpdate:modelValue={(v: string) => (form.value.name = v)} hideDetails /></FormField>
-                    <FormField label={t("Description")}><VTextarea modelValue={form.value.description} onUpdate:modelValue={(v: string) => (form.value.description = v)} rows={3} hideDetails /></FormField>
-                    <FormField label={t("Expected monthly volume")}><VTextField type="number" modelValue={form.value.expectedMonthlyVolume} onUpdate:modelValue={(v: string) => (form.value.expectedMonthlyVolume = v)} hideDetails /></FormField>
-                    <FormField label={t("Sandbox wallet")} required><VSelect items={wallets.value.map((wallet) => ({ title: `${wallet.name || wallet.id.slice(0, 8)} (${wallet.availableBalance})`, value: wallet.id }))} modelValue={form.value.walletId} onUpdate:modelValue={(v: string) => (form.value.walletId = v)} hideDetails /></FormField>
-                    <FormField label={t("Rail whitelist")}><VTextField modelValue={form.value.railWhitelist} onUpdate:modelValue={(v: string) => (form.value.railWhitelist = v)} placeholder={t("Comma separated, empty means all rails.")} hideDetails /></FormField>
-                    <FormField label={t("Redirect domain allowlist")}><VTextField modelValue={form.value.redirectDomainAllowlist} onUpdate:modelValue={(v: string) => (form.value.redirectDomainAllowlist = v)} placeholder={t("Comma separated domains.")} hideDetails /></FormField>
+                    <FormField label={t("Application name")} required><PgTextField modelValue={form.value.name} onUpdate:modelValue={(v: string) => (form.value.name = v)} hideDetails /></FormField>
+                    <FormField label={t("Description")}><PgTextarea modelValue={form.value.description} onUpdate:modelValue={(v: string) => (form.value.description = v)} rows={3} hideDetails /></FormField>
+                    <FormField label={t("Expected monthly volume")}><PgTextField type="number" modelValue={form.value.expectedMonthlyVolume} onUpdate:modelValue={(v: string) => (form.value.expectedMonthlyVolume = v)} hideDetails /></FormField>
+                    <FormField label={t("Sandbox wallet")} required><PgAutocomplete items={wallets.value.map((wallet) => ({ title: `${wallet.name || wallet.id.slice(0, 8)} (${wallet.availableBalance})`, value: wallet.id }))} modelValue={form.value.walletId} onUpdate:modelValue={(v: string) => (form.value.walletId = v)} hideDetails /></FormField>
+                    <FormField label={t("Rail whitelist")}><PgTextField modelValue={form.value.railWhitelist} onUpdate:modelValue={(v: string) => (form.value.railWhitelist = v)} placeholder={t("Comma separated, empty means all rails.")} hideDetails /></FormField>
+                    <FormField label={t("Redirect domain allowlist")}><PgTextField modelValue={form.value.redirectDomainAllowlist} onUpdate:modelValue={(v: string) => (form.value.redirectDomainAllowlist = v)} placeholder={t("Comma separated domains.")} hideDetails /></FormField>
                 </SectionFields>
             </FormModal>
         </ScreenContainer>

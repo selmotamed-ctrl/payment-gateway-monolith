@@ -1,7 +1,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter, type RouteLocationRaw } from "vue-router";
-import { VDialog, VIcon, VProgressLinear } from "@/components/vael/VuetifyShim";
+import {PgAlert, PgDialog, PgIcon, PgProgressBar, PgTextField} from "@pg/ui";
 import type { GuideSearchEntry } from "@/content/guide/types";
 import {
     cancelPendingGlobalSearch,
@@ -92,7 +92,7 @@ export const GlobalSearchPalette = defineComponent({
     emits: ["update:modelValue"],
     setup(props, { emit }) {
         const router = useRouter();
-        const inputRef = ref<HTMLInputElement | null>(null);
+        const inputRef = ref<any>(null);
         const listboxRef = ref<HTMLElement | null>(null);
 
         const query = ref("");
@@ -544,7 +544,7 @@ export const GlobalSearchPalette = defineComponent({
         };
 
         return () => (
-            <VDialog
+            <PgDialog
                 modelValue={props.modelValue}
                 onUpdate:modelValue={updateModelValue}
                 maxWidth={780}
@@ -557,14 +557,14 @@ export const GlobalSearchPalette = defineComponent({
                     onKeydown={handleKeydown}
                 >
                     <div class="pg-command-header">
-                        <VIcon
+                        <PgIcon
                             icon="mdi-magnify"
                             size={20}
                             class="pg-command-header__icon"
                         />
-                        <input
+                        <PgTextField
                             ref={inputRef}
-                            type="text"
+                            hideDetails
                             role="combobox"
                             aria-expanded={props.modelValue ? "true" : "false"}
                             aria-autocomplete="list"
@@ -575,10 +575,8 @@ export const GlobalSearchPalette = defineComponent({
                             placeholder={t.value.placeholder}
                             autocomplete="off"
                             spellcheck={false}
-                            value={query.value}
-                            onInput={(event) => {
-                                query.value = (event.target as HTMLInputElement).value;
-                            }}
+                            modelValue={query.value}
+                            onUpdate:modelValue={(value: string) => (query.value = value)}
                         />
                         {query.value.length > 0 && (
                             <button
@@ -590,7 +588,7 @@ export const GlobalSearchPalette = defineComponent({
                                     inputRef.value?.focus();
                                 }}
                             >
-                                <VIcon icon="mdi-close-circle" size={16} />
+                                <PgIcon icon="mdi-close-circle" size={16} />
                             </button>
                         )}
                         <kbd class="pg-command-kbd">ESC</kbd>
@@ -635,7 +633,7 @@ export const GlobalSearchPalette = defineComponent({
 
                     <div class="pg-command-progress-slot">
                         {loading.value && (
-                            <VProgressLinear indeterminate height={2} color="primary" />
+                            <PgProgressBar indeterminate height={2} color="primary" />
                         )}
                     </div>
 
@@ -676,7 +674,7 @@ export const GlobalSearchPalette = defineComponent({
                                                         inputRef.value?.focus();
                                                     }}
                                                 >
-                                                    <VIcon icon="mdi-history" size={14} />
+                                                    <PgIcon icon="mdi-history" size={14} />
                                                     <span>{recentQuery}</span>
                                                 </button>
                                                 <button
@@ -692,7 +690,7 @@ export const GlobalSearchPalette = defineComponent({
                                                             );
                                                     }}
                                                 >
-                                                    <VIcon icon="mdi-close" size={12} />
+                                                    <PgIcon icon="mdi-close" size={12} />
                                                 </button>
                                             </div>
                                         ))}
@@ -745,17 +743,17 @@ export const GlobalSearchPalette = defineComponent({
                         {errorState.value &&
                             (activeTab.value === "all" ||
                                 activeTab.value === "records") && (
-                                <div class="pg-command-error-banner" role="alert">
+                                <PgAlert tone="danger" density="compact" class="pg-command-error-banner">
                                     <span>{t.value.errorBanner}</span>
                                     <button
                                         type="button"
                                         class="pg-command-retry-btn"
                                         onClick={() => void executeServerSearch(true)}
                                     >
-                                        <VIcon icon="mdi-refresh" size={14} />
+                                        <PgIcon icon="mdi-refresh" size={14} />
                                         <span>{t.value.retry}</span>
                                     </button>
-                                </div>
+                                </PgAlert>
                             )}
 
                         {!errorState.value &&
@@ -769,7 +767,7 @@ export const GlobalSearchPalette = defineComponent({
                                         class="pg-command-retry-btn"
                                         onClick={() => void executeServerSearch(true)}
                                     >
-                                        <VIcon icon="mdi-refresh" size={14} />
+                                        <PgIcon icon="mdi-refresh" size={14} />
                                         <span>{t.value.retry}</span>
                                     </button>
                                 </div>
@@ -780,7 +778,7 @@ export const GlobalSearchPalette = defineComponent({
                             !errorState.value &&
                             flatOptions.value.length === 0 && (
                                 <div class="pg-command-empty">
-                                    <VIcon icon="mdi-file-search-outline" size={32} />
+                                    <PgIcon icon="mdi-file-search-outline" size={32} />
                                     <div class="pg-command-empty__title">
                                         {t.value.noResultsTitle(trimmedQuery.value)}
                                     </div>
@@ -812,7 +810,7 @@ export const GlobalSearchPalette = defineComponent({
                         </div>
                     </div>
                 </div>
-            </VDialog>
+            </PgDialog>
         );
     },
 });

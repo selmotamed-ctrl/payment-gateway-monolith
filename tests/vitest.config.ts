@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("../admin-front/src", import.meta.url)),
+      "@pg/ui": fileURLToPath(new URL("../packages/ui/src", import.meta.url)),
     },
   },
   test: {

@@ -1,0 +1,13 @@
+{
+  "name": "payment-gateway-monolith",
+  "private": true,
+  "type": "module",
+  "description": "Payment Gateway monorepo. The four portals share the 2026 Fintech Vapor design system in packages/ui (@pg/ui).",
+  "scripts": {
+    "ui:audit": "bun scripts/ui-full-sweep-audit.ts",
+    "ui:icons": "bun scripts/generate-ui-icons.ts",
+    "ui:icons:check": "bun scripts/generate-ui-icons.ts --check",
+    "ui:test": "cd packages/ui && bun run test",
+    "ui:typecheck": "cd packages/ui && bun run typecheck"
+  }
+}

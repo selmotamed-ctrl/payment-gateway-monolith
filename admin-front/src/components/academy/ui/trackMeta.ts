@@ -1,4 +1,4 @@
-import type { BadgeTone } from "@/components/ui/StatusBadge";
+import type { BadgeTone } from "@pg/ui";
 import type { TrackId } from "@/content/academy";
 import type { BadgeState } from "../useAcademyProgress";
 

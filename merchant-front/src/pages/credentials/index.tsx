@@ -1,23 +1,23 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { StateView } from "@/components/StateView";
-import { DataTable } from "@/components/Table/DataTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { SectionFields } from "@/components/SectionFields";
+import {PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 type CredentialSet = {
     id: string;
     label: string;
@@ -170,9 +170,9 @@ const CredentialsPage = dc(() => {
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Merchant Credentials")} subtitle={t("Gateway credential sets and rotation posture.")}>(
-                        <VBtn variant="tonal" onClick={() => openDialog(null)}>
+                        <PgButton variant="tonal" onClick={() => openDialog(null)}>
                             {t("Create")}
-                        </VBtn>
+                        </PgButton>
                     )</PageHeader>
 
                 {error.value ? (
@@ -204,14 +204,14 @@ const CredentialsPage = dc(() => {
             >
                 <SectionFields title={t("Details")}>
                     <FormField label={t("Credential Name")} required>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.label}
                             onUpdate:modelValue={(v: string) => (form.value.label = v)}
                             hideDetails
                         />
                     </FormField>
                     <FormField label={t("Gateway Code")} required>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.gatewayCode}
                             onUpdate:modelValue={(v: string) => (form.value.gatewayCode = v)}
                             disabled={!!editing.value}
@@ -219,7 +219,7 @@ const CredentialsPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Environment")} required>
-                        <VSelect
+                        <PgAutocomplete
                             items={["SANDBOX", "LIVE"]}
                             modelValue={form.value.env}
                             onUpdate:modelValue={(v: any) => (form.value.env = v)}
@@ -228,7 +228,7 @@ const CredentialsPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Settlement Target")} required>
-                        <VSelect
+                        <PgAutocomplete
                             items={["PLATFORM_CLEARING", "MERCHANT_DIRECT", "PROVIDER_HELD"]}
                             modelValue={form.value.settlementTarget}
                             onUpdate:modelValue={(v: any) => (form.value.settlementTarget = v)}
@@ -239,14 +239,14 @@ const CredentialsPage = dc(() => {
                 </SectionFields>
                 <SectionFields title={t("Secret")}>
                     <FormField label={t("Username")}>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.username}
                             onUpdate:modelValue={(v: string) => (form.value.username = v)}
                             hideDetails
                         />
                     </FormField>
                     <FormField label={t("Secret")} hint={t("Write Only")}>
-                        <VTextField
+                        <PgTextField
                             type="password"
                             modelValue={form.value.secret}
                             onUpdate:modelValue={(v: string) => (form.value.secret = v)}
@@ -254,7 +254,7 @@ const CredentialsPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Secret Reference")}>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.secretRef}
                             onUpdate:modelValue={(v: string) => (form.value.secretRef = v)}
                             hideDetails

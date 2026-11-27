@@ -2,17 +2,17 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import { VBtn } from "@/components/vael/VuetifyShim";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { FormModal } from "@/components/ui/FormModal";
+import {PgButton} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {FormModal} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import { xlsxUIPipeline } from "@/utils/xlsx";
-import ScreenContainer from "@/components/ScreenContainer";
-import { ThemedView } from "@/components/ThemedView";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { MetaPill, MonoRef, PageHeader, SegmentedTabs, StatusBadge } from "@/components/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {MetaPill, MonoRef, PageHeader, SegmentedTabs, StatusBadge} from "@pg/ui";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
@@ -259,15 +259,15 @@ const Page = dc(() => {
       <ThemedView style={{ gap: "18px" }}>
         <PageHeader title={t("Reports Needing Migration")} subtitle={t("Stored reports that must be regenerated or migrated before they can run again")} badge="NEEDS_MIGRATION" badgeLabel={t("Needs migration")} badgeTone="danger">(
             <div class="d-flex flex-wrap ga-2">
-              <VBtn variant="tonal" prependIcon="mdi-page-layout-header-footer" onClick={() => void router.push({ name: "ReportsChromeNeedsMigration" })}>
+              <PgButton variant="tonal" prependIcon="mdi-page-layout-header-footer" onClick={() => void router.push({ name: "ReportsChromeNeedsMigration" })}>
                 {t("Headers & Footers migration")}
-              </VBtn>
-              <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>
+              </PgButton>
+              <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>
                 {t("Export queue")}
-              </VBtn>
-              <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refresh}>
+              </PgButton>
+              <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refresh}>
                 {t("Refresh")}
-              </VBtn>
+              </PgButton>
             </div>
           )</PageHeader>
         <SegmentedTabs

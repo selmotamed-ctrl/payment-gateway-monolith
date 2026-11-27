@@ -12,7 +12,7 @@ import {
   isStatusValue,
   normalizeDiff,
   parsePath,
-} from "@/components/ui/jsonDiffModel";
+} from "../../packages/ui/src/data/json/jsonDiffModel";
 
 describe("label humanisation", () => {
   test("camelCase, snake_case and acronyms", () => {

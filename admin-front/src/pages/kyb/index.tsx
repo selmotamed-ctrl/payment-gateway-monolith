@@ -2,19 +2,19 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
-import { VBtn } from "@/components/vael/VuetifyShim";
+import {PgButton} from "@pg/ui";
 import { useRouter } from "vue-router";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import { statusTone } from "@/components/Table/statusTone";
-import type { TableHeader } from "@/components/Table/types";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import {statusTone} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { areHelpPanelsVisible } from "@/constants/env";
@@ -36,11 +36,11 @@ import KybDocumentPreview from "./components/KybDocumentPreview";
 import KybReviewDialog from "./components/KybReviewDialog";
 import KybActionDialog, { type KybActionMode } from "./components/KybActionDialog";
 
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
 type KybDocumentsSummary = {
     total: number;
     pending: number;
@@ -535,8 +535,8 @@ const KybReviewPage = dc(() => {
                             <StatusBadge status="info" label={`${total.value} ${t("documents")}`} toneOverride="info" showDot={false} />
                             <StatusBadge status="success" label={`${actionableCount.value} ${t("actionable")}`} toneOverride="success" showDot={false} />
                             <StatusBadge status="duplicates" label={`${duplicateCount.value} ${t("duplicates")}`} toneOverride={duplicateCount.value ? "warning" : "neutral"} showDot={false} />
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</PgButton>
                         </ThemedView>
                     )</PageHeader>
 

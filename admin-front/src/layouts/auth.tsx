@@ -2,8 +2,8 @@ import { createSlot } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
 import LogoSvg from "@/assets/images/logo.svg";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import ThemeMenu from "@/components/ThemeMenu";
+import {StatusBadge} from "@pg/ui";
+import {PgThemeMenu as ThemeMenu} from "@pg/ui";
 
 export const AuthLayout = defineComponent({
     name: "AuthLayout",

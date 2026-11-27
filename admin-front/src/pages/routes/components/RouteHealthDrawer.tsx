@@ -1,15 +1,15 @@
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VAlert, VBtn, VSelect, VTextarea, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgAutocomplete, PgTextarea, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { FormField } from "@/components/ui/FormField";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { SectionFields } from "@/components/SectionFields";
-import { StateView } from "@/components/StateView";
+import {SlideOverDrawer} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
+import {StateView} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -272,22 +272,22 @@ export const RouteHealthDrawer = defineComponent({
 
                     <SectionFields title={t("Run a recovery probe")} subtitle={t("The probe is read-only and is recorded as evidence. It never changes a credential-set verdict.")}>
                         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" prependIcon="mdi-access-point-check" loading={busy.value} onClick={() => void runProbe()}>
+                            <PgButton variant="tonal" prependIcon="mdi-access-point-check" loading={busy.value} onClick={() => void runProbe()}>
                                 {t("Run probe now")}
-                            </VBtn>
+                            </PgButton>
                         </div>
                     </SectionFields>
 
                     <SectionFields title={t("Admin override")} subtitle={t("Force HEALTHY is approved by a second officer. DEGRADED and OPEN_BREAKER apply immediately.")}>
                         <FormField label={t("Target state")}>
-                            <VSelect
+                            <PgAutocomplete
                                 items={["HEALTHY", "DEGRADED", "OPEN_BREAKER"]}
                                 modelValue={overrideState.value}
                                 onUpdate:modelValue={(value: HealthState) => (overrideState.value = value)}
                             />
                         </FormField>
                         <FormField label={t("Reason")} hint={t("At least 10 characters; this is written to the audit log and the approval.")}>
-                            <VTextarea
+                            <PgTextarea
                                 rows={3}
                                 modelValue={overrideReason.value}
                                 onUpdate:modelValue={(value: string) => (overrideReason.value = value)}
@@ -297,32 +297,32 @@ export const RouteHealthDrawer = defineComponent({
                                 label={t("Expires at")}
                                 hint={`${t("Optional")}. ${t("Default")}: ${data.value?.policy?.overrideDefaultExpiryDays ?? 7} ${t("days")}; ${t("maximum")}: ${data.value?.policy?.overrideMaxExpiryDays ?? 30} ${t("days")}.`}
                             >
-                            <VTextField
+                            <PgTextField
                                 type="datetime-local"
                                 modelValue={overrideExpiry.value}
                                 onUpdate:modelValue={(value: string) => (overrideExpiry.value = value)}
                             />
                         </FormField>
                         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn color="primary" variant="flat" loading={busy.value} onClick={() => void applyOverride()}>
+                            <PgButton color="primary" variant="flat" loading={busy.value} onClick={() => void applyOverride()}>
                                 {overrideState.value === "HEALTHY" ? t("Request force healthy") : t("Apply override")}
-                            </VBtn>
+                            </PgButton>
                         </div>
                     </SectionFields>
 
                     {activeOverride.value && (
                         <SectionFields title={t("Clear the override")} subtitle={t("If the computed state is healthier than the override, clearing needs a second approval.")}>
                             <FormField label={t("Reason")} hint={t("At least 10 characters.")}>
-                                <VTextarea
+                                <PgTextarea
                                     rows={2}
                                     modelValue={clearReason.value}
                                     onUpdate:modelValue={(value: string) => (clearReason.value = value)}
                                 />
                             </FormField>
                             <div>
-                                <VBtn variant="outlined" color="warning" loading={busy.value} onClick={() => void clearOverride()}>
+                                <PgButton variant="outlined" color="warning" loading={busy.value} onClick={() => void clearOverride()}>
                                     {t("Clear override")}
-                                </VBtn>
+                                </PgButton>
                             </div>
                         </SectionFields>
                     )}
@@ -449,8 +449,8 @@ export const RouteHealthDrawer = defineComponent({
                     default: body,
                     footer: () => (
                         <>
-                            <VBtn variant="text" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
-                            <VBtn variant="text" onClick={() => emit("update:modelValue", false)}>{t("Close")}</VBtn>
+                            <PgButton variant="text" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</PgButton>
+                            <PgButton variant="text" onClick={() => emit("update:modelValue", false)}>{t("Close")}</PgButton>
                         </>
                     ),
                 }}

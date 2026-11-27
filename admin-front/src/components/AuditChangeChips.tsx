@@ -1,7 +1,7 @@
 import { computed, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { MetaPill } from "@/components/ui/MetaPill";
+import {MetaPill} from "@pg/ui";
 import { auditChangeChips, summarizeAuditChange } from "@/utils/auditSummary";
 
 /**

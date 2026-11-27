@@ -1,10 +1,10 @@
 import { dc } from "@/utils/dc";
 import { computed } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VCard, VCardText, VNavigationDrawer } from "@/components/vael/VuetifyShim";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
+import {PgButton, PgCard, PgCardText, PgNavigationDrawer} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StatusChip} from "@pg/ui";
 import { GuideMarkdown } from "@/components/guide/GuideMarkdown";
 import { findBookByNumber, findChapter, GUIDE_ROUTE_HELP } from "@/content/guide/legacy";
 
@@ -32,7 +32,7 @@ export const ContextualHelpDrawer = dc(
         });
 
         return () => (
-            <VNavigationDrawer
+            <PgNavigationDrawer
                 modelValue={props.modelValue}
                 onUpdate:modelValue={(value: boolean) => setOpen(value)}
                 location="end"
@@ -41,7 +41,7 @@ export const ContextualHelpDrawer = dc(
             >
                 <ThemedView style={{ padding: "20px", gap: "14px", height: "100%", overflowY: "auto" }}>
                     <ThemedView style={{ flexDirection: "row", alignItems: "flex-start", gap: "8px" }}>
-                        <VBtn icon="mdi-close" variant="text" aria-label={isArabic() ? "إغلاق" : "Close"} onClick={() => setOpen(false)} />
+                        <PgButton icon="mdi-close" variant="text" aria-label={isArabic() ? "إغلاق" : "Close"} onClick={() => setOpen(false)} />
                         <ThemedView style={{ flex: 1, gap: "6px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                 <StatusChip label={isArabic() ? "المساعدة وإجراءات التشغيل" : "Help & SOP"} tone="primary" size="x-small" />
@@ -75,16 +75,16 @@ export const ContextualHelpDrawer = dc(
                     )}
 
                     {book.value && book.value.sopChecklist.length > 0 ? (
-                        <VCard variant="outlined">
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <PgCard variant="outlined">
+                            <PgCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                 <ThemedText type="defaultSemiBold">{isArabic() ? "قائمة SOP لهذا الكتاب" : "Book SOP checklist"}</ThemedText>
                                 <ol style={{ margin: 0, paddingInlineStart: "22px", lineHeight: 1.7, fontSize: "13px" }}>
                                     {book.value.sopChecklist.map((step, index) => (
                                         <li key={`sop-${index}`}>{step}</li>
                                     ))}
                                 </ol>
-                            </VCardText>
-                        </VCard>
+                            </PgCardText>
+                        </PgCard>
                     ) : null}
 
                     {book.value && book.value.humanErrorWarning ? (
@@ -106,16 +106,16 @@ export const ContextualHelpDrawer = dc(
                         </div>
                     ) : null}
 
-                    <VBtn variant="tonal" prependIcon="mdi-book-open-variant" onClick={() => props.onOpenFullGuide?.()}>
+                    <PgButton variant="tonal" prependIcon="mdi-book-open-variant" onClick={() => props.onOpenFullGuide?.()}>
                         {isArabic() ? "فتح الدليل الكامل" : "Open the full guide"}
-                    </VBtn>
+                    </PgButton>
                     <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>
                         {isArabic()
                             ? "هذا الدرج لا يغلق النموذج أو يعيد تعيينه. يمكنك القراءة ثم العودة إلى العمل."
                             : "This drawer never closes or resets the form you are working on. Read, then return to work."}
                     </ThemedText>
                 </ThemedView>
-            </VNavigationDrawer>
+            </PgNavigationDrawer>
         );
     },
     { props: ["modelValue", "routeName", "onUpdate:modelValue", "onOpenFullGuide"] as any },

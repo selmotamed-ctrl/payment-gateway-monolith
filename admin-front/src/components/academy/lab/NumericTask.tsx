@@ -3,6 +3,7 @@ import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
 import type { NumericTask as NumericTaskType } from "@/content/academy";
 import { parseDecimal, type NumericAnswer } from "../labScoring";
+import { PgTextField } from "@pg/ui";
 
 export const NumericTask = defineComponent({
     name: "AcademyLabNumericTask",
@@ -24,18 +25,19 @@ export const NumericTask = defineComponent({
                         {t("Your answer")}
                         {props.task.unit ? ` (${props.task.unit})` : ""}
                     </label>
-                    <input
+                    <PgTextField
                         id={id()}
                         class="ac-lab-input"
-                        type="text"
+                        density="compact"
+                        hideDetails
                         inputmode="decimal"
                         autocomplete="off"
                         dir="ltr"
-                        value={value}
+                        modelValue={value}
                         disabled={props.locked}
                         aria-invalid={invalid ? "true" : undefined}
                         aria-describedby={`${id()}-help`}
-                        onInput={(event: Event) => props.onChange({ ...(props.answer ?? {}), value: (event.target as HTMLInputElement).value })}
+                        onUpdate:modelValue={(next: string) => props.onChange({ ...(props.answer ?? {}), value: next })}
                     />
                     <span id={`${id()}-help`} role={invalid ? "alert" : undefined} class={["ac-lab-help", invalid ? "ac-lab-help--error" : ""]}>
                         {invalid ? t("Enter a plain number such as -57 or 12.50.") : t("Use digits, a minus sign and a decimal point only.")}

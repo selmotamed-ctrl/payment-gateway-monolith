@@ -2,19 +2,19 @@ import { dc } from "@/utils/dc";
 import { ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { DataTable } from "@/components/Table/DataTable";
-import type { TableHeader } from "@/components/Table/types";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { StateView } from "@/components/StateView";
-import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
+import {VAlert, PgButton} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import type { TableHeader } from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { SandboxBanner } from "@/features/sandbox/SandboxBanner";
 import { sandboxGet } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 
@@ -54,19 +54,19 @@ const SandboxApplicationDetailPage = dc(() => {
         { key: "state", label: "State", Value: ({ row }) => <StatusBadge status={row.state} /> },
         { key: "uses", label: "Uses", value: (row) => `${row.confirmedCount}/${row.useCount}` },
         { key: "createdAt", label: "Created", value: (row) => row.createdAt },
-        { key: "actions", label: "Actions", Value: ({ row }) => <VBtn size="small" variant="tonal" onClick={() => void router.push(`/sandbox/links/${row.id}`)}>{t("Open")}</VBtn> },
+        { key: "actions", label: "Actions", Value: ({ row }) => <PgButton size="small" variant="tonal" onClick={() => void router.push(`/sandbox/links/${row.id}`)}>{t("Open")}</PgButton> },
     ];
     const paymentHeaders: TableHeader<Detail["payments"][number]>[] = [
         { key: "reference", label: "Reference", Value: ({ row }) => <MonoRef value={row.reference} truncate={18} /> },
         { key: "status", label: "Status", Value: ({ row }) => <StatusBadge status={row.status} /> },
         { key: "totalChargedAmount", label: "Amount", Value: ({ row }) => <MoneyDisplay amount={row.totalChargedAmount} currency={row.currency} size="sm" /> },
         { key: "createdAt", label: "Created", value: (row) => row.createdAt },
-        { key: "actions", label: "Actions", Value: ({ row }) => <VBtn size="small" variant="tonal" onClick={() => void router.push(`/sandbox/payments/${row.id}`)}>{t("Open")}</VBtn> },
+        { key: "actions", label: "Actions", Value: ({ row }) => <PgButton size="small" variant="tonal" onClick={() => void router.push(`/sandbox/payments/${row.id}`)}>{t("Open")}</PgButton> },
     ];
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={detail.value?.application.name ?? t("Sandbox Application")} subtitle={detail.value?.application.id ?? applicationId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Applications"), to: "/sandbox/applications" }, { label: detail.value?.application.name ?? applicationId() }]}><VBtn variant="tonal" onClick={() => void router.push("/sandbox/applications")}>{t("Back")}</VBtn></PageHeader>
+            <PageHeader title={detail.value?.application.name ?? t("Sandbox Application")} subtitle={detail.value?.application.id ?? applicationId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Applications"), to: "/sandbox/applications" }, { label: detail.value?.application.name ?? applicationId() }]}><PgButton variant="tonal" onClick={() => void router.push("/sandbox/applications")}>{t("Back")}</PgButton></PageHeader>
             <SandboxBanner />
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             <StateView loading={loading.value} minHeight="200px">

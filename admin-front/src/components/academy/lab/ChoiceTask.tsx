@@ -4,6 +4,7 @@ import { useLocale } from "@/utils/vael-compat";
 import type { ChoiceTask as ChoiceTaskType } from "@/content/academy";
 import type { ChoiceAnswer } from "../labScoring";
 import { choiceTag, renderInline } from "./PanelView";
+import { PgChoice } from "@pg/ui";
 
 export const ChoiceTask = defineComponent({
     name: "AcademyLabChoiceTask",
@@ -27,22 +28,20 @@ export const ChoiceTask = defineComponent({
                         const state = props.locked ? (option.correct ? "good" : chosen ? "bad" : "locked") : chosen ? "selected" : "";
                         return (
                             <div class="ac-lab-opt" key={option.id}>
-                                <label class={["ac-choice", state ? `ac-choice--${state}` : "", props.locked ? "ac-choice--locked" : ""]}>
-                                    <input
-                                        type="radio"
-                                        name={`choice-${props.task.id}`}
-                                        value={option.id}
-                                        checked={chosen}
-                                        disabled={props.locked}
-                                        aria-describedby={showFeedback ? noteId : undefined}
-                                        onChange={() => props.onChange({ ...(props.answer ?? { selected: null }), selected: option.id })}
-                                    />
-                                    <span class="ac-choice__label" dir="auto">
-                                        {renderInline(option.label)}
-                                    </span>
+                                <PgChoice
+                                    type="radio"
+                                    name={`choice-${props.task.id}`}
+                                    value={option.id}
+                                    checked={chosen}
+                                    disabled={props.locked}
+                                    ariaDescribedBy={showFeedback ? noteId : ""}
+                                    state={state}
+                                    onChange={() => props.onChange({ ...(props.answer ?? { selected: null }), selected: option.id })}
+                                >
+                                    <span dir="auto">{renderInline(option.label)}</span>
                                     {props.locked && option.correct ? choiceTag("good", t("Correct answer")) : null}
                                     {props.locked && chosen && !option.correct ? choiceTag("bad", t("Your choice")) : null}
-                                </label>
+                                </PgChoice>
                                 {showFeedback ? (
                                     <p id={noteId} class="ac-choice__note ac-lab-opt__note" dir="auto">
                                         {option.feedback}

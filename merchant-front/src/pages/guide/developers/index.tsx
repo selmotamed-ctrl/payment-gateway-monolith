@@ -2,19 +2,19 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 import { GuideMarkdown } from "@/components/guide/GuideMarkdown";
 import { GuideCodeBlock } from "@/components/guide/GuideCodeBlock";
 import { MERCHANT_DEVELOPER_CHAPTERS } from "@/content/guide/merchantDeveloperApiGuide";
 import type { DeveloperCodeLanguage } from "@/content/guide/types";
 
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MetaPill } from "@/components/ui/MetaPill";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
 
 const LANGUAGES: { value: DeveloperCodeLanguage; label: string }[] = [
     { value: "typescript", label: "TypeScript / Node / Bun" },

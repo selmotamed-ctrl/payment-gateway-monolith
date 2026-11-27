@@ -1,4 +1,4 @@
-import { humanizeKey, isPlainObject } from "@/components/ui/jsonDiffModel";
+import {humanizeKey, isPlainObject} from "@pg/ui/data/json/jsonDiffModel";
 
 export interface SeverityStep {
     source: string;

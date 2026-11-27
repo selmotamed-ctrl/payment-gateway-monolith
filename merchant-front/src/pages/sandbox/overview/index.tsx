@@ -2,21 +2,21 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { DataTable } from "@/components/Table/DataTable";
-import type { TableHeader } from "@/components/Table/types";
-import { StateView } from "@/components/StateView";
-import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
+import {VAlert, PgButton} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import {MetricStrip, type MetricItem} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import type { TableHeader } from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { SandboxBanner } from "@/features/sandbox/SandboxBanner";
 import { sandboxGet, sandboxPost, type SandboxStudioOverview } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showConfirm } from "@/utils/confirm";
@@ -151,7 +151,7 @@ const SandboxOverviewPage = dc(() => {
             <PageHeader title={t("Sandbox Overview")} subtitle={t("A separate database, a separate core node, and zero real money.")} badge="SANDBOX" badgeTone="warning">(
                     <div class="d-flex flex-wrap ga-2 align-center">
                         <StatusBadge status="SANDBOX" label={`${overview.value?.counts.payments ?? 0} ${t("payments")}`} toneOverride="info" showDot={false} />
-                        <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</VBtn>
+                        <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</PgButton>
                     </div>
                 )</PageHeader>
             <SandboxBanner />
@@ -188,11 +188,11 @@ const SandboxOverviewPage = dc(() => {
                         </SurfaceCard>
                         <SurfaceCard title={t("Demo workspace")} style={{ flex: "1 1 360px" }}>
                             <div class="d-flex flex-wrap ga-2">
-                                <VBtn color="primary" prependIcon="mdi-play" loading={busy.value === "seed"} onClick={() => void seed()}>{t("Seed demo workspace")}</VBtn>
-                                <VBtn color="primary" variant="tonal" prependIcon="mdi-history" loading={busy.value === "history"} onClick={() => void seedHistory()}>{t("Seed 20 historical payments")}</VBtn>
-                                <VBtn color="error" variant="outlined" prependIcon="mdi-restore" loading={busy.value === "reset"} onClick={() => void reset()}>{t("Reset my sandbox data")}</VBtn>
-                                <VBtn variant="tonal" prependIcon="mdi-bank-outline" onClick={() => void router.push("/sandbox/accounts")}>{t("Fake Rails accounts")}</VBtn>
-                                <VBtn variant="tonal" prependIcon="mdi-wallet-outline" onClick={() => void router.push("/sandbox/wallets")}>{t("Wallets")}</VBtn>
+                                <PgButton color="primary" prependIcon="mdi-play" loading={busy.value === "seed"} onClick={() => void seed()}>{t("Seed demo workspace")}</PgButton>
+                                <PgButton color="primary" variant="tonal" prependIcon="mdi-history" loading={busy.value === "history"} onClick={() => void seedHistory()}>{t("Seed 20 historical payments")}</PgButton>
+                                <PgButton color="error" variant="outlined" prependIcon="mdi-restore" loading={busy.value === "reset"} onClick={() => void reset()}>{t("Reset my sandbox data")}</PgButton>
+                                <PgButton variant="tonal" prependIcon="mdi-bank-outline" onClick={() => void router.push("/sandbox/accounts")}>{t("Fake Rails accounts")}</PgButton>
+                                <PgButton variant="tonal" prependIcon="mdi-wallet-outline" onClick={() => void router.push("/sandbox/wallets")}>{t("Wallets")}</PgButton>
                             </div>
                             <p class="text-caption text-medium-emphasis mt-3">
                                 {t("The seeder creates a funded LYD wallet, an application, a POS terminal, links and a pg_test_ API token. Reset removes only sandbox data.")}

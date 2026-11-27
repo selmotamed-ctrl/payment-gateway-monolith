@@ -1,25 +1,25 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { StateView } from "@/components/StateView";
-import { DataTable } from "@/components/Table/DataTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { SectionFields } from "@/components/SectionFields";
+import {PgButton, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MonoRef } from "@/components/ui/MonoRef";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
 type AccessToken = {
     id: string;
     name: string;
@@ -221,7 +221,7 @@ const DeveloperTokensPage = dc(() => {
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Developer Tokens")} subtitle={t("API credentials and IP allow-lists for integrations.")}>(
-                        <VBtn
+                        <PgButton
                             variant="tonal"
                             onClick={() => {
                                 form.value = { name: "", scopes: "", ipWhitelistEnabled: false, ipAllowlist: "" };
@@ -230,7 +230,7 @@ const DeveloperTokensPage = dc(() => {
                             }}
                         >
                             {t("Create Token")}
-                        </VBtn>
+                        </PgButton>
                     )</PageHeader>
 
                 {createdSecret.value && (
@@ -276,21 +276,21 @@ const DeveloperTokensPage = dc(() => {
             >
                 <SectionFields title={t("Details")}>
                     <FormField label={t("Token Name")} required>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.name}
                             onUpdate:modelValue={(v: string) => (form.value.name = v)}
                             hideDetails
                         />
                     </FormField>
                     <FormField label={t("Scopes")} hint={t("Comma separated, e.g. links.create,payments.read.")}>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.scopes}
                             onUpdate:modelValue={(v: string) => (form.value.scopes = v)}
                             hideDetails
                         />
                     </FormField>
                     <FormField label={t("IP Whitelist")} hint={t("Comma separated CIDR ranges.")}>
-                        <VTextField
+                        <PgTextField
                             modelValue={form.value.ipAllowlist}
                             onUpdate:modelValue={(v: string) => (form.value.ipAllowlist = v)}
                             hideDetails
@@ -310,7 +310,7 @@ const DeveloperTokensPage = dc(() => {
                 onSubmit={() => void saveIps()}
             >
                 <FormField label={t("CIDR")} hint={t("Comma separated CIDR ranges.")}>
-                    <VTextField
+                    <PgTextField
                         modelValue={ipList.value}
                         onUpdate:modelValue={(v: string) => (ipList.value = v)}
                         hideDetails

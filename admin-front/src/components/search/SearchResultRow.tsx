@@ -1,7 +1,7 @@
 import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VIcon } from "@/components/vael/VuetifyShim";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {PgIcon} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 import { splitHighlightSegments } from "./highlight";
 
 export function renderHighlightedText(
@@ -51,7 +51,7 @@ export const SearchResultRow = defineComponent({
                 onMouseenter={props.onHover}
             >
                 <div class="pg-command-item__icon">
-                    <VIcon icon={props.icon} size={18} />
+                    <PgIcon icon={props.icon} size={18} />
                 </div>
 
                 <div class="pg-command-item__body">
@@ -75,7 +75,7 @@ export const SearchResultRow = defineComponent({
                 <div class="pg-command-item__meta">
                     {props.status && <StatusBadge status={props.status} showDot={false} />}
                     <span class="pg-command-item__kind">{props.kindLabel}</span>
-                    <VIcon
+                    <PgIcon
                         icon="mdi-keyboard-return"
                         size={14}
                         class="pg-command-item__enter-hint"

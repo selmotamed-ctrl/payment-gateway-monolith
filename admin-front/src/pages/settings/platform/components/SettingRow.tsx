@@ -1,9 +1,9 @@
 import { defineComponent } from "@/utils/dc";
 import { type PropType, type VNodeChild } from "vue";
-import { VIcon } from "@/components/vael/VuetifyShim";
+import {PgIcon} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MetaPill } from "@/components/ui/MetaPill";
+import {StatusBadge} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
 import { SETTING_STATUS_META, settingPreview, settingTitle, type SettingEntry } from "@/components/builders/model";
 
 const RISK_LABEL: Record<string, string> = {
@@ -54,7 +54,7 @@ export const SettingRow = defineComponent({
                 </span>
                 <span class="pg-settings-row__action">
                     <span>{action()}</span>
-                    <VIcon icon="mdi-chevron-right" size={18} />
+                    <PgIcon icon="mdi-chevron-right" size={18} />
                 </span>
             </button>
         );

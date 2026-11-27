@@ -1,11 +1,11 @@
 import { dc } from "@/utils/dc";
 import { ref, watch } from "vue";
-import { VBtn, VDivider, VNavigationDrawer } from "@/components/vael/VuetifyShim";
-import { DataTable } from "@/components/Table/DataTable";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MonoRef } from "@/components/ui/MonoRef";
-import type { TableHeader } from "@/components/Table/types";
+import {PgButton, PgDivider, PgNavigationDrawer} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import {SurfaceCard} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/utils/api";
 
 interface InspectorData {
@@ -69,7 +69,7 @@ export const WireInspectorDrawer = dc(
     ];
 
     return () => (
-      <VNavigationDrawer
+      <PgNavigationDrawer
         modelValue={props.modelValue}
         onUpdate:modelValue={(value: boolean | null) => { if (value === false) props.onClose?.(); }}
         location="right"
@@ -81,9 +81,9 @@ export const WireInspectorDrawer = dc(
           <strong>Wire inspector</strong>
           <StatusBadge status={props.transactionId ?? ""} label={props.transactionId ?? ""} toneOverride="neutral" showDot={false} />
           <div style={{ flex: 1 }} />
-          <VBtn variant="text" onClick={close}>Close</VBtn>
+          <PgButton variant="text" onClick={close}>Close</PgButton>
         </div>
-        <VDivider />
+        <PgDivider />
         {loading.value ? <div class="pa-4">Loading…</div> : null}
         {data.value ? (
           <div class="pa-4 d-flex flex-column ga-4">
@@ -128,7 +128,7 @@ export const WireInspectorDrawer = dc(
             />
           </div>
         ) : null}
-      </VNavigationDrawer>
+      </PgNavigationDrawer>
     );
   },
   { props: ["transactionId", "modelValue", "onClose"] },

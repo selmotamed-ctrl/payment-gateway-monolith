@@ -1,14 +1,14 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VAutocomplete, VBtn, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { StateView } from "@/components/StateView";
-import { DataTable } from "@/components/Table/DataTable";
-import type { TableHeader } from "@/components/Table/types";
-import { SectionFields } from "@/components/SectionFields";
+import {PgAutocomplete, PgButton, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import type { TableHeader } from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -16,11 +16,11 @@ import { showSnackBar } from "@/utils/snackBar";
 import { showConfirm } from "@/utils/confirm";
 import { isValidPositiveAmount } from "@/utils/security/amount";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
 type Cashout = {
     id: string;
     state: string;
@@ -194,7 +194,7 @@ ${t("IBAN (optional)")}: ${iban.value}` : ""}`,
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Cash-Outs")} subtitle={t("Settlement withdrawals and payout status.")}>(
-                        <VBtn
+                        <PgButton
                             variant="tonal"
                             onClick={() => {
                                 amount.value = "";
@@ -210,7 +210,7 @@ ${t("IBAN (optional)")}: ${iban.value}` : ""}`,
                             }}
                         >
                             {t("Request Cash-Out")}
-                        </VBtn>
+                        </PgButton>
                     )</PageHeader>
 
                 {error.value ? (
@@ -241,10 +241,10 @@ ${t("IBAN (optional)")}: ${iban.value}` : ""}`,
                 v-slots={{
                     footer: () => (
                         <>
-                            <VBtn variant="outlined" disabled={actionLoading.value} onClick={() => (dialogOpen.value = false)}>
+                            <PgButton variant="outlined" disabled={actionLoading.value} onClick={() => (dialogOpen.value = false)}>
                                 {t("Cancel")}
-                            </VBtn>
-                            <VBtn
+                            </PgButton>
+                            <PgButton
                                 color="primary"
                                 variant="flat"
                                 {...{ type: "submit" }}
@@ -252,14 +252,14 @@ ${t("IBAN (optional)")}: ${iban.value}` : ""}`,
                                 loading={actionLoading.value}
                             >
                                 {t("Request Cash-Out")}
-                            </VBtn>
+                            </PgButton>
                         </>
                     ),
                 }}
             >
                 <SectionFields title={t("Cash-Outs")}>
                     <FormField label={t("Wallet")} required>
-                        <VAutocomplete
+                        <PgAutocomplete
                             items={walletOptions.value}
                             itemTitle="title"
                             itemValue="value"
@@ -269,14 +269,14 @@ ${t("IBAN (optional)")}: ${iban.value}` : ""}`,
                         />
                     </FormField>
                     <FormField label={t("Amount")} required>
-                        <VTextField
+                        <PgTextField
                             modelValue={amount.value}
                             onUpdate:modelValue={(v: string) => (amount.value = v)}
                             hideDetails
                         />
                     </FormField>
                     <FormField label={t("Currency")} required>
-                        <VTextField
+                        <PgTextField
                             modelValue={currency.value}
                             onUpdate:modelValue={(v: string) => (currency.value = v.toUpperCase())}
                             hideDetails
@@ -285,21 +285,21 @@ ${t("IBAN (optional)")}: ${iban.value}` : ""}`,
                 </SectionFields>
                 <SectionFields title={t("Bank Details")}>
                     <FormField label={t("Bank name")} required>
-                        <VTextField
+                        <PgTextField
                             modelValue={bankName.value}
                             onUpdate:modelValue={(v: string) => (bankName.value = v)}
                             hideDetails
                         />
                     </FormField>
                     <FormField label={t("Account number")} required>
-                        <VTextField
+                        <PgTextField
                             modelValue={accountNumber.value}
                             onUpdate:modelValue={(v: string) => (accountNumber.value = v)}
                             hideDetails
                         />
                     </FormField>
                     <FormField label={t("IBAN (optional)")}>
-                        <VTextField
+                        <PgTextField
                             modelValue={iban.value}
                             onUpdate:modelValue={(v: string) => (iban.value = v)}
                             hideDetails

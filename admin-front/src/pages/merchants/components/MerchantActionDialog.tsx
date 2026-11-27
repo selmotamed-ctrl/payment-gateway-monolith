@@ -2,9 +2,9 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VCheckbox, VSelect, VSwitch, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
+import {VAlert, PgCheckbox, PgAutocomplete, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -13,8 +13,8 @@ import { useSafeguard } from "@/components/guide/useSafeguard";
 import { CLOSE_REASONS, SUSPENSION_REASONS } from "../merchantHelp";
 import type { MerchantSummary } from "../types";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
 const SUSPEND_CHECKS = [
     { key: "IMPACT_REVIEWED", label: "Merchant impact reviewed" },
     { key: "REASON_DOCUMENTED", label: "Suspension reason documented" },
@@ -160,16 +160,16 @@ const MerchantActionDialog = dc(
                         {isSuspend.value && (
                             <>
                                 <FormField label={t("Reason code")} required>
-                                    <VSelect v-model={reasonCode.value} items={SUSPENSION_REASONS} />
+                                    <PgAutocomplete v-model={reasonCode.value} items={SUSPENSION_REASONS} />
                                 </FormField>
-                                <VSwitch v-model={emergency.value} label={t("Emergency suspension (immediate effect)")} color="error" hideDetails />
+                                <PgSwitch v-model={emergency.value} label={t("Emergency suspension (immediate effect)")} color="error" hideDetails />
                                 {emergency.value && (
                                     <>
                                         <VAlert type="warning" variant="tonal">
                                             {t("The suspension takes effect now. A compliance or MLRO checker must ratify it within the selected window; it remains in force if ratification is rejected.")}
                                         </VAlert>
                                         <FormField label={t("Ratify within hours")}>
-                                            <VTextField v-model={ratifyHours.value} type="number" />
+                                            <PgTextField v-model={ratifyHours.value} type="number" />
                                         </FormField>
                                     </>
                                 )}
@@ -181,7 +181,7 @@ const MerchantActionDialog = dc(
                                     {t("Closing is irreversible and requires zero wallet balance, no open disputes and no pending cash-outs.")}
                                 </VAlert>
                                 <FormField label={t("Reason code")} required>
-                                    <VSelect v-model={reasonCode.value} items={CLOSE_REASONS} />
+                                    <PgAutocomplete v-model={reasonCode.value} items={CLOSE_REASONS} />
                                 </FormField>
                             </>
                         )}
@@ -189,7 +189,7 @@ const MerchantActionDialog = dc(
                             <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                                 <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Action checklist")}</ThemedText>
                                 {checks.value.map((check) => (
-                                    <VCheckbox
+                                    <PgCheckbox
                                         key={check.key}
                                         modelValue={checklist.value[check.key] === true}
                                         onUpdate:modelValue={(value: unknown) => (checklist.value = { ...checklist.value, [check.key]: Boolean(value) })}
@@ -204,7 +204,7 @@ const MerchantActionDialog = dc(
                             </ThemedView>
                         )}
                         <FormField label={props.mode === "REINSTATE" ? t("Reinstatement reason") : t("Notes")} required={props.mode === "REINSTATE"}>
-                            <VTextarea v-model={notes.value} rows={4} autoGrow />
+                            <PgTextarea v-model={notes.value} rows={4} autoGrow />
                         </FormField>
             </FormModal>
         );

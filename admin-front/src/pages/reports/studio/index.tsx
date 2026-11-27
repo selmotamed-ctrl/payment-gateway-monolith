@@ -2,27 +2,19 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import ScreenContainer from "@/components/ScreenContainer";
-import { ThemedView } from "@/components/ThemedView";
-import { VAlert, VBtn, VBtnToggle, VCol, VFileInput, VRow, VSelect } from "@/components/vael/VuetifyShim";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { FormModal } from "@/components/ui/FormModal";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {VAlert, PgButton, PgBtnToggle, PgCol, PgFileUpload, PgRow, PgAutocomplete} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {FormModal} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import { DataTable } from "@/components/Table/DataTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
+import { DataTable } from "@/tables/DataTable";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
 import { ReportDiagnosticsPanel } from "@/components/reports/ReportDiagnosticsPanel";
 import { JsonSpecEditor } from "@/components/reports/JsonSpecEditor";
 import { AuthorityOverrideModal, type AuthorityOverridePayload } from "@/components/reports/AuthorityOverrideModal";
-import {
-  DescriptionList,
-  MetaPill,
-  MonoRef,
-  PageHeader,
-  SegmentedTabs,
-  StatusBadge,
-  SurfaceCard,
-} from "@/components/ui";
+import {DescriptionList, MetaPill, MonoRef, PageHeader, SegmentedTabs, StatusBadge, SurfaceCard} from "@pg/ui";
 import { formatDateTime } from "@/components/ledger/format";
 import { api } from "@/state/api";
 import {
@@ -762,9 +754,9 @@ const ReportsStudioPage = dc(() => {
         report.aiRepairPrompt
           ? {
               headerActions: () => (
-                <VBtn size="small" variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyRepairPrompt()}>
+                <PgButton size="small" variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyRepairPrompt()}>
                   {t("Copy AI Repair Prompt")}
-                </VBtn>
+                </PgButton>
               ),
             }
           : undefined
@@ -828,7 +820,7 @@ const ReportsStudioPage = dc(() => {
             ? {
                 headerActions: () => (
                   <div class="d-flex flex-wrap ga-2">
-                    <VBtn
+                    <PgButton
                       size="small"
                       variant="tonal"
                       prependIcon="mdi-shield-account-outline"
@@ -839,8 +831,8 @@ const ReportsStudioPage = dc(() => {
                       }}
                     >
                       {t("Security Admin Authority Override")}
-                    </VBtn>
-                    <VBtn
+                    </PgButton>
+                    <PgButton
                       size="small"
                       variant="tonal"
                       prependIcon="mdi-shield-off-outline"
@@ -848,7 +840,7 @@ const ReportsStudioPage = dc(() => {
                       onClick={() => void clearOverride()}
                     >
                       {t("Clear override")}
-                    </VBtn>
+                    </PgButton>
                   </div>
                 ),
               }
@@ -889,18 +881,18 @@ const ReportsStudioPage = dc(() => {
       <ThemedView style={{ gap: "18px" }}>
         <PageHeader title={t("Report Studio")} subtitle={t("Download the AI transcript, verify a spec, infer authorities and publish")} badge={isVerified.value ? "VERIFIED" : "DRAFT"} badgeLabel={isVerified.value ? t("Verified") : t("Draft")} badgeTone={isVerified.value ? "success" : "neutral"}>(
             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-              <VBtn variant="tonal" prependIcon="mdi-file-chart-outline" onClick={() => void router.push({ name: "ReportsCatalog" })}>
+              <PgButton variant="tonal" prependIcon="mdi-file-chart-outline" onClick={() => void router.push({ name: "ReportsCatalog" })}>
                 {t("Open Catalog")}
-              </VBtn>
+              </PgButton>
               {canChrome.value && (
-                <VBtn variant="tonal" prependIcon="mdi-page-layout-header-footer" onClick={() => void router.push({ name: "ReportsChrome" })}>
+                <PgButton variant="tonal" prependIcon="mdi-page-layout-header-footer" onClick={() => void router.push({ name: "ReportsChrome" })}>
                   {t("Headers & Footers")}
-                </VBtn>
+                </PgButton>
               )}
               {canApproveAml.value && (
-                <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => void loadPendingAml()}>
+                <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => void loadPendingAml()}>
                   {t("Refresh pending")}
-                </VBtn>
+                </PgButton>
               )}
             </ThemedView>
           )</PageHeader>
@@ -920,9 +912,9 @@ const ReportsStudioPage = dc(() => {
         )}
 
         <SurfaceCard title={t("Step 1 — AI Authoring Transcript")} subtitle={t("The transcript contains the live schema, optimization rules and bilingual contract")}>
-          <VRow dense align="center">
-            <VCol cols={12} md={5}>
-              <VSelect
+          <PgRow dense align="center">
+            <PgCol cols={12} md={5}>
+              <PgAutocomplete
                 modelValue={domains.value}
                 onUpdate:modelValue={(value: string[]) => (domains.value = value)}
                 label={t("Domains")}
@@ -930,16 +922,16 @@ const ReportsStudioPage = dc(() => {
                 multiple
                 chips
               />
-            </VCol>
-            <VCol cols={12} md={7} class="d-flex flex-wrap ga-2">
-              <VBtn color="primary" loading={busy.value} prependIcon="mdi-download" onClick={() => void downloadTranscript("REPORT")}>
+            </PgCol>
+            <PgCol cols={12} md={7} class="d-flex flex-wrap ga-2">
+              <PgButton color="primary" loading={busy.value} prependIcon="mdi-download" onClick={() => void downloadTranscript("REPORT")}>
                 {t("Download Report AI Transcript")}
-              </VBtn>
-              <VBtn variant="tonal" loading={busy.value} prependIcon="mdi-download" onClick={() => void downloadTranscript("CHROME")}>
+              </PgButton>
+              <PgButton variant="tonal" loading={busy.value} prependIcon="mdi-download" onClick={() => void downloadTranscript("CHROME")}>
                 {t("Download Header/Footer AI Transcript")}
-              </VBtn>
-            </VCol>
-          </VRow>
+              </PgButton>
+            </PgCol>
+          </PgRow>
         </SurfaceCard>
 
         <SurfaceCard
@@ -956,25 +948,25 @@ const ReportsStudioPage = dc(() => {
           }
         >
           <div class="d-flex flex-column ga-3">
-            <VRow dense>
-              <VCol cols={12} md={6}>
-                <VFileInput
+            <PgRow dense>
+              <PgCol cols={12} md={6}>
+                <PgFileUpload
                   label={t("Report spec (.json)")}
                   {...{ accept: "application/json,.json" }}
                   modelValue={specFile.value}
                   onUpdate:modelValue={(files: File | File[] | null) => void readSpecFile(pickFile(files))}
                 />
-              </VCol>
-              <VCol cols={12} md={6}>
-                <VFileInput
+              </PgCol>
+              <PgCol cols={12} md={6}>
+                <PgFileUpload
                   label={t("Asset bundle (.zip, optional)")}
                   {...{ accept: "application/zip,.zip" }}
                   modelValue={zipFile.value}
                   errorMessages={zipError.value ? [zipError.value] : []}
                   onUpdate:modelValue={(files: File | File[] | null) => (zipFile.value = pickFile(files))}
                 />
-              </VCol>
-            </VRow>
+              </PgCol>
+            </PgRow>
             {loadedNeedsAssets.value && !zipFile.value && (
               <VAlert type="info" variant="tonal">
                 {t("This spec declares required assets. Re-attach its asset bundle (.zip) before verifying.")}
@@ -989,15 +981,15 @@ const ReportsStudioPage = dc(() => {
               copiedMessage={t("Spec JSON copied")}
             />
             <div class="d-flex flex-wrap align-center ga-2">
-              <VBtn color="primary" loading={busy.value} disabled={!canVerify.value} prependIcon="mdi-shield-check-outline" onClick={() => void verify()}>
+              <PgButton color="primary" loading={busy.value} disabled={!canVerify.value} prependIcon="mdi-shield-check-outline" onClick={() => void verify()}>
                 {t("Verify Spec (5 Layers)")}
-              </VBtn>
-              <VBtn variant="tonal" loading={busy.value} disabled={!canSave.value} onClick={() => void save(false)}>
+              </PgButton>
+              <PgButton variant="tonal" loading={busy.value} disabled={!canSave.value} onClick={() => void save(false)}>
                 {t("Save as Verified")}
-              </VBtn>
-              <VBtn variant="tonal" loading={busy.value} disabled={!canSave.value} prependIcon="mdi-publish" onClick={openPublish}>
+              </PgButton>
+              <PgButton variant="tonal" loading={busy.value} disabled={!canSave.value} prependIcon="mdi-publish" onClick={openPublish}>
                 {t("Publish")}
-              </VBtn>
+              </PgButton>
               {verificationStale.value && (
                 <MetaPill color="warning" prependIcon="mdi-alert-outline">{t("Verify again after editing")}</MetaPill>
               )}
@@ -1015,7 +1007,7 @@ const ReportsStudioPage = dc(() => {
             v-slots={{
               headerActions: () => (
                 <div class="d-flex flex-wrap align-center ga-2">
-                  <VBtnToggle
+                  <PgBtnToggle
                     modelValue={previewMode.value}
                     onUpdate:modelValue={(next: unknown) => {
                       const value = Array.isArray(next) ? next[0] : next;
@@ -1028,10 +1020,10 @@ const ReportsStudioPage = dc(() => {
                     variant="outlined"
                     divided
                   >
-                    <VBtn value="MOCK" size="small" prependIcon="mdi-flask-outline">{t("Mock data")}</VBtn>
-                    <VBtn value="LIVE" size="small" prependIcon="mdi-database-outline">{t("Live sample")}</VBtn>
-                  </VBtnToggle>
-                  <VBtn
+                    <PgButton value="MOCK" size="small" prependIcon="mdi-flask-outline">{t("Mock data")}</PgButton>
+                    <PgButton value="LIVE" size="small" prependIcon="mdi-database-outline">{t("Live sample")}</PgButton>
+                  </PgBtnToggle>
+                  <PgButton
                     size="small"
                     variant="tonal"
                     prependIcon="mdi-eye-outline"
@@ -1040,7 +1032,7 @@ const ReportsStudioPage = dc(() => {
                     onClick={() => void runPreview()}
                   >
                     {t("Generate preview")}
-                  </VBtn>
+                  </PgButton>
                   {previewBundle.value && (
                     <>
                       <MetaPill color={previewMode.value === "MOCK" ? "warning" : "info"}>
@@ -1048,14 +1040,14 @@ const ReportsStudioPage = dc(() => {
                       </MetaPill>
                       <MetaPill color="info">{`${previewPages.value} ${t("pages")}`}</MetaPill>
                       <MonoRef value={previewBundle.value.verificationSha256} truncate={12} />
-                      <VBtn
+                      <PgButton
                         size="small"
                         variant="tonal"
                         prependIcon="mdi-printer-outline"
                         onClick={() => previewRef.value?.printClientSideVectorPdf?.()}
                       >
                         {t("Print")}
-                      </VBtn>
+                      </PgButton>
                     </>
                   )}
                 </div>
@@ -1114,9 +1106,9 @@ const ReportsStudioPage = dc(() => {
                 numberOfItemsPerPageChoices={false}
                 TopSlot={() => (
                   <div class="px-5 pb-3">
-                    <VBtn size="small" variant="tonal" prependIcon="mdi-refresh" onClick={() => void loadHistory(savedSpecCode.value)}>
+                    <PgButton size="small" variant="tonal" prependIcon="mdi-refresh" onClick={() => void loadHistory(savedSpecCode.value)}>
                       {t("Refresh history")}
-                    </VBtn>
+                    </PgButton>
                   </div>
                 )}
               />
@@ -1131,9 +1123,9 @@ const ReportsStudioPage = dc(() => {
                 numberOfItemsPerPage={20}
                 TopSlot={() => (
                   <div class="px-5 pb-3">
-                    <VBtn size="small" variant="tonal" prependIcon="mdi-refresh" onClick={() => void loadExecutions(savedSpecCode.value)}>
+                    <PgButton size="small" variant="tonal" prependIcon="mdi-refresh" onClick={() => void loadExecutions(savedSpecCode.value)}>
                       {t("Refresh")}
-                    </VBtn>
+                    </PgButton>
                   </div>
                 )}
               />

@@ -2,8 +2,8 @@ import { computed, onMounted, ref } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRoute } from "vue-router";
 import { RouterLink } from "vue-router/experimental/vapor";
-import { PageHeader } from "@/components/ui/PageHeader";
-import ScreenContainer from "@/components/ScreenContainer";
+import {PageHeader, PgAutocomplete, PgSearchInput} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
 import { MarkdownView } from "@/components/guide/MarkdownView";
 import { useGuideLocale } from "@/components/guide/widgets/useGuideLocale";
 import { loadCards, type Card } from "@/content/guide";
@@ -61,19 +61,20 @@ export const AdminGuideCardsPage = defineComponent({
                 ) : (
                     <div class="guide-cards-page">
                         <div class="guide-cards-tools">
-                            <input
-                                type="search"
-                                value={query.value}
+                            <PgSearchInput
+                                modelValue={query.value}
+                                onUpdate:modelValue={(value: string) => (query.value = value)}
                                 placeholder={L("Search cards…", "ابحث في البطاقات…")}
-                                aria-label={L("Search cards", "البحث في البطاقات")}
-                                onInput={(event) => (query.value = (event.target as HTMLInputElement).value)}
+                                ariaLabel={L("Search cards", "البحث في البطاقات")}
                             />
-                            <select value={risk.value} onChange={(event) => (risk.value = (event.target as HTMLSelectElement).value)}>
-                                <option value="">{L("All risk levels", "كل مستويات الخطورة")}</option>
-                                {["LOW", "MEDIUM", "HIGH", "CRITICAL"].map((level) => (
-                                    <option key={level} value={level}>{level}</option>
-                                ))}
-                            </select>
+                            <PgAutocomplete
+                                density="compact"
+                                searchable={false}
+                                clearable={false}
+                                items={[{ value: "", label: L("All risk levels", "كل مستويات الخطورة") }, ...["LOW", "MEDIUM", "HIGH", "CRITICAL"].map((level) => ({ value: level, label: level }))]}
+                                modelValue={risk.value}
+                                onUpdate:modelValue={(value: string) => (risk.value = value)}
+                            />
                         </div>
                         <div class="guide-cards-layout">
                             <ul class="guide-card-list">

@@ -1,17 +1,17 @@
 import Decimal from "decimal.js";
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VBtn } from "@/components/vael/VuetifyShim";
+import {PgButton} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { StateView } from "@/components/StateView";
-import { LazyEChart as EChart } from "@/components/EChart/lazy";
+import {SlideOverDrawer} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { LazyEChart as EChart } from "@/charts/EChart/lazy";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -89,15 +89,15 @@ export const GatewayHealthDrawer = defineComponent({
 
         const palette = computed<ChartPalette>(() => {
             const colors = theme.current.value.colors as Record<string, string>;
-            const ink = colors["on-surface"] ?? "#667085";
+            const ink = colors["on-surface"] ?? "var(--pg-ink-secondary)";
             return {
                 ink,
                 muted: ink,
                 grid: "rgba(128, 128, 128, 0.35)",
-                success: colors.success ?? "#12b76a",
-                info: colors.info ?? "#2e90fa",
-                warning: colors.warning ?? "#f79009",
-                danger: colors.error ?? "#f04438",
+                success: colors.success ?? "var(--pg-status-success-dot)",
+                info: colors.info ?? "var(--pg-status-info-dot)",
+                warning: colors.warning ?? "var(--pg-status-warning-dot)",
+                danger: colors.error ?? "var(--pg-status-danger-dot)",
             };
         });
 
@@ -232,9 +232,9 @@ export const GatewayHealthDrawer = defineComponent({
                     default: body,
                     footer: () => (
                         <>
-                            <VBtn variant="text" prependIcon="mdi-refresh" onClick={() => props.gatewayId && void load(props.gatewayId)}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!data.value} onClick={() => void copyHealthSummary()}>{t("Copy summary")}</VBtn>
-                            <VBtn variant="text" onClick={() => emit("close")}>{t("Close")}</VBtn>
+                            <PgButton variant="text" prependIcon="mdi-refresh" onClick={() => props.gatewayId && void load(props.gatewayId)}>{t("Refresh")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-content-copy" disabled={!data.value} onClick={() => void copyHealthSummary()}>{t("Copy summary")}</PgButton>
+                            <PgButton variant="text" onClick={() => emit("close")}>{t("Close")}</PgButton>
                         </>
                     ),
                 }}

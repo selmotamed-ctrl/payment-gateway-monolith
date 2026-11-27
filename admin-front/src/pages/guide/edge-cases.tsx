@@ -1,8 +1,8 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRoute } from "vue-router";
-import { PageHeader } from "@/components/ui/PageHeader";
-import ScreenContainer from "@/components/ScreenContainer";
+import {PageHeader, PgAutocomplete, PgSearchInput} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
 import { useGuideLocale } from "@/components/guide/widgets/useGuideLocale";
 import { loadEdgeCases, type EdgeCase } from "@/content/guide";
 import { normalizeArabicText } from "@/utils/arabic";
@@ -79,25 +79,28 @@ export const AdminGuideEdgeCasesPage = defineComponent({
                 ) : (
                     <div class="guide-edge-cases-page">
                         <div class="guide-edge-tools">
-                            <input
-                                type="search"
-                                value={query.value}
+                            <PgSearchInput
+                                modelValue={query.value}
+                                onUpdate:modelValue={(value: string) => (query.value = value)}
                                 placeholder={L("Search scenarios and resolutions…", "ابحث في السيناريوهات والحلول…")}
-                                aria-label={L("Search edge cases", "البحث في حالات الحافة")}
-                                onInput={(event) => (query.value = (event.target as HTMLInputElement).value)}
+                                ariaLabel={L("Search edge cases", "البحث في حالات الحافة")}
                             />
-                            <select value={group.value} onChange={(event) => (group.value = (event.target as HTMLSelectElement).value)}>
-                                <option value="">{L("All groups", "كل المجموعات")}</option>
-                                {groups.value.map(([letter, name]) => (
-                                    <option key={letter} value={letter}>{letter} — {name}</option>
-                                ))}
-                            </select>
-                            <select value={severity.value} onChange={(event) => (severity.value = (event.target as HTMLSelectElement).value)}>
-                                <option value="">{L("All severities", "كل المستويات")}</option>
-                                {["Low", "Med", "High"].map((level) => (
-                                    <option key={level} value={level}>{level}</option>
-                                ))}
-                            </select>
+                            <PgAutocomplete
+                                density="compact"
+                                searchable={false}
+                                clearable={false}
+                                items={[{ value: "", label: L("All groups", "كل المجموعات") }, ...groups.value.map(([letter, name]) => ({ value: letter, label: `${letter} — ${name}` }))]}
+                                modelValue={group.value}
+                                onUpdate:modelValue={(value: string) => (group.value = value)}
+                            />
+                            <PgAutocomplete
+                                density="compact"
+                                searchable={false}
+                                clearable={false}
+                                items={[{ value: "", label: L("All severities", "كل المستويات") }, ...["Low", "Med", "High"].map((level) => ({ value: level, label: level }))]}
+                                modelValue={severity.value}
+                                onUpdate:modelValue={(value: string) => (severity.value = value)}
+                            />
                             <span class="guide-edge-count">{filtered.value.length} / {cases.value.length}</span>
                         </div>
                         <div class="guide-edge-table-wrap">

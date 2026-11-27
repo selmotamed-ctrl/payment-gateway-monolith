@@ -2,14 +2,14 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import { VBtn, VCheckbox, VIcon, VProgressLinear, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {PgButton, PgCheckbox, PgIcon, PgProgressBar, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 import { GuideMarkdown } from "@/components/guide/GuideMarkdown";
 import { GuideCodeBlock } from "@/components/guide/GuideCodeBlock";
 import { MerchantFeeCalculator, type MerchantFeeCalculatorForm } from "@/components/guide/MerchantFeeCalculator";
@@ -20,9 +20,9 @@ import { urlsMap } from "@/constants/urlsMap";
 import { getBaseUrl } from "@/constants/baseUrl";
 import { api } from "@/state/api";
 import { showSnackBar } from "@/utils/snackBar";
-import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MetaPill } from "@/components/ui/MetaPill";
+import {FormModal} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
 
 type ChecklistStep = {
     id: string;
@@ -231,7 +231,7 @@ const MerchantGuidePage = dc(() => {
     const sandbox = ref({
         applicationId: "0192d4a0-7c10-7000-8000-000000000001",
         token: "pg_live_your_token",
-        title: "Order #1001",
+        title: "Order #" + "1001",
         reference: "PAY-REF-1001",
     });
 
@@ -532,7 +532,7 @@ curl ${shellQuote(paymentEndpoint.value)} \\
                                     <ThemedText style={{ fontSize: "13px", opacity: 0.72 }}>{isArabic.value ? "الإنجاز" : "Completion"}</ThemedText>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "14px" }}>{completion.value}%</ThemedText>
                                 </ThemedView>
-                                <VProgressLinear modelValue={completion.value} color="primary" height={8} rounded />
+                                <PgProgressBar modelValue={completion.value} color="primary" height={8} rounded />
                             </ThemedView>
                         </ThemedView>
                         <ThemedView style={{ gap: "8px" }}>
@@ -550,7 +550,7 @@ curl ${shellQuote(paymentEndpoint.value)} \\
                                         background: checklist.value[step.id] === true ? "var(--pg-status-success-bg)" : "var(--pg-bg-surface-subtle)",
                                     }}
                                 >
-                                    <VCheckbox
+                                    <PgCheckbox
                                         modelValue={checklist.value[step.id] === true}
                                         onUpdate:modelValue={(value: boolean | null) => toggleStep(step.id, value)}
                                         hideDetails
@@ -558,12 +558,12 @@ curl ${shellQuote(paymentEndpoint.value)} \\
                                         color="success"
                                         style={{ flex: "0 0 auto" }}
                                     />
-                                    <VIcon icon={step.icon} size="20px" color="primary" />
+                                    <PgIcon icon={step.icon} size="20px" color="primary" />
                                     <ThemedText style={{ flex: "1 1 220px", fontSize: "14px" }}>{`${index + 1}. ${stepLabel(step)}`}</ThemedText>
                                     <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                        <VBtn size="small" variant="tonal" onClick={() => goTo(step.routeName)}>{isArabic.value ? "اذهب" : "Go"}</VBtn>
+                                        <PgButton size="small" variant="tonal" onClick={() => goTo(step.routeName)}>{isArabic.value ? "اذهب" : "Go"}</PgButton>
                                         {step.altRouteName ? (
-                                            <VBtn size="small" variant="text" onClick={() => goTo(step.altRouteName)}>{altStepLabel(step)}</VBtn>
+                                            <PgButton size="small" variant="text" onClick={() => goTo(step.altRouteName)}>{altStepLabel(step)}</PgButton>
                                         ) : null}
                                     </ThemedView>
                                 </ThemedView>
@@ -580,7 +580,7 @@ curl ${shellQuote(paymentEndpoint.value)} \\
                                 {isArabic.value ? "ابحث بالعنوان أو الوسم أو النص ثم صفِّ حسب دورك." : "Search by title, tag, or body, then filter by your role."}
                             </ThemedText>
                         </ThemedView>
-                        <VTextField
+                        <PgTextField
                             label={isArabic.value ? "ابحث في الفصول" : "Search chapters"}
                             modelValue={search.value}
                             onUpdate:modelValue={(value: string | null) => (search.value = value ?? "")}
@@ -606,7 +606,7 @@ curl ${shellQuote(paymentEndpoint.value)} \\
                                     <SurfaceCard key={chapter.id} variant="outlined" style={{ cursor: "pointer" }} onClick={() => openChapter(chapter)}>
                                         <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px", height: "100%" }}>
                                             <ThemedView style={{ flexDirection: "row", alignItems: "flex-start", gap: "8px" }}>
-                                                <VIcon icon="mdi-book-open-page-variant-outline" color="primary" size="20px" style={{ marginTop: "2px" }} />
+                                                <PgIcon icon="mdi-book-open-page-variant-outline" color="primary" size="20px" style={{ marginTop: "2px" }} />
                                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "15px", lineHeight: 1.35 }}>{chapterTitle(chapter)}</ThemedText>
                                             </ThemedView>
                                             <ThemedText style={{ fontSize: "13px", opacity: 0.72, lineHeight: 1.55, flex: 1 }}>
@@ -646,8 +646,8 @@ curl ${shellQuote(paymentEndpoint.value)} \\
                             </ThemedText>
                         </ThemedView>
                         <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "12px" }}>
-                            <VTextField label={isArabic.value ? "رمز Bearer" : "Bearer token"} modelValue={sandbox.value.token} onUpdate:modelValue={(value: string) => (sandbox.value.token = value)} type="password" style={{ minWidth: "240px", flex: "1 1 240px" }} />
-                            <VTextField label={isArabic.value ? "المرجع" : "Payment reference"} modelValue={sandbox.value.reference} onUpdate:modelValue={(value: string) => (sandbox.value.reference = value)} style={{ minWidth: "220px", flex: "1 1 220px" }} />
+                            <PgTextField label={isArabic.value ? "رمز Bearer" : "Bearer token"} modelValue={sandbox.value.token} onUpdate:modelValue={(value: string) => (sandbox.value.token = value)} type="password" style={{ minWidth: "240px", flex: "1 1 240px" }} />
+                            <PgTextField label={isArabic.value ? "المرجع" : "Payment reference"} modelValue={sandbox.value.reference} onUpdate:modelValue={(value: string) => (sandbox.value.reference = value)} style={{ minWidth: "220px", flex: "1 1 220px" }} />
                         </ThemedView>
                         <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "12px", alignItems: "center" }}>
                             <code style={{ fontSize: "12px", direction: "ltr" }}>POST /api/v1/external/links</code>
@@ -681,7 +681,7 @@ ${webhookPayload.value}`}
                                 <GuideCodeBlock code={webhookVerifySnippets[snippetTab.value]} />
                                 {WEBHOOK_CHECKS.map((check) => (
                                     <ThemedView key={check} style={{ flexDirection: "row", gap: "8px", alignItems: "flex-start" }}>
-                                        <VIcon icon="mdi-check-circle-outline" color="success" size="18px" style={{ marginTop: "2px" }} />
+                                        <PgIcon icon="mdi-check-circle-outline" color="success" size="18px" style={{ marginTop: "2px" }} />
                                         <ThemedText style={{ fontSize: "13px", lineHeight: 1.55, opacity: 0.78 }}>{check}</ThemedText>
                                     </ThemedView>
                                 ))}

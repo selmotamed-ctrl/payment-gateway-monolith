@@ -2,7 +2,7 @@ import { computed, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
 import type { ReportDiagnostic } from "@/lib/reportEngineSdk";
-import { MetaPill, MonoRef, StatusBadge, SurfaceCard } from "@/components/ui";
+import {MetaPill, MonoRef, StatusBadge, SurfaceCard} from "@pg/ui";
 import { friendlyDiagnosticTitle } from "@/utils/reports/diagnostics";
 import "./reports.css";
 

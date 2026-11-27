@@ -3,7 +3,7 @@
 };
 
 import { registerPlugins } from "@/plugins";
-import { initTheme } from "@/state/theme";
+import {initTheme} from "@pg/ui";
 
 import { createVaporApp } from "vue";
 import { formPlugin } from "vael-form";
@@ -11,9 +11,7 @@ import { i18n } from "@/plugins/i18n";
 import App from "./App";
 
 import "@/assets/fonts/fonts.css";
-import "@/styles/fintech-minimal.css";
-import "@/styles/vael-theme.css";
-import "@/styles/vael-shim.css";
+import "@pg/ui/tokens/index.css";
 import "@/styles/command-palette.css";
 import "@/styles/guide.css";
 import "@/styles/academy/index.css";

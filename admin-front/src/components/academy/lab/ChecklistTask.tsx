@@ -4,6 +4,7 @@ import { useLocale } from "@/utils/vael-compat";
 import type { ChecklistTask as ChecklistTaskType } from "@/content/academy";
 import type { ChecklistAnswer } from "../labScoring";
 import { choiceTag, renderInline } from "./PanelView";
+import { PgChoice } from "@pg/ui";
 
 export const ChecklistTask = defineComponent({
     name: "AcademyLabChecklistTask",
@@ -35,25 +36,22 @@ export const ChecklistTask = defineComponent({
                             const state = props.locked ? (right ? "good" : item.shouldTick ? "missed" : "bad") : isOn ? "selected" : "";
                             return (
                                 <div class="ac-lab-opt" key={item.id}>
-                                    <label class={["ac-choice", state ? `ac-choice--${state}` : "", props.locked ? "ac-choice--locked" : ""]}>
-                                        <input
-                                            type="checkbox"
-                                            value={item.id}
-                                            checked={isOn}
-                                            disabled={props.locked}
-                                            aria-describedby={props.locked ? noteId : undefined}
-                                            onChange={(event: Event) => toggle(item.id, (event.target as HTMLInputElement).checked)}
-                                        />
-                                        <span class="ac-choice__label" dir="auto">
-                                            {renderInline(item.label)}
-                                        </span>
+                                    <PgChoice
+                                        type="checkbox"
+                                        checked={isOn}
+                                        disabled={props.locked}
+                                        ariaDescribedBy={props.locked ? noteId : ""}
+                                        state={state}
+                                        onChange={(value: boolean) => toggle(item.id, value)}
+                                    >
+                                        <span dir="auto">{renderInline(item.label)}</span>
                                         {props.locked
                                             ? choiceTag(
                                                   right ? "good" : item.shouldTick ? "missed" : "bad",
                                                   right ? t("Right") : item.shouldTick ? t("Should be ticked") : t("Should not be ticked"),
                                               )
                                             : null}
-                                    </label>
+                                    </PgChoice>
                                     {props.locked ? (
                                         <p id={noteId} class="ac-choice__note ac-lab-opt__note" dir="auto">
                                             {item.why}

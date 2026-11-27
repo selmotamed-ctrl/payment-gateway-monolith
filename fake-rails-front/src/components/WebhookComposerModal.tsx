@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
-import { VAlert, VBtn, VSelect, VSwitch, VTextField } from "@/components/vael/VuetifyShim";
-import { FormModal } from "@/components/ui/FormModal";
-import { SectionFields } from "@/components/SectionFields";
+import {VAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { api } from "@/utils/api";
 
 export const WebhookComposerModal = dc(
@@ -61,9 +61,9 @@ export const WebhookComposerModal = dc(
         v-slots={{
           footer: () => (
             <>
-              <VBtn variant="text" disabled={busy.value} onClick={close}>Cancel</VBtn>
-              <VBtn variant="outlined" color="warning" disabled={busy.value} onClick={dispute}>Open dispute</VBtn>
-              <VBtn variant="flat" loading={busy.value} disabled={busy.value} onClick={fire}>Fire webhook</VBtn>
+              <PgButton variant="text" disabled={busy.value} onClick={close}>Cancel</PgButton>
+              <PgButton variant="outlined" color="warning" disabled={busy.value} onClick={dispute}>Open dispute</PgButton>
+              <PgButton variant="flat" loading={busy.value} disabled={busy.value} onClick={fire}>Fire webhook</PgButton>
             </>
           ),
         }}
@@ -72,7 +72,7 @@ export const WebhookComposerModal = dc(
         <SectionFields title="Payload" columns={2}>
           <div class="pg-field-wrapper">
             <label>Event</label>
-            <VSelect
+            <PgAutocomplete
               density="compact"
               variant="outlined"
               hideDetails
@@ -83,7 +83,7 @@ export const WebhookComposerModal = dc(
           </div>
           <div class="pg-field-wrapper">
             <label>Delay (s)</label>
-            <VTextField
+            <PgTextField
               type="number"
               density="compact"
               variant="outlined"
@@ -94,7 +94,7 @@ export const WebhookComposerModal = dc(
           </div>
           <div class="pg-field-wrapper">
             <label>Duplicates</label>
-            <VTextField
+            <PgTextField
               type="number"
               density="compact"
               variant="outlined"
@@ -105,14 +105,14 @@ export const WebhookComposerModal = dc(
           </div>
           <div class="pg-field-wrapper">
             <label>Signature</label>
-            <VSwitch
+            <PgSwitch
               label="Forge signature"
               density="compact"
               hideDetails
               modelValue={corrupt.value}
               onUpdate:modelValue={(value: boolean | null) => { corrupt.value = value === true; }}
             />
-            <VSwitch
+            <PgSwitch
               label="Send PENDING after PAID"
               density="compact"
               hideDetails

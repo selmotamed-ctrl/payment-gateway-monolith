@@ -1,10 +1,10 @@
 import { dc } from "@/utils/dc";
 import { ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VProgressCircular } from "@/components/vael/VuetifyShim";
+import {VAlert, PgSpinner} from "@pg/ui";
 import QRCode from "qrcode";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
 import type { QrOrCodeClientAction } from "./types";
 import { safeDeepLink } from "@/utils/security/deepLink";
 
@@ -71,7 +71,7 @@ export const QrOrCodeRenderer = dc(
                         <img src={qrDataUrl.value} alt="qr" width={"240px"} height={"240px"} />
                     </div>
                 ) : (
-                    <VProgressCircular indeterminate size={40} color="primary" />
+                    <PgSpinner indeterminate size={40} color="primary" />
                 )}
 
                 {props.action.pay_code && (

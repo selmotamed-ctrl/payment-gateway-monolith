@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VExpansionPanel, VExpansionPanelText, VExpansionPanelTitle, VExpansionPanels } from "@/components/vael/VuetifyShim";
-import { ThemedText } from "@/components/ThemedText";
+import {PgExpansionPanel, PgExpansionPanelText, PgExpansionPanelTitle, PgExpansionPanels} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
 import { areHelpPanelsVisible } from "@/constants/env";
 import { APPROVAL_HELP_SECTIONS } from "../approvalHelp";
 
@@ -13,18 +13,18 @@ const ApprovalHelpPanel = dc(() => {
         return () => null;
     }
     return () => (
-        <VExpansionPanels modelValue={open.value} onUpdate:modelValue={(value: unknown) => (open.value = (value as number[]) ?? [])} variant="accordion">
+        <PgExpansionPanels modelValue={open.value} onUpdate:modelValue={(value: unknown) => (open.value = (value as number[]) ?? [])} variant="accordion">
             {APPROVAL_HELP_SECTIONS.map((section, index) => (
-                <VExpansionPanel key={section.title} value={index}>
-                    <VExpansionPanelTitle>
+                <PgExpansionPanel key={section.title} value={index}>
+                    <PgExpansionPanelTitle>
                         <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t(section.title)}</ThemedText>
-                    </VExpansionPanelTitle>
-                    <VExpansionPanelText>
+                    </PgExpansionPanelTitle>
+                    <PgExpansionPanelText>
                         <ThemedText style={{ fontSize: "12px", lineHeight: 1.65, opacity: 0.8 }}>{t(section.body)}</ThemedText>
-                    </VExpansionPanelText>
-                </VExpansionPanel>
+                    </PgExpansionPanelText>
+                </PgExpansionPanel>
             ))}
-        </VExpansionPanels>
+        </PgExpansionPanels>
     );
 });
 

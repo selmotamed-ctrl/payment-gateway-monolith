@@ -1,9 +1,9 @@
 import { computed, ref, useId } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn } from "@/components/vael/VuetifyShim";
+import {PgButton, PgCodeEditor} from "@pg/ui";
 import { showSnackBar } from "@/utils/snackBar";
-import { countLines, downloadText, findJsonParseIssue } from "@/utils/reports/jsonSpec";
+import { downloadText, findJsonParseIssue } from "@/utils/reports/jsonSpec";
 import "./reports.css";
 
 /**
@@ -27,16 +27,9 @@ export const JsonSpecEditor = defineComponent({
     const { t } = useLocale();
     const inputId = useId();
     const errorId = `${inputId}-error`;
-    const gutter = ref<HTMLElement | null>(null);
 
     const hasText = computed(() => props.modelValue.trim().length > 0);
     const issue = computed(() => findJsonParseIssue(props.modelValue));
-    const lineCount = computed(() => countLines(props.modelValue));
-
-    const syncScroll = (event: Event) => {
-      const target = event.target as HTMLTextAreaElement;
-      if (gutter.value) gutter.value.scrollTop = target.scrollTop;
-    };
 
     const update = (value: string) => emit("update:modelValue", value);
 
@@ -80,51 +73,33 @@ export const JsonSpecEditor = defineComponent({
           <div class="pg-json-editor__toolbar">
             <label class="pg-json-editor__label" for={inputId}>{props.label || t("Spec JSON")}</label>
             <div class="pg-json-editor__actions">
-              <VBtn size="small" variant="text" prependIcon="mdi-format-align-left" disabled={!hasText.value || Boolean(current) || props.disabled} onClick={format}>
+              <PgButton size="small" variant="text" prependIcon="mdi-format-align-left" disabled={!hasText.value || Boolean(current) || props.disabled} onClick={format}>
                 {t("Format JSON")}
-              </VBtn>
-              <VBtn size="small" variant="text" prependIcon="mdi-content-copy" disabled={!hasText.value} onClick={() => void copy()}>
+              </PgButton>
+              <PgButton size="small" variant="text" prependIcon="mdi-content-copy" disabled={!hasText.value} onClick={() => void copy()}>
                 {t("Copy JSON")}
-              </VBtn>
-              <VBtn size="small" variant="text" prependIcon="mdi-download" disabled={!hasText.value} onClick={download}>
+              </PgButton>
+              <PgButton size="small" variant="text" prependIcon="mdi-download" disabled={!hasText.value} onClick={download}>
                 {t("Download JSON")}
-              </VBtn>
-              <VBtn size="small" variant="text" prependIcon="mdi-eraser" disabled={props.disabled} onClick={() => emit("clear")}>
+              </PgButton>
+              <PgButton size="small" variant="text" prependIcon="mdi-eraser" disabled={props.disabled} onClick={() => emit("clear")}>
                 {t("Clear editor")}
-              </VBtn>
+              </PgButton>
             </div>
           </div>
-          <div class={["pg-json-editor__frame", current ? "pg-json-editor__frame--invalid" : ""]}>
-            <div ref={gutter} class="pg-json-editor__gutter pg-mono" aria-hidden="true">
-              {Array.from({ length: lineCount.value }, (_, index) => (
-                <div
-                  key={index}
-                  class={["pg-json-editor__gutter-line", current?.line === index + 1 ? "pg-json-editor__gutter-line--error" : ""]}
-                >
-                  {index + 1}
-                </div>
-              ))}
-            </div>
-            <textarea
-              id={inputId}
-              class="pg-json-editor__input pg-mono"
-              dir="ltr"
-              spellcheck={false}
-              autocomplete="off"
-              autocapitalize="off"
-              wrap="off"
-              disabled={props.disabled}
-              aria-invalid={current ? "true" : undefined}
-              aria-describedby={current ? errorId : undefined}
-              value={props.modelValue}
-              onInput={(event: Event) => update((event.target as HTMLTextAreaElement).value)}
-              onScroll={syncScroll}
-              onKeydown={onKeydown}
-            />
-          </div>
+          <PgCodeEditor
+            id={inputId}
+            modelValue={props.modelValue}
+            label={props.label}
+            errorLine={current?.line ?? 0}
+            describedBy={current ? errorId : ""}
+            disabled={props.disabled}
+            onUpdate:modelValue={update}
+            onKeydown={onKeydown}
+          />
           <div class="pg-json-editor__status">
             {current ? (
-              <span id={errorId} class="pg-json-editor__error" role="alert">
+              <span id={errorId} class="pg-json-editor__error">
                 {t("Invalid JSON at line {line}, column {column}: {message}", {
                   line: current.line,
                   column: current.column,
@@ -132,7 +107,7 @@ export const JsonSpecEditor = defineComponent({
                 })}
               </span>
             ) : hasText.value ? (
-              <span>{t("Valid JSON · {lines} lines", { lines: lineCount.value })}</span>
+              <span>{t("Valid JSON · {lines} lines", { lines: props.modelValue.split("\n").length })}</span>
             ) : (
               <span>{t("Paste the spec produced from the AI transcript, or upload a .json file")}</span>
             )}

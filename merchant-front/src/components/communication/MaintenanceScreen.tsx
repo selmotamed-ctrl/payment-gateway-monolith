@@ -1,10 +1,10 @@
 import { defineComponent } from "@/utils/dc";
 import { type PropType } from "vue";
-import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { RouterLink } from "vue-router/experimental/vapor";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { ThemedText } from "@/components/ThemedText";
+import {SurfaceCard} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
 import type { CommunicationMaintenance } from "@/state/app";
 
 /**
@@ -31,12 +31,12 @@ export const MaintenanceScreen = defineComponent({
                     </ThemedText>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                         {props.onRefresh ? (
-                            <VBtn variant="tonal" loading={props.loading} onClick={() => props.onRefresh?.()}>
+                            <PgButton variant="tonal" loading={props.loading} onClick={() => props.onRefresh?.()}>
                                 {t("Check again")}
-                            </VBtn>
+                            </PgButton>
                         ) : null}
                         <RouterLink to={{ name: "Landing" }} style={{ textDecoration: "none" }}>
-                            <VBtn variant="text">{t("Back to home")}</VBtn>
+                            <PgButton variant="text">{t("Back to home")}</PgButton>
                         </RouterLink>
                     </div>
                 </div>

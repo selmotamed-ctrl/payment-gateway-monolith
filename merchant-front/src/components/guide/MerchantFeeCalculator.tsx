@@ -2,11 +2,11 @@ import { dc } from "@/utils/dc";
 import { computed } from "vue";
 import type Decimal from "decimal.js";
 import { useLocale } from "@/utils/vael-compat";
-import { VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { FormField } from "@/components/ui/FormField";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { DescriptionList } from "@/components/ui/DescriptionList";
+import {PgAutocomplete, PgTextField} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
 import { toDecimal } from "@/utils/money";
 
 export type FeeBearer = "MERCHANT_ABSORBS" | "PAYER_SURCHARGE" | "SPLIT";
@@ -114,7 +114,7 @@ export const MerchantFeeCalculator = dc(
                     <div style={{ display: "flex", flexDirection: "row", flexWrap: "wrap", gap: "12px" }}>
                         <div style={{ minWidth: "170px", flex: "1 1 170px" }}>
                             <FormField label={isArabic.value ? "المبلغ" : "Amount"} required>
-                                <VTextField
+                                <PgTextField
                                     type="number"
                                     modelValue={props.modelValue.amount}
                                     onUpdate:modelValue={(value: string) => update({ amount: value })}
@@ -125,7 +125,7 @@ export const MerchantFeeCalculator = dc(
                         </div>
                         <div style={{ minWidth: "190px", flex: "1 1 190px" }}>
                             <FormField label={isArabic.value ? "السكة" : "Rail"} required>
-                                <VSelect
+                                <PgAutocomplete
                                     items={RAIL_CODES.map((code) => ({ title: code, value: code }))}
                                     modelValue={props.modelValue.rail}
                                     onUpdate:modelValue={(value: string) => update({ rail: value })}
@@ -135,7 +135,7 @@ export const MerchantFeeCalculator = dc(
                         </div>
                         <div style={{ minWidth: "150px", flex: "1 1 150px" }}>
                             <FormField label={isArabic.value ? "العمولة" : "Commission"} required>
-                                <VTextField
+                                <PgTextField
                                     type="number"
                                     modelValue={props.modelValue.commission}
                                     onUpdate:modelValue={(value: string) => update({ commission: value })}
@@ -146,7 +146,7 @@ export const MerchantFeeCalculator = dc(
                         </div>
                         <div style={{ minWidth: "150px", flex: "1 1 150px" }}>
                             <FormField label={isArabic.value ? "رسم البوابة" : "Gateway fee"} required>
-                                <VTextField
+                                <PgTextField
                                     type="number"
                                     modelValue={props.modelValue.gatewayFee}
                                     onUpdate:modelValue={(value: string) => update({ gatewayFee: value })}
@@ -158,7 +158,7 @@ export const MerchantFeeCalculator = dc(
                         {props.modelValue.feeBearer === "SPLIT" ? (
                             <div style={{ minWidth: "150px", flex: "1 1 150px" }}>
                                 <FormField label={isArabic.value ? "حصة المنصة" : "Platform share"} required>
-                                    <VTextField
+                                    <PgTextField
                                         type="number"
                                         modelValue={props.modelValue.platformShare}
                                         onUpdate:modelValue={(value: string) => update({ platformShare: value })}

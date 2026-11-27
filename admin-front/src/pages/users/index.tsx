@@ -4,23 +4,23 @@ import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VCheckbox, VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { statusTone } from "@/components/Table/statusTone";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import type { TableHeader } from "@/components/Table/types";
+import {VAlert, PgButton, PgCheckbox, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {statusTone} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { user as currentUser } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
@@ -29,12 +29,12 @@ import { ADMIN_ROLES } from "@/utils/authorities";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { SectionFields } from "@/components/SectionFields";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 type UserRow = {
     id: string;
     email: string;
@@ -577,7 +577,7 @@ const UsersPage = dc(() => {
             headerCellStyle: { justifyContent: "center" },
             Header: () => (
                 <span style={{ width: "28px", height: "40px", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-                    <VCheckbox
+                    <PgCheckbox
                         modelValue={allVisibleSelected.value}
                         indeterminate={someVisibleSelected.value}
                         onUpdate:modelValue={(value: boolean | null) => toggleVisible(value)}
@@ -589,7 +589,7 @@ const UsersPage = dc(() => {
             ),
             Value: ({ row }: { row: UserRow }) => (
                 <ThemedView style={{ width: "28px", height: "40px", alignItems: "center", justifyContent: "center" }}>
-                    <VCheckbox
+                    <PgCheckbox
                         modelValue={Boolean(selectedUsers.value[row.id])}
                         onUpdate:modelValue={(value: boolean | null) => toggleRow(row, value)}
                         disabled={row.id === currentUserId.value}
@@ -683,9 +683,9 @@ const UsersPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Admin Users")} subtitle={t("Platform operators, makers, checkers, and access posture.")}>(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { userExportChecklist.value = {}; userExportOpen.value = true; }}>{t("Export Excel")}</VBtn>
-                            <VBtn color="primary" variant="flat" prependIcon="mdi-account-plus-outline" onClick={openCreate}>{t("Invite user")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { userExportChecklist.value = {}; userExportOpen.value = true; }}>{t("Export Excel")}</PgButton>
+                            <PgButton color="primary" variant="flat" prependIcon="mdi-account-plus-outline" onClick={openCreate}>{t("Invite user")}</PgButton>
                         </ThemedView>
                     )</PageHeader>
 
@@ -734,8 +734,8 @@ const UsersPage = dc(() => {
                         <ThemedText style={{ fontSize: "13px", fontWeight: 600 }}>{selectedCount.value} {t("selected")}</ThemedText>
                         <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("Status-only changes apply immediately. Your own account cannot be selected.")}</ThemedText>
                         <div style={{ flex: 1 }} />
-                        <VBtn size="small" variant="text" onClick={clearSelection}>{t("Clear selection")}</VBtn>
-                        <VBtn size="small" color="warning" variant="flat" prependIcon="mdi-account-cog-outline" onClick={openBulk}>{t("Change status")}</VBtn>
+                        <PgButton size="small" variant="text" onClick={clearSelection}>{t("Clear selection")}</PgButton>
+                        <PgButton size="small" color="warning" variant="flat" prependIcon="mdi-account-cog-outline" onClick={openBulk}>{t("Change status")}</PgButton>
                     </ThemedView>
                 )}
 
@@ -828,10 +828,10 @@ const UsersPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <>
-                            <VBtn variant="outlined" disabled={bulkLoading.value} onClick={() => (bulkOpen.value = false)}>
+                            <PgButton variant="outlined" disabled={bulkLoading.value} onClick={() => (bulkOpen.value = false)}>
                                 {t("Cancel")}
-                            </VBtn>
-                            <VBtn
+                            </PgButton>
+                            <PgButton
                                 color="warning"
                                 variant="flat"
                                 {...{ type: "submit" }}
@@ -839,7 +839,7 @@ const UsersPage = dc(() => {
                                 disabled={!bulkStatusChecklistComplete.value}
                             >
                                 {t("Apply")} ({selectedCount.value})
-                            </VBtn>
+                            </PgButton>
                         </>
                     ),
                 }}
@@ -849,14 +849,14 @@ const UsersPage = dc(() => {
                 </VAlert>
                 <SectionFields title={t("Status change")}>
                     <FormField label={t("Status")} sensitiveMakerChecker>
-                        <VSelect
+                        <PgAutocomplete
                             items={["ACTIVE", "SUSPENDED", "DISABLED"]}
                             modelValue={bulkStatus.value}
                             onUpdate:modelValue={(value: string | null) => (bulkStatus.value = value ?? "SUSPENDED")}
                         />
                     </FormField>
                     <FormField label={t("Reason (optional)")} sensitiveMakerChecker>
-                        <VTextField
+                        <PgTextField
                             modelValue={bulkReason.value}
                             onUpdate:modelValue={(value: string) => (bulkReason.value = value)}
                         />
@@ -886,7 +886,7 @@ const UsersPage = dc(() => {
                     footer: () =>
                         detail.value ? (
                             <>
-                                <VBtn
+                                <PgButton
                                     variant="text"
                                     onClick={() => {
                                         detailOpen.value = false;
@@ -894,11 +894,11 @@ const UsersPage = dc(() => {
                                     }}
                                 >
                                     {t("Full profile")}
-                                </VBtn>
-                                <VBtn variant="outlined" disabled={saving.value} onClick={() => (detailOpen.value = false)}>{t("Cancel")}</VBtn>
-                                <VBtn color="primary" variant="flat" {...{ type: "submit" }} loading={saving.value} disabled={!detailChecklistComplete.value}>
+                                </PgButton>
+                                <PgButton variant="outlined" disabled={saving.value} onClick={() => (detailOpen.value = false)}>{t("Cancel")}</PgButton>
+                                <PgButton color="primary" variant="flat" {...{ type: "submit" }} loading={saving.value} disabled={!detailChecklistComplete.value}>
                                     {t("Save changes")}
-                                </VBtn>
+                                </PgButton>
                             </>
                         ) : null,
                 }}
@@ -941,23 +941,23 @@ const UsersPage = dc(() => {
                                         complete={resendChecklistComplete.value}
                                         incompleteMessage={t("Complete all invitation checklist items before resending")}
                                     />
-                                    <VBtn size="small" variant="outlined" loading={resendingInvitation.value} disabled={!resendChecklistComplete.value} onClick={() => void resendInvitation()}>
+                                    <PgButton size="small" variant="outlined" loading={resendingInvitation.value} disabled={!resendChecklistComplete.value} onClick={() => void resendInvitation()}>
                                         {t("Resend invitation")}
-                                    </VBtn>
+                                    </PgButton>
                                 </div>
                             </VAlert>
                         )}
 
                         <SectionFields title={t("Role and access")}>
                             <FormField label={t("Role")} sensitiveMakerChecker>
-                                <VSelect
+                                <PgAutocomplete
                                     items={[...ADMIN_ROLES] as string[]}
                                     modelValue={editForm.value.role}
                                     onUpdate:modelValue={(value: string | null) => (editForm.value.role = value ?? "OPERATOR")}
                                 />
                             </FormField>
                             <FormField label={t("Status")} sensitiveMakerChecker>
-                                <VSelect
+                                <PgAutocomplete
                                     items={USER_STATUSES}
                                     modelValue={editForm.value.status}
                                     onUpdate:modelValue={(value: string) => (editForm.value.status = value)}
@@ -968,7 +968,7 @@ const UsersPage = dc(() => {
                                 hint={t("Comma-separated keys. Any role or authority change waits for a checker.")}
                                 sensitiveMakerChecker
                             >
-                                <VTextField
+                                <PgTextField
                                     modelValue={editForm.value.authorities}
                                     onUpdate:modelValue={(value: string) => (editForm.value.authorities = value)}
                                     placeholder="user:read, user:write, merchant:read"
@@ -1004,10 +1004,10 @@ const UsersPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <>
-                            <VBtn variant="outlined" disabled={creating.value} onClick={() => (createOpen.value = false)}>
+                            <PgButton variant="outlined" disabled={creating.value} onClick={() => (createOpen.value = false)}>
                                 {t("Cancel")}
-                            </VBtn>
-                            <VBtn
+                            </PgButton>
+                            <PgButton
                                 color="primary"
                                 variant="flat"
                                 {...{ type: "submit" }}
@@ -1015,7 +1015,7 @@ const UsersPage = dc(() => {
                                 disabled={!createForm.value.email.trim() || !createForm.value.email.includes("@") || !inviteChecklistComplete.value}
                             >
                                 {t("Invite")}
-                            </VBtn>
+                            </PgButton>
                         </>
                     ),
                 }}
@@ -1025,22 +1025,22 @@ const UsersPage = dc(() => {
                 </VAlert>
                 <SectionFields title={t("User details")}>
                     <FormField label={t("Email")} required>
-                        <VTextField type="email" modelValue={createForm.value.email} onUpdate:modelValue={(value: string) => (createForm.value.email = value)} />
+                        <PgTextField type="email" modelValue={createForm.value.email} onUpdate:modelValue={(value: string) => (createForm.value.email = value)} />
                     </FormField>
                     <FormField label={t("Display name")}>
-                        <VTextField modelValue={createForm.value.fullName} onUpdate:modelValue={(value: string) => (createForm.value.fullName = value)} />
+                        <PgTextField modelValue={createForm.value.fullName} onUpdate:modelValue={(value: string) => (createForm.value.fullName = value)} />
                     </FormField>
                 </SectionFields>
                 <SectionFields title={t("Access")}>
                     <FormField label={t("Role")} sensitiveMakerChecker>
-                        <VSelect items={[...ADMIN_ROLES] as string[]} modelValue={createForm.value.role} onUpdate:modelValue={(value: string | null) => (createForm.value.role = value ?? "OPERATOR")} />
+                        <PgAutocomplete items={[...ADMIN_ROLES] as string[]} modelValue={createForm.value.role} onUpdate:modelValue={(value: string | null) => (createForm.value.role = value ?? "OPERATOR")} />
                     </FormField>
                     <FormField
                         label={t("Authority keys")}
                         hint={t("Optional. Comma-separated authority keys.")}
                         sensitiveMakerChecker
                     >
-                        <VTextField
+                        <PgTextField
                             modelValue={createForm.value.authorities}
                             onUpdate:modelValue={(value: string) => (createForm.value.authorities = value)}
                             placeholder="user:read, merchant:read"

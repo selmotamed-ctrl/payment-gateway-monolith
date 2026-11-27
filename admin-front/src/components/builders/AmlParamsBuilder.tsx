@@ -1,8 +1,8 @@
 import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VSelect, VTextField } from "@/components/vael/VuetifyShim";
+import {PgAutocomplete, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
-import { FormField } from "@/components/ui/FormField";
+import {FormField} from "@pg/ui";
 import { ChipListInput } from "./ChipListInput";
 import { KeyValueSummary, type KeyValueItem } from "./KeyValueSummary";
 import { AML_PARAM_ERROR_MESSAGES } from "./messages";
@@ -55,7 +55,7 @@ export const AmlParamsBuilder = defineComponent({
             switch (field.kind) {
                 case "select":
                     return (
-                        <VSelect
+                        <PgAutocomplete
                             modelValue={text || null}
                             onUpdate:modelValue={(next: string | null) => setValue(field.key, next ?? "")}
                             items={(field.options ?? []).map((option) => ({ title: option.charAt(0) + option.slice(1).toLowerCase().replaceAll("_", " "), value: option }))}
@@ -81,7 +81,7 @@ export const AmlParamsBuilder = defineComponent({
                     const unit = split.unit;
                     return (
                         <div style={{ display: "flex", gap: "8px", alignItems: "flex-start" }}>
-                            <VTextField
+                            <PgTextField
                                 type="number"
                                 modelValue={Number.isNaN(split.value) ? "" : String(split.value)}
                                 onUpdate:modelValue={(next: string) => {
@@ -92,7 +92,7 @@ export const AmlParamsBuilder = defineComponent({
                                 hideDetails
                                 style={{ flex: 1, minInlineSize: 0 }}
                             />
-                            <VSelect
+                            <PgAutocomplete
                                 modelValue={unit}
                                 onUpdate:modelValue={(next: DurationUnit) => {
                                     const current = Number.isNaN(split.value) ? 1 : split.value;
@@ -107,9 +107,9 @@ export const AmlParamsBuilder = defineComponent({
                     );
                 }
                 case "currency":
-                    return <VTextField modelValue={text} onUpdate:modelValue={(next: string) => setValue(field.key, next.toUpperCase())} density="compact" hideDetails />;
+                    return <PgTextField modelValue={text} onUpdate:modelValue={(next: string) => setValue(field.key, next.toUpperCase())} density="compact" hideDetails />;
                 default:
-                    return <VTextField modelValue={text} onUpdate:modelValue={(next: string) => setValue(field.key, next)} density="compact" hideDetails />;
+                    return <PgTextField modelValue={text} onUpdate:modelValue={(next: string) => setValue(field.key, next)} density="compact" hideDetails />;
             }
         };
 

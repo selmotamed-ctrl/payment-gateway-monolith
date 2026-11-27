@@ -1,11 +1,11 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { FormField } from "@/components/ui/FormField";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import {PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
 import { WizardSection } from "./WizardSection";
 import type { WizardRail, WizardRailField } from "./types";
 import type { WizardStepProps } from "./StepIdentity";
@@ -129,9 +129,9 @@ export const StepCustomerCatalog = dc(
                     title={t("Customer Catalog")}
                     v-slots={{
                         headerActions: () => (
-                            <VBtn variant="tonal" size="small" onClick={addRail}>
+                            <PgButton variant="tonal" size="small" onClick={addRail}>
                                 {t("Add")}
-                            </VBtn>
+                            </PgButton>
                         ),
                     }}
                 >
@@ -159,46 +159,46 @@ export const StepCustomerCatalog = dc(
                                                 toneOverride="info"
                                                 showDot={false}
                                             />
-                                            <VBtn
+                                            <PgButton
                                                 size="x-small"
                                                 variant="text"
                                                 color="error"
                                                 onClick={() => removeRail(activeRailIndex.value)}
                                             >
                                                 ×
-                                            </VBtn>
+                                            </PgButton>
                                         </>
                                     ),
                                 }}
                             >
                                 <div style={gridStyle}>
                                     <FormField label={t("Rail Code")}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={activeRail.code}
                                             onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { code: v })}
                                         />
                                     </FormField>
                                     <FormField label={t("Label (English)")}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={activeRail.nameEn}
                                             onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { nameEn: v })}
                                         />
                                     </FormField>
                                     <FormField label={t("Label (Arabic)")}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={activeRail.nameAr}
                                             onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { nameAr: v })}
                                         />
                                     </FormField>
                                     <FormField label={t("Type")}>
-                                        <VSelect
+                                        <PgAutocomplete
                                             items={["OTP_PULL", "REDIRECT", "EMBEDDED", "PUSH_APPROVAL", "QR_DISPLAY", "PAY_CODE", "DEEP_LINK", "MANUAL", "HYBRID"]}
                                             modelValue={activeRail.collectionMode}
                                             onUpdate:modelValue={(v: any) => updateRail(activeRailIndex.value, { collectionMode: v })}
                                         />
                                     </FormField>
                                     <FormField label={t("Currency")}>
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={activeRail.currency}
                                             onUpdate:modelValue={(v: string) =>
                                                 updateRail(activeRailIndex.value, { currency: v.toUpperCase() })
@@ -206,13 +206,13 @@ export const StepCustomerCatalog = dc(
                                         />
                                     </FormField>
                                     <FormField label="min_amount">
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={activeRail.minAmount}
                                             onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { minAmount: v })}
                                         />
                                     </FormField>
                                     <FormField label="max_amount">
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={activeRail.maxAmount}
                                             onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { maxAmount: v })}
                                         />
@@ -224,9 +224,9 @@ export const StepCustomerCatalog = dc(
                                     divider
                                     v-slots={{
                                         actions: () => (
-                                            <VBtn variant="tonal" size="small" onClick={() => addField(activeRailIndex.value)}>
+                                            <PgButton variant="tonal" size="small" onClick={() => addField(activeRailIndex.value)}>
                                                 {t("Add")}
-                                            </VBtn>
+                                            </PgButton>
                                         ),
                                     }}
                                 >
@@ -251,27 +251,27 @@ export const StepCustomerCatalog = dc(
                                                 v-slots={{
                                                     actions: () => (
                                                         <>
-                                                            <VIconDrag />
+                                                            <PgIcon />
                                                             <StatusBadge
                                                                 status={field.sensitivity}
                                                                 toneOverride={sensitivityTone(field.sensitivity)}
                                                                 showDot={false}
                                                             />
-                                                            <VBtn
+                                                            <PgButton
                                                                 size="x-small"
                                                                 variant="text"
                                                                 color="error"
                                                                 onClick={() => removeField(activeRailIndex.value, fieldIndex)}
                                                             >
                                                                 ×
-                                                            </VBtn>
+                                                            </PgButton>
                                                         </>
                                                     ),
                                                 }}
                                             >
                                                 <div style={gridStyle}>
                                                     <FormField label={t("Field Key")}>
-                                                        <VTextField
+                                                        <PgTextField
                                                             modelValue={field.fieldKey}
                                                             onUpdate:modelValue={(v: string) =>
                                                                 updateField(activeRailIndex.value, fieldIndex, { fieldKey: v })
@@ -279,7 +279,7 @@ export const StepCustomerCatalog = dc(
                                                         />
                                                     </FormField>
                                                     <FormField label={t("Label (English)")}>
-                                                        <VTextField
+                                                        <PgTextField
                                                             modelValue={field.labelEn}
                                                             onUpdate:modelValue={(v: string) =>
                                                                 updateField(activeRailIndex.value, fieldIndex, { labelEn: v })
@@ -287,7 +287,7 @@ export const StepCustomerCatalog = dc(
                                                         />
                                                     </FormField>
                                                     <FormField label={t("Label (Arabic)")}>
-                                                        <VTextField
+                                                        <PgTextField
                                                             modelValue={field.labelAr}
                                                             onUpdate:modelValue={(v: string) =>
                                                                 updateField(activeRailIndex.value, fieldIndex, { labelAr: v })
@@ -295,7 +295,7 @@ export const StepCustomerCatalog = dc(
                                                         />
                                                     </FormField>
                                                     <FormField label={t("Input Type")}>
-                                                        <VSelect
+                                                        <PgAutocomplete
                                                             items={["text", "numeric", "phone", "wallet_id", "otp", "select"]}
                                                             modelValue={field.inputType}
                                                             onUpdate:modelValue={(v: any) =>
@@ -304,7 +304,7 @@ export const StepCustomerCatalog = dc(
                                                         />
                                                     </FormField>
                                                     <FormField label={t("Regex")}>
-                                                        <VTextField
+                                                        <PgTextField
                                                             modelValue={field.regex}
                                                             onUpdate:modelValue={(v: string) =>
                                                                 updateField(activeRailIndex.value, fieldIndex, { regex: v })
@@ -312,7 +312,7 @@ export const StepCustomerCatalog = dc(
                                                         />
                                                     </FormField>
                                                     <FormField label={t("Min Length")}>
-                                                        <VTextField
+                                                        <PgTextField
                                                             type="number"
                                                             modelValue={field.minLength ?? undefined}
                                                             onUpdate:modelValue={(v: any) =>
@@ -323,7 +323,7 @@ export const StepCustomerCatalog = dc(
                                                         />
                                                     </FormField>
                                                     <FormField label={t("Max Length")}>
-                                                        <VTextField
+                                                        <PgTextField
                                                             type="number"
                                                             modelValue={field.maxLength ?? undefined}
                                                             onUpdate:modelValue={(v: any) =>
@@ -334,7 +334,7 @@ export const StepCustomerCatalog = dc(
                                                         />
                                                     </FormField>
                                                     <FormField label={t("Normalizer")}>
-                                                        <VSelect
+                                                        <PgAutocomplete
                                                             items={[
                                                                 "NONE",
                                                                 "ARABIC_DIGITS_TO_ASCII",
@@ -349,7 +349,7 @@ export const StepCustomerCatalog = dc(
                                                         />
                                                     </FormField>
                                                     <FormField label={t("Sensitivity")}>
-                                                        <VSelect
+                                                        <PgAutocomplete
                                                             items={["NORMAL", "SENSITIVE", "PAN"]}
                                                             modelValue={field.sensitivity}
                                                             onUpdate:modelValue={(v: any) =>
@@ -374,7 +374,7 @@ export const StepCustomerCatalog = dc(
     },
 );
 
-const VIconDrag = dc(() => {
+const PgIcon = dc(() => {
     return () => (
         <span style={{ opacity: 0.5, fontSize: "18px", lineHeight: 1, userSelect: "none" }} aria-hidden="true">
             ⋮⋮

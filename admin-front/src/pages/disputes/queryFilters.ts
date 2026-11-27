@@ -1,4 +1,4 @@
-import type { FilterValues } from "@/components/Table/filters";
+import type { FilterValues } from "@pg/ui";
 
 export type DisputeView = "open" | "resolved" | "all";
 

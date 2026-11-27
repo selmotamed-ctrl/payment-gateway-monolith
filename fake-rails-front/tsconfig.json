@@ -1,29 +1,35 @@
 {
-  "extends": "@vue/tsconfig/tsconfig.dom.json",
-  "include": [
-    "env.d.ts",
-    "src/**/*",
-    "src/**/*.tsx"
-  ],
-  "compilerOptions": {
-    "target": "es2021",
-    "lib": [
-      "es2021",
-      "DOM",
-      "DOM.Iterable"
+    "extends": "@vue/tsconfig/tsconfig.dom.json",
+    "include": [
+        "env.d.ts",
+        "src/**/*",
+        "src/**/*.tsx"
     ],
-    "jsx": "preserve",
-    "jsxImportSource": "vue",
-    "paths": {
-      "@/*": [
-        "./src/*"
-      ]
-    },
-    "types": [
-      "vite/client"
-    ],
-    "noEmit": true,
-    "skipLibCheck": true,
-    "noImplicitAny": false
-  }
+    "compilerOptions": {
+        "target": "es2021",
+        "lib": [
+            "es2021",
+            "DOM",
+            "DOM.Iterable"
+        ],
+        "jsx": "preserve",
+        "jsxImportSource": "vue",
+        "paths": {
+            "@/*": [
+                "./src/*"
+            ],
+            "@pg/ui": [
+                "../packages/ui/src/index.ts"
+            ],
+            "@pg/ui/*": [
+                "../packages/ui/src/*"
+            ]
+        },
+        "types": [
+            "vite/client"
+        ],
+        "noEmit": true,
+        "skipLibCheck": true,
+        "noImplicitAny": false
+    }
 }

@@ -1,7 +1,7 @@
 import { computed, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VTextField } from "@/components/vael/VuetifyShim";
+import {PgButton, PgTextField} from "@pg/ui";
 import { MAX_TIERS, emptyTier, type TierError, type TierErrorCode, type TierField, type TierRow } from "../commissionTiers";
 
 const ERROR_TEXT: Record<TierErrorCode, string> = {
@@ -59,7 +59,7 @@ export const CommissionTiersEditor = defineComponent({
 
         const cell = (index: number, row: TierRow, field: TierField, label: string, placeholder: string): VNodeChild => (
             <td style={{ padding: "6px 8px", verticalAlign: "top", minInlineSize: "120px" }}>
-                <VTextField
+                <PgTextField
                     modelValue={row[field]}
                     onUpdate:modelValue={(value: string) => update(index, field, value)}
                     aria-label={`${label} ${index + 1}`}
@@ -105,7 +105,7 @@ export const CommissionTiersEditor = defineComponent({
                                         {cell(index, row, "flat", t("Fixed fee"), "0.0000")}
                                         {cell(index, row, "percent", t("Rate"), "0.015")}
                                         <td style={{ padding: "6px 8px", verticalAlign: "middle", textAlign: "end" }}>
-                                            <VBtn
+                                            <PgButton
                                                 icon="mdi-delete-outline"
                                                 size="small"
                                                 variant="text"
@@ -121,7 +121,7 @@ export const CommissionTiersEditor = defineComponent({
                     </table>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                    <VBtn
+                    <PgButton
                         size="small"
                         variant="tonal"
                         prependIcon="mdi-plus"
@@ -129,13 +129,13 @@ export const CommissionTiersEditor = defineComponent({
                         onClick={add}
                     >
                         {t("Add tier")}
-                    </VBtn>
+                    </PgButton>
                     <span style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
                         {t("The first tier whose ceiling covers the amount applies. The rate is a decimal fraction, for example 0.015 for 1.5%.")}
                     </span>
                 </div>
                 {distinctMessages.value.length > 0 && (
-                    <ul role="alert" style={{ margin: 0, paddingInlineStart: "18px", color: "var(--pg-status-danger-text)", fontSize: "12px" }}>
+                    <ul style={{ margin: 0, paddingInlineStart: "18px", color: "var(--pg-status-danger-text)", fontSize: "12px" }}>
                         {distinctMessages.value.map((message) => (
                             <li key={message}>{message}</li>
                         ))}

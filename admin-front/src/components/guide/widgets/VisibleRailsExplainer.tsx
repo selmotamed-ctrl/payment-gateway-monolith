@@ -3,6 +3,7 @@ import { defineComponent } from "@/utils/dc";
 import { loadData, type VisibleRailsData } from "@/content/guide";
 import { evaluateVisibleRails } from "./engine/visibleRails";
 import { useGuideLocale } from "./useGuideLocale";
+import { PgAutocomplete, PgTextField } from "@pg/ui";
 
 const parseWhitelist = (value: string): string[] | null => {
     const entries = value
@@ -72,29 +73,26 @@ export const VisibleRailsExplainer = defineComponent({
                 ) : (
                     <>
                         <div class="guide-tool__grid">
-                            <label class="guide-field">
+                            <div class="guide-field">
                                 <span>{L("Link amount", "مبلغ الرابط")}</span>
-                                <input value={amount.value} onInput={(event) => (amount.value = (event.target as HTMLInputElement).value)} />
-                            </label>
-                            <label class="guide-field">
+                                <PgTextField density="compact" modelValue={amount.value} onUpdate:modelValue={(value: string) => (amount.value = value)} />
+                            </div>
+                            <div class="guide-field">
                                 <span>{L("Currency", "العملة")}</span>
-                                <select value={currency.value} onChange={(event) => (currency.value = (event.target as HTMLSelectElement).value)}>
-                                    <option value="LYD">LYD</option>
-                                    <option value="USD">USD</option>
-                                </select>
-                            </label>
-                            <label class="guide-field">
+                                <PgAutocomplete density="compact" searchable={false} clearable={false} items={["LYD", "USD"]} modelValue={currency.value} onUpdate:modelValue={(value: string) => (currency.value = value)} />
+                            </div>
+                            <div class="guide-field">
                                 <span>{L("Time of day", "وقت اليوم")}</span>
-                                <input type="time" value={timeOfDay.value} onInput={(event) => (timeOfDay.value = (event.target as HTMLInputElement).value)} />
-                            </label>
-                            <label class="guide-field">
+                                <PgTextField type="time" density="compact" modelValue={timeOfDay.value} onUpdate:modelValue={(value: string) => (timeOfDay.value = value)} />
+                            </div>
+                            <div class="guide-field">
                                 <span>{L("Application whitelist (comma separated)", "قائمة تطبيق المسموح (مفصولة بفواصل)")}</span>
-                                <input value={applicationWhitelist.value} onInput={(event) => (applicationWhitelist.value = (event.target as HTMLInputElement).value)} />
-                            </label>
-                            <label class="guide-field">
+                                <PgTextField density="compact" modelValue={applicationWhitelist.value} onUpdate:modelValue={(value: string) => (applicationWhitelist.value = value)} />
+                            </div>
+                            <div class="guide-field">
                                 <span>{L("Link whitelist (comma separated)", "قائمة الرابط المسموح (مفصولة بفواصل)")}</span>
-                                <input value={linkWhitelist.value} onInput={(event) => (linkWhitelist.value = (event.target as HTMLInputElement).value)} />
-                            </label>
+                                <PgTextField density="compact" modelValue={linkWhitelist.value} onUpdate:modelValue={(value: string) => (linkWhitelist.value = value)} />
+                            </div>
                         </div>
                         <div class="guide-rail-list" aria-live="polite">
                             {results.value.map((rail) => (
@@ -108,20 +106,19 @@ export const VisibleRailsExplainer = defineComponent({
                                         {rail.routes.map((route) => (
                                             <label key={route.id} class="guide-rail__route">
                                                 <span>{route.id}</span>
-                                                <select
-                                                    value={overrides.value[route.id] ?? "HEALTHY"}
-                                                    onChange={(event) => {
+                                                <PgAutocomplete
+                                                    density="compact"
+                                                    searchable={false}
+                                                    clearable={false}
+                                                    items={["HEALTHY", "DEGRADED", "OPEN_BREAKER"]}
+                                                    modelValue={overrides.value[route.id] ?? "HEALTHY"}
+                                                    onUpdate:modelValue={(value: string) => {
                                                         const next = { ...overrides.value };
-                                                        const value = (event.target as HTMLSelectElement).value;
                                                         if (value === "HEALTHY") delete next[route.id];
                                                         else next[route.id] = value;
                                                         overrides.value = next;
                                                     }}
-                                                >
-                                                    <option value="HEALTHY">HEALTHY</option>
-                                                    <option value="DEGRADED">DEGRADED</option>
-                                                    <option value="OPEN_BREAKER">OPEN_BREAKER</option>
-                                                </select>
+                                                />
                                                 <small>
                                                     {route.passed
                                                         ? L("passes", "ناجح")

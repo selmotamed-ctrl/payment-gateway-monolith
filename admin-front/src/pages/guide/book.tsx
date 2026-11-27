@@ -2,8 +2,8 @@ import { computed, onMounted, ref } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRoute } from "vue-router";
 import { RouterLink } from "vue-router/experimental/vapor";
-import { PageHeader } from "@/components/ui/PageHeader";
-import ScreenContainer from "@/components/ScreenContainer";
+import {PageHeader} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
 import { useGuideProgress } from "@/components/guide/useGuideProgress";
 import { useGuideLocale } from "@/components/guide/widgets/useGuideLocale";
 import {

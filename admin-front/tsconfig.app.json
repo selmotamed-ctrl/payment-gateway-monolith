@@ -1,26 +1,32 @@
 {
-  "extends": "@vue/tsconfig/tsconfig.dom.json",
-  "include": [
-    "env.d.ts",
-    "src/**/*",
-    "src/**/*.tsx"
-  ],
-  "exclude": [
-    "src/**/__tests__/*"
-  ],
-  "compilerOptions": {
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
-    "target": "es2021",
-    "lib": [
-      "es2021",
-      "DOM",
-      "DOM.Iterable"
+    "extends": "@vue/tsconfig/tsconfig.dom.json",
+    "include": [
+        "env.d.ts",
+        "src/**/*",
+        "src/**/*.tsx"
     ],
-    "paths": {
-      "@/*": [
-        "./src/*"
-      ]
-    },
-    "noImplicitAny": false
-  }
+    "exclude": [
+        "src/**/__tests__/*"
+    ],
+    "compilerOptions": {
+        "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+        "target": "es2021",
+        "lib": [
+            "es2021",
+            "DOM",
+            "DOM.Iterable"
+        ],
+        "paths": {
+            "@/*": [
+                "./src/*"
+            ],
+            "@pg/ui": [
+                "../packages/ui/src/index.ts"
+            ],
+            "@pg/ui/*": [
+                "../packages/ui/src/*"
+            ]
+        },
+        "noImplicitAny": false
+    }
 }

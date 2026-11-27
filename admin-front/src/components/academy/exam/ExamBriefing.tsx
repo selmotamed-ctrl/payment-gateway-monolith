@@ -1,10 +1,10 @@
 import { dc } from "@/utils/dc";
 import { computed, ref, type VNodeChild } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn } from "@/components/vael/VuetifyShim";
+import {PgButton, PgChoice} from "@pg/ui";
 import { GuideMarkdown } from "@/components/guide/GuideMarkdown";
-import { MetricStrip } from "@/components/ui/MetricStrip";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {MetricStrip} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
 import type { ExamBlueprintPublic } from "@/content/academy";
 import type { Eligibility, OpenExamSession } from "@/content/academy/apiTypes";
 import { fmtDateTime } from "../format";
@@ -71,9 +71,9 @@ export const ExamBriefing = dc((props: Props) => {
                         <span>
                             {t("We could not check your requirements.")} {props.eligibilityError}
                         </span>
-                        <VBtn size="small" variant="outlined" onClick={props.onRetryEligibility}>
+                        <PgButton size="small" variant="outlined" onClick={props.onRetryEligibility}>
                             {t("Retry")}
-                        </VBtn>
+                        </PgButton>
                     </div>
                 </Callout>
             );
@@ -170,35 +170,38 @@ export const ExamBriefing = dc((props: Props) => {
                                 <div class="ac-prose" dir="auto">
                                     <GuideMarkdown source={props.integrityText} />
                                 </div>
-                                <label class={["ac-choice", "ac-exam-accept", accepted.value ? "ac-choice--selected" : ""]}>
-                                    <input
-                                        type="checkbox"
-                                        checked={accepted.value}
-                                        onChange={(event: Event) => (accepted.value = (event.target as HTMLInputElement).checked)}
-                                    />
-                                    <span class="ac-choice__label">{t("I have read and I agree to this integrity statement.")}</span>
-                                </label>
-                                <label class={["ac-choice", "ac-exam-accept", noHelp.value ? "ac-choice--selected" : ""]}>
-                                    <input
-                                        type="checkbox"
-                                        checked={noHelp.value}
-                                        onChange={(event: Event) => (noHelp.value = (event.target as HTMLInputElement).checked)}
-                                    />
-                                    <span class="ac-choice__label">{t("I will complete this exam without outside help or notes.")}</span>
-                                </label>
-                                <label class={["ac-choice", "ac-exam-accept", timeAck.value ? "ac-choice--selected" : ""]}>
-                                    <input
-                                        type="checkbox"
-                                        checked={timeAck.value}
-                                        onChange={(event: Event) => (timeAck.value = (event.target as HTMLInputElement).checked)}
-                                    />
-                                    <span class="ac-choice__label">{t("I understand the time limit and that the session may not be resumed after it expires.")}</span>
-                                </label>
+                                <PgChoice
+                                    type="checkbox"
+                                    checked={accepted.value}
+                                    onChange={(value: boolean) => (accepted.value = value)}
+                                    state={accepted.value ? "selected" : ""}
+                                    class="ac-exam-accept"
+                                >
+                                    {t("I have read and I agree to this integrity statement.")}
+                                </PgChoice>
+                                <PgChoice
+                                    type="checkbox"
+                                    checked={noHelp.value}
+                                    onChange={(value: boolean) => (noHelp.value = value)}
+                                    state={noHelp.value ? "selected" : ""}
+                                    class="ac-exam-accept"
+                                >
+                                    {t("I will complete this exam without outside help or notes.")}
+                                </PgChoice>
+                                <PgChoice
+                                    type="checkbox"
+                                    checked={timeAck.value}
+                                    onChange={(value: boolean) => (timeAck.value = value)}
+                                    state={timeAck.value ? "selected" : ""}
+                                    class="ac-exam-accept"
+                                >
+                                    {t("I understand the time limit and that the session may not be resumed after it expires.")}
+                                </PgChoice>
                                 {props.startError && <Callout tone="danger">{props.startError}</Callout>}
                                 <div>
-                                    <VBtn color="primary" disabled={!checklistComplete.value || !canStart.value || props.starting} loading={props.starting} onClick={() => props.onStart(["EXAM_INTEGRITY_ACCEPTED", ...(noHelp.value ? ["EXAM_NO_OUTSIDE_HELP"] : []), ...(timeAck.value ? ["EXAM_TIME_LIMIT_ACKNOWLEDGED"] : [])])}>
+                                    <PgButton color="primary" disabled={!checklistComplete.value || !canStart.value || props.starting} loading={props.starting} onClick={() => props.onStart(["EXAM_INTEGRITY_ACCEPTED", ...(noHelp.value ? ["EXAM_NO_OUTSIDE_HELP"] : []), ...(timeAck.value ? ["EXAM_TIME_LIMIT_ACKNOWLEDGED"] : [])])}>
                                         {props.open ? t("Resume exam") : t("Start exam")}
-                                    </VBtn>
+                                    </PgButton>
                                 </div>
                             </div>
                         </SurfaceCard>

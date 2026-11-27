@@ -1,4 +1,4 @@
-import type { StatusTone } from "@/components/StatusChip";
+import type { StatusTone } from "@pg/ui";
 import type { JoinRequestStatus } from "./types";
 
 export const COLUMN_HELP = {

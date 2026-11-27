@@ -1,9 +1,9 @@
 import { dc } from "@/utils/dc";
 import { computed } from "vue";
-import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
-import { ThemedText } from "@/components/ThemedText";
-import { ThemedView } from "@/components/ThemedView";
-import { DescriptionList, MetaPill, MonoRef, SlideOverDrawer } from "@/components/ui";
+import {PgButton, PgIcon} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {DescriptionList, MetaPill, MonoRef, SlideOverDrawer} from "@pg/ui";
 import { showSnackBar } from "@/utils/snackBar";
 import type { AttemptStatus, PayLinkSummary, RailDescriptor } from "@/components/renderers/types";
 
@@ -258,7 +258,6 @@ export const CheckoutHelpDrawer = dc(
                     >
                         {stateHelp.value && stateTone && (
                             <div
-                                role="alert"
                                 style={{
                                     display: "flex",
                                     flexDirection: "column",
@@ -302,7 +301,7 @@ export const CheckoutHelpDrawer = dc(
                         {hasGuide && (
                             <ThemedView style={{ gap: "12px" }}>
                                 <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
-                                    <VIcon
+                                    <PgIcon
                                         icon="mdi-credit-card-outline"
                                         style={{ color: "var(--pg-accent-interactive)" }}
                                     />
@@ -413,7 +412,7 @@ export const CheckoutHelpDrawer = dc(
                         {hasFaq && (
                             <ThemedView style={{ gap: "10px" }}>
                                 <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
-                                    <VIcon
+                                    <PgIcon
                                         icon="mdi-frequently-asked-questions"
                                         style={{ color: "var(--pg-accent-interactive)" }}
                                     />
@@ -456,7 +455,7 @@ export const CheckoutHelpDrawer = dc(
                             <ThemedView style={{ gap: "12px" }}>
                                 <div style={{ height: "1px", backgroundColor: "var(--pg-border-subtle)" }} />
                                 <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
-                                    <VIcon icon="mdi-headset" style={{ color: "var(--pg-accent-interactive)" }} />
+                                    <PgIcon icon="mdi-headset" style={{ color: "var(--pg-accent-interactive)" }} />
                                     <ThemedText type="defaultSemiBold" style={sectionTitleStyle}>
                                         {ar ? "تواصل مع الدعم" : "Contact Support"}
                                     </ThemedText>
@@ -482,7 +481,7 @@ export const CheckoutHelpDrawer = dc(
                                         </ThemedText>
                                         <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "8px" }}>
                                             {!!whatsappHref.value && (
-                                                <VBtn
+                                                <PgButton
                                                     size="small"
                                                     color="success"
                                                     variant="tonal"
@@ -490,20 +489,20 @@ export const CheckoutHelpDrawer = dc(
                                                     href={whatsappHref.value}
                                                 >
                                                     WhatsApp
-                                                </VBtn>
+                                                </PgButton>
                                             )}
                                             {!!platformPhone.value && (
-                                                <VBtn
+                                                <PgButton
                                                     size="small"
                                                     variant="tonal"
                                                     prependIcon="mdi-phone"
                                                     href={`tel:${platformPhone.value.replace(/\s+/g, "")}`}
                                                 >
                                                     {platformPhone.value}
-                                                </VBtn>
+                                                </PgButton>
                                             )}
                                             {!!platformEmail.value && (
-                                                <VBtn
+                                                <PgButton
                                                     size="small"
                                                     variant="tonal"
                                                     prependIcon="mdi-email-outline"
@@ -512,7 +511,7 @@ export const CheckoutHelpDrawer = dc(
                                                     )}&body=${encodeURIComponent(helpMessage.value)}`}
                                                 >
                                                     {platformEmail.value}
-                                                </VBtn>
+                                                </PgButton>
                                             )}
                                         </ThemedView>
                                     </ThemedView>
@@ -536,17 +535,17 @@ export const CheckoutHelpDrawer = dc(
                                         )}
                                         <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "8px" }}>
                                             {!!merchantPhone.value && (
-                                                <VBtn
+                                                <PgButton
                                                     size="small"
                                                     variant="tonal"
                                                     prependIcon="mdi-phone"
                                                     href={`tel:${merchantPhone.value.replace(/\s+/g, "")}`}
                                                 >
                                                     {merchantPhone.value}
-                                                </VBtn>
+                                                </PgButton>
                                             )}
                                             {!!merchantEmail.value && (
-                                                <VBtn
+                                                <PgButton
                                                     size="small"
                                                     variant="tonal"
                                                     prependIcon="mdi-email-outline"
@@ -555,7 +554,7 @@ export const CheckoutHelpDrawer = dc(
                                                     )}&body=${encodeURIComponent(helpMessage.value)}`}
                                                 >
                                                     {merchantEmail.value}
-                                                </VBtn>
+                                                </PgButton>
                                             )}
                                         </ThemedView>
                                     </ThemedView>

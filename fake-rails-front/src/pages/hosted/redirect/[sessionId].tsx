@@ -1,11 +1,11 @@
 import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
-import { VAlert, VDivider } from "@/components/vael/VuetifyShim";
+import {VAlert, PgDivider} from "@pg/ui";
 import HostedLayout from "@/layouts/hosted";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MonoRef } from "@/components/ui/MonoRef";
+import {TableRowActions} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
 import { api, HOSTED_ACTION_HEADER } from "@/utils/api";
 import { isSafeRedirectUrl } from "@/utils/security";
 
@@ -82,7 +82,7 @@ const HostedRedirectPage = dc(() => {
             <span>Status</span>
             <StatusBadge status={session.value.transaction.status} />
           </div>
-          <VDivider class="mb-3" />
+          <PgDivider class="mb-3" />
           <div class="text-caption text-medium-emphasis mb-2">
             Tester controls (this page emulates the upstream gateway checkout)
           </div>

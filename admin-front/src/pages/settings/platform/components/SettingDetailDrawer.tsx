@@ -1,15 +1,15 @@
 import { defineComponent } from "@/utils/dc";
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
-import { VAlert, VBtn, VDivider, VTextarea, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgDivider, PgTextarea, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { JsonDiffViewer } from "@/components/ui/JsonDiffViewer";
+import {SlideOverDrawer} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {JsonDiffViewer} from "@pg/ui";
 import { SettingValueView } from "@/components/builders/SettingValueView";
 import { PlatformSettingTypedEditor } from "@/components/builders/PlatformSettingTypedEditor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -245,7 +245,7 @@ export const SettingDetailDrawer = defineComponent({
                             {entry.latest && <MetaPill size="small" variant="tonal">v{entry.effective?.version ?? entry.latest.version}</MetaPill>}
                             {entry.scheduled.length > 0 && <MetaPill size="small" variant="tonal" color="info">{t("Scheduled")}</MetaPill>}
                             <div style={{ flex: 1 }} />
-                            <VBtn size="small" variant="text" prependIcon="mdi-content-copy" onClick={() => void copyKey()}>{t("Copy key")}</VBtn>
+                            <PgButton size="small" variant="text" prependIcon="mdi-content-copy" onClick={() => void copyKey()}>{t("Copy key")}</PgButton>
                         </div>
 
                         <div style={{ fontSize: "12.5px", color: "var(--pg-ink-muted)", lineHeight: 1.5 }}>{t(status.value.description)}</div>
@@ -278,16 +278,16 @@ export const SettingDetailDrawer = defineComponent({
                                     <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
                                         <span style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>{t("Related settings")}:</span>
                                         {relatedKeys.value.map((key) => (
-                                            <VBtn key={key} size="x-small" variant="tonal" onClick={() => emit("openKey", key)}>{key}</VBtn>
+                                            <PgButton key={key} size="x-small" variant="tonal" onClick={() => emit("openKey", key)}>{key}</PgButton>
                                         ))}
                                     </div>
                                 )}
                                 <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                                     {entry.definition.managePath && (
-                                        <VBtn size="small" variant="tonal" prependIcon="mdi-open-in-new" to={entry.definition.managePath}>{t("Open the owning screen")}</VBtn>
+                                        <PgButton size="small" variant="tonal" prependIcon="mdi-open-in-new" to={entry.definition.managePath}>{t("Open the owning screen")}</PgButton>
                                     )}
                                     {entry.definition.guideArticleId && (
-                                        <VBtn size="small" variant="tonal" prependIcon="mdi-book-open-page-variant-outline" to={{ name: "AdminGuideArticle", params: { articleId: entry.definition.guideArticleId } }}>{t("Read the guide")}</VBtn>
+                                        <PgButton size="small" variant="tonal" prependIcon="mdi-book-open-page-variant-outline" to={{ name: "AdminGuideArticle", params: { articleId: entry.definition.guideArticleId } }}>{t("Read the guide")}</PgButton>
                                     )}
                                     {entry.definition.unregistered && (
                                         <span style={{ fontSize: "11.5px", color: "var(--pg-ink-muted)", lineHeight: 1.5 }}>
@@ -301,7 +301,7 @@ export const SettingDetailDrawer = defineComponent({
                         {tab.value === "value" && (
                             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                 {!entry.readOnly && namespace.value && namespace.value.fields.length > 8 && (
-                                    <VTextField
+                                    <PgTextField
                                         modelValue={fieldQuery.value}
                                         onUpdate:modelValue={(value: string) => (fieldQuery.value = value)}
                                         prependInnerIcon="mdi-filter-outline"
@@ -313,7 +313,7 @@ export const SettingDetailDrawer = defineComponent({
                                 )}
                                 {!entry.readOnly && (
                                     <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                                        <VBtn size="x-small" variant="text" onClick={resetToDefault}>{t("Reset form to default")}</VBtn>
+                                        <PgButton size="x-small" variant="text" onClick={resetToDefault}>{t("Reset form to default")}</PgButton>
                                     </div>
                                 )}
                                 {entry.readOnly ? (
@@ -341,8 +341,8 @@ export const SettingDetailDrawer = defineComponent({
                                                 <MetaPill size="x-small" variant="tonal" color="primary">v{row.version}</MetaPill>
                                                 <StatusBadge status={state} toneOverride={state === "CURRENT" ? "success" : state === "SCHEDULED" ? "info" : "neutral"} showDot={false} />
                                                 <div style={{ flex: 1 }} />
-                                                {state !== "CURRENT" && <VBtn size="x-small" variant="text" onClick={() => (compareRow.value = row)}>{t("Compare with current")}</VBtn>}
-                                                <VBtn size="x-small" variant="text" onClick={() => loadVersion(row)}>{t("Load into editor")}</VBtn>
+                                                {state !== "CURRENT" && <PgButton size="x-small" variant="text" onClick={() => (compareRow.value = row)}>{t("Compare with current")}</PgButton>}
+                                                <PgButton size="x-small" variant="text" onClick={() => loadVersion(row)}>{t("Load into editor")}</PgButton>
                                             </div>
                                             <DescriptionList
                                                 columns={2}
@@ -358,7 +358,7 @@ export const SettingDetailDrawer = defineComponent({
                                     <div style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "10px 12px", borderRadius: "var(--pg-radius-sm)", border: "1px solid var(--pg-border-subtle)", backgroundColor: "var(--pg-bg-surface-subtle)" }}>
                                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                                             <span style={{ fontSize: "12.5px", fontWeight: 600, flex: 1 }}>{t("Comparing")} v{compareRow.value.version} → v{entry.effective?.version ?? entry.latest?.version ?? "—"}</span>
-                                            <VBtn size="x-small" variant="text" onClick={() => (compareRow.value = null)}>{t("Clear comparison")}</VBtn>
+                                            <PgButton size="x-small" variant="text" onClick={() => (compareRow.value = null)}>{t("Clear comparison")}</PgButton>
                                         </div>
                                         <JsonDiffViewer diff={{ before: compareRow.value.valueJson ?? {}, after: currentValue.value }} />
                                     </div>
@@ -368,9 +368,9 @@ export const SettingDetailDrawer = defineComponent({
 
                         {canEdit.value && (
                             <>
-                                <VDivider />
+                                <PgDivider />
                                 <FormField label={t("Change note")} hint={t("Required. Recorded in the audit log with this version.")} required>
-                                    <VTextarea
+                                    <PgTextarea
                                         modelValue={reason.value}
                                         onUpdate:modelValue={(value: string) => (reason.value = value)}
                                         rows={2}
@@ -397,12 +397,12 @@ export const SettingDetailDrawer = defineComponent({
                         footer: () => entry ? (
                             <>
                                 {entry.definition.managePath && (
-                                    <VBtn variant="tonal" to={entry.definition.managePath}>{t("Open the owning screen")}</VBtn>
+                                    <PgButton variant="tonal" to={entry.definition.managePath}>{t("Open the owning screen")}</PgButton>
                                 )}
                                 <div style={{ flex: 1 }} />
-                                <VBtn variant="outlined" onClick={() => emit("update:modelValue", false)}>{canEdit.value ? t("Cancel") : t("Close")}</VBtn>
+                                <PgButton variant="outlined" onClick={() => emit("update:modelValue", false)}>{canEdit.value ? t("Cancel") : t("Close")}</PgButton>
                                 {canEdit.value && (
-                                    <VBtn
+                                    <PgButton
                                         color="primary"
                                         variant="flat"
                                         loading={saving.value}
@@ -410,7 +410,7 @@ export const SettingDetailDrawer = defineComponent({
                                         onClick={() => void save()}
                                     >
                                         {t("Save new version")}
-                                    </VBtn>
+                                    </PgButton>
                                 )}
                             </>
                         ) : null,

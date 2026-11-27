@@ -1,9 +1,9 @@
 import { dc } from "@/utils/dc";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
+import {VAlert, PgButton} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
 import type { EmbeddedClientAction } from "./types";
 import {
     createBridgeHandler,
@@ -150,9 +150,9 @@ export const EmbeddedWidgetRenderer = dc(
                 )}
 
                 {!loading.value && !props.action.iframe_src && (
-                    <VBtn variant="tonal" onClick={() => props.onReady?.()}>
+                    <PgButton variant="tonal" onClick={() => props.onReady?.()}>
                         {t("Continue To Payment")}
-                    </VBtn>
+                    </PgButton>
                 )}
             </ThemedView>
         );

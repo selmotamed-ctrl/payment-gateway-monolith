@@ -2,16 +2,16 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { FormModal } from "@/components/ui/FormModal";
+import {VAlert, PgButton} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {FormModal} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import ScreenContainer from "@/components/ScreenContainer";
-import { ThemedView } from "@/components/ThemedView";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { MetaPill, MonoRef, PageHeader, StatusBadge } from "@/components/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {MetaPill, MonoRef, PageHeader, StatusBadge} from "@pg/ui";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
@@ -243,17 +243,17 @@ const Page = dc(() => {
       <ThemedView style={{ gap: "18px" }}>
         <PageHeader title={t("Headers & Footers Needing Migration")} subtitle={t("Platform headers and footers that must be migrated before dependent reports can run")} badge="NEEDS_MIGRATION" badgeLabel={t("Needs migration")} badgeTone="danger">(
             <div class="d-flex flex-wrap ga-2">
-              <VBtn variant="tonal" prependIcon="mdi-file-chart-outline" onClick={() => void router.push({ name: "ReportsNeedsMigration" })}>
+              <PgButton variant="tonal" prependIcon="mdi-file-chart-outline" onClick={() => void router.push({ name: "ReportsNeedsMigration" })}>
                 {t("Report migration")}
-              </VBtn>
+              </PgButton>
               {canReconcile.value && (
-                <VBtn variant="tonal" loading={busy.value} prependIcon="mdi-cog-refresh-outline" onClick={() => { reconcileChecklist.value = {}; reconcileOpen.value = true; }}>
+                <PgButton variant="tonal" loading={busy.value} prependIcon="mdi-cog-refresh-outline" onClick={() => { reconcileChecklist.value = {}; reconcileOpen.value = true; }}>
                   {t("Reconcile defaults")}
-                </VBtn>
+                </PgButton>
               )}
-              <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>
+              <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>
                 {t("Refresh")}
-              </VBtn>
+              </PgButton>
             </div>
           )</PageHeader>
         {defaultIssues.value.length > 0 && (

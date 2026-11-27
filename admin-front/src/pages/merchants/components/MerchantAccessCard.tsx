@@ -2,14 +2,14 @@ import { computed, ref, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn } from "@/components/vael/VuetifyShim";
+import {PgButton} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {StatusBadge} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MonoRef } from "@/components/ui/MonoRef";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
 import { notifyOutcome, reportCommerceError, runGoverned } from "../governedRequest";
 import type { MerchantCredentialSet, MerchantToken, MerchantUser } from "../types";
 import ReasonModal from "./ReasonModal";
@@ -87,9 +87,9 @@ export const MerchantAccessCard = defineComponent({
                                     key: "email",
                                     label: t("User"),
                                     render: (row: MerchantUser) => (
-                                        <VBtn size="small" variant="text" style={{ textTransform: "none", paddingInline: "4px" }} onClick={() => void router.push({ name: "AdminUserDetail", params: { id: row.id } })}>
+                                        <PgButton size="small" variant="text" style={{ textTransform: "none", paddingInline: "4px" }} onClick={() => void router.push({ name: "AdminUserDetail", params: { id: row.id } })}>
                                             <span dir="ltr">{row.email}</span>
-                                        </VBtn>
+                                        </PgButton>
                                     ),
                                 },
                                 { key: "role", label: t("Role"), render: (row: MerchantUser) => row.role },
@@ -125,7 +125,7 @@ export const MerchantAccessCard = defineComponent({
                                     align: "end",
                                     render: (row: MerchantToken) =>
                                         props.canWrite && !row.revokedAt ? (
-                                            <VBtn
+                                            <PgButton
                                                 size="small"
                                                 variant="tonal"
                                                 color="error"
@@ -137,7 +137,7 @@ export const MerchantAccessCard = defineComponent({
                                                 }}
                                             >
                                                 {t("Revoke token")}
-                                            </VBtn>
+                                            </PgButton>
                                         ) : (
                                             <span style={{ color: "var(--pg-ink-faint)" }}>—</span>
                                         ),
@@ -162,14 +162,14 @@ export const MerchantAccessCard = defineComponent({
                                     label: "",
                                     align: "end",
                                     render: (row: MerchantCredentialSet) => (
-                                        <VBtn
+                                        <PgButton
                                             size="small"
                                             variant="text"
                                             prependIcon="mdi-open-in-new"
                                             onClick={() => void router.push({ name: "CredentialSets", query: { highlight: row.id } })}
                                         >
                                             {t("Open in vault")}
-                                        </VBtn>
+                                        </PgButton>
                                     ),
                                 },
                             ]}

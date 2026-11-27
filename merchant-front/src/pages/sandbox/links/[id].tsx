@@ -2,19 +2,19 @@ import { dc } from "@/utils/dc";
 import { ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { DataTable } from "@/components/Table/DataTable";
-import type { TableHeader } from "@/components/Table/types";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { StateView } from "@/components/StateView";
-import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
+import {VAlert, PgButton} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import type { TableHeader } from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { SandboxBanner } from "@/features/sandbox/SandboxBanner";
 import { sandboxGet } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { buildCheckoutUrl } from "@/utils/security/checkoutUrl";
@@ -55,12 +55,12 @@ const SandboxLinkDetailPage = dc(() => {
         { key: "status", label: "Status", Value: ({ row }) => <StatusBadge status={row.status} /> },
         { key: "totalChargedAmount", label: "Amount", Value: ({ row }) => <MoneyDisplay amount={row.totalChargedAmount} currency={row.currency} size="sm" /> },
         { key: "createdAt", label: "Created", value: (row) => row.createdAt },
-        { key: "actions", label: "Actions", Value: ({ row }) => <VBtn size="small" variant="tonal" onClick={() => void router.push(`/sandbox/payments/${row.id}`)}>{t("Open")}</VBtn> },
+        { key: "actions", label: "Actions", Value: ({ row }) => <PgButton size="small" variant="tonal" onClick={() => void router.push(`/sandbox/payments/${row.id}`)}>{t("Open")}</PgButton> },
     ];
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={detail.value?.link.title ?? t("Sandbox Link")} subtitle={detail.value?.link.key ?? linkId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Checkout Links"), to: "/sandbox/links" }, { label: detail.value?.link.key ?? linkId() }]}><div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => { copyToClipboard(checkoutUrl()); showSnackBar({ type: "success", message: t("Copied") }); }}>{t("Copy checkout URL")}</VBtn><VBtn color="primary" prependIcon="mdi-open-in-new" onClick={() => window.open(checkoutUrl(), "_blank", "noopener")}>{t("Open checkout")}</VBtn></div></PageHeader>
+            <PageHeader title={detail.value?.link.title ?? t("Sandbox Link")} subtitle={detail.value?.link.key ?? linkId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Checkout Links"), to: "/sandbox/links" }, { label: detail.value?.link.key ?? linkId() }]}><div class="d-flex flex-wrap ga-2"><PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</PgButton><PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => { copyToClipboard(checkoutUrl()); showSnackBar({ type: "success", message: t("Copied") }); }}>{t("Copy checkout URL")}</PgButton><PgButton color="primary" prependIcon="mdi-open-in-new" onClick={() => window.open(checkoutUrl(), "_blank", "noopener")}>{t("Open checkout")}</PgButton></div></PageHeader>
             <SandboxBanner />
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             <StateView loading={loading.value} minHeight="200px">

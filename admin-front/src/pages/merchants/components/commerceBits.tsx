@@ -2,13 +2,13 @@ import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { statusTone } from "@/components/Table/statusTone";
+import {VAlert, PgButton} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {statusTone} from "@pg/ui";
 import { approvalActionLabel, describeApprovalPayload } from "../approvalPayload";
 
 export const toBadgeTone = (value: string): BadgeTone => {
@@ -109,8 +109,8 @@ export const ApprovalSubmittedNotice = defineComponent({
                 <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px", justifyContent: "space-between" }}>
                     <span>{t("Submitted for approval. The change is not applied until an independent checker approves it.")}</span>
                     <span style={{ display: "inline-flex", gap: "6px" }}>
-                        <VBtn size="small" variant="tonal" prependIcon="mdi-open-in-new" onClick={openApprovals}>{t("Open Approvals")}</VBtn>
-                        {props.dismissible && <VBtn size="small" variant="text" onClick={() => emit("dismiss")}>{t("Dismiss")}</VBtn>}
+                        <PgButton size="small" variant="tonal" prependIcon="mdi-open-in-new" onClick={openApprovals}>{t("Open Approvals")}</PgButton>
+                        {props.dismissible && <PgButton size="small" variant="text" onClick={() => emit("dismiss")}>{t("Dismiss")}</PgButton>}
                     </span>
                 </div>
             </VAlert>
@@ -149,14 +149,14 @@ export const PendingApprovalsList = defineComponent({
                                             <StatusBadge status={approval.state} toneOverride="warning" />
                                             <strong style={{ fontSize: "13px" }}>{t(approvalActionLabel(action))}</strong>
                                         </span>
-                                        <VBtn
+                                        <PgButton
                                             size="small"
                                             variant="text"
                                             prependIcon="mdi-open-in-new"
                                             onClick={() => void router.push({ name: "Approvals", query: { open: approval.id } })}
                                         >
                                             {t("Open in Approvals")}
-                                        </VBtn>
+                                        </PgButton>
                                     </div>
                                     {approval.makerReason && <span style={{ fontSize: "12.5px", color: "var(--pg-ink-secondary)" }}>{approval.makerReason}</span>}
                                     {rows.length > 0 && (

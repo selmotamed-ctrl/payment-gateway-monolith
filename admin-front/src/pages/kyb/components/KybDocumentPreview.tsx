@@ -2,9 +2,9 @@ import { safePreviewMime } from "@/utils/safeBlob";
 import { dc } from "@/utils/dc";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn, VProgressCircular } from "@/components/vael/VuetifyShim";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
+import {VAlert, PgButton, PgSpinner} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -86,14 +86,14 @@ const KybDocumentPreview = dc(
                             {props.document.mime} · {formatBytes(props.document.sizeBytes)}
                         </ThemedText>
                         {objectUrl.value && (
-                            <VBtn size="x-small" variant="tonal" prependIcon="mdi-open-in-new" onClick={openInNewTab}>
+                            <PgButton size="x-small" variant="tonal" prependIcon="mdi-open-in-new" onClick={openInNewTab}>
                                 {t("Open in new tab")}
-                            </VBtn>
+                            </PgButton>
                         )}
                     </ThemedView>
                     {loading.value && (
                         <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "240px" }}>
-                            <VProgressCircular indeterminate color="primary" />
+                            <PgSpinner indeterminate color="primary" />
                         </ThemedView>
                     )}
                     {!loading.value && error.value && (

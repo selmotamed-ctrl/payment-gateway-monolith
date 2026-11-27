@@ -1,14 +1,14 @@
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VAutocomplete, VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
+import {VAlert, PgAutocomplete, PgButton, PgTextField} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
-import { FormField } from "@/components/ui/FormField";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {FormField} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import { createOptionsLoader } from "@/components/Table/referenceOptions";
+import { createOptionsLoader } from "@/tables/referenceOptions";
 import {
     addRedirectDomains,
     buildPolicyPatch,
@@ -180,7 +180,7 @@ export const ApplicationPolicyModal = defineComponent({
                     incompleteMessage={t("Complete all policy checklist items before submitting")}
                 />
                 <FormField label={t("Settlement wallet")} hint={t("Only active wallets of this merchant in the same currency.")}>
-                    <VSelect
+                    <PgAutocomplete
                         modelValue={walletId.value}
                         onUpdate:modelValue={(value: string | null) => (walletId.value = value)}
                         items={wallets.value.map((wallet) => ({ title: `${wallet.currency} · ${wallet.id.slice(0, 8)} · ${wallet.status}`, value: wallet.id }))}
@@ -188,7 +188,7 @@ export const ApplicationPolicyModal = defineComponent({
                     />
                 </FormField>
                 <FormField label={t("Rail whitelist")}>
-                    <VSelect
+                    <PgAutocomplete
                         modelValue={railMode.value}
                         onUpdate:modelValue={(value: RailWhitelistMode) => (railMode.value = value)}
                         items={[
@@ -201,7 +201,7 @@ export const ApplicationPolicyModal = defineComponent({
                 </FormField>
                 {railMode.value === "LIST" && (
                     <FormField label={t("Allowed rails")}>
-                        <VAutocomplete
+                        <PgAutocomplete
                             modelValue={railCodes.value}
                             onUpdate:modelValue={(value: string[]) => (railCodes.value = value)}
                             items={rails.value.map((rail) => ({ title: rail.title, value: rail.code }))}
@@ -227,7 +227,7 @@ export const ApplicationPolicyModal = defineComponent({
                         <RestrictedValue />
                     ) : (
                         <div style={{ display: "flex", gap: "8px", alignItems: "flex-start" }}>
-                            <VTextField
+                            <PgTextField
                                 modelValue={domainInput.value}
                                 onUpdate:modelValue={(value: string) => (domainInput.value = value)}
                                 placeholder="shop.example.ly"
@@ -240,7 +240,7 @@ export const ApplicationPolicyModal = defineComponent({
                                     }
                                 }}
                             />
-                            <VBtn variant="tonal" prependIcon="mdi-plus" onClick={addDomains}>{t("Add")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-plus" onClick={addDomains}>{t("Add")}</PgButton>
                         </div>
                     )}
                 </FormField>

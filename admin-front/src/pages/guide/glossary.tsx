@@ -2,8 +2,8 @@ import { computed, onMounted, ref } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRoute } from "vue-router";
 import { RouterLink } from "vue-router/experimental/vapor";
-import { PageHeader } from "@/components/ui/PageHeader";
-import ScreenContainer from "@/components/ScreenContainer";
+import {PageHeader, PgSearchInput} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
 import { useGuideLocale } from "@/components/guide/widgets/useGuideLocale";
 import { loadGlossary, type Term } from "@/content/guide";
 import { normalizeArabicText } from "@/utils/arabic";
@@ -82,12 +82,11 @@ export const AdminGuideGlossaryPage = defineComponent({
                 ) : (
                     <div class="guide-glossary-page">
                         <div class="guide-glossary-tools">
-                            <input
-                                type="search"
-                                value={query.value}
+                            <PgSearchInput
+                                modelValue={query.value}
+                                onUpdate:modelValue={(value: string) => (query.value = value)}
                                 placeholder={L("Filter terms…", "صفِّ المصطلحات…")}
-                                aria-label={L("Filter terms", "تصفية المصطلحات")}
-                                onInput={(event) => (query.value = (event.target as HTMLInputElement).value)}
+                                ariaLabel={L("Filter terms", "تصفية المصطلحات")}
                             />
                             <div class="guide-letter-bar" role="group" aria-label={L("Jump to letter", "انتقل إلى حرف")}>
                                 <button type="button" class={letter.value === "" ? "is-active" : ""} onClick={() => (letter.value = "")}>

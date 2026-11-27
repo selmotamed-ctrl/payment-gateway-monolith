@@ -2,9 +2,9 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VCheckbox, VSelect, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
+import {VAlert, PgCheckbox, PgAutocomplete, PgTextField, PgTextarea} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -12,8 +12,8 @@ import { showSnackBar } from "@/utils/snackBar";
 import { useSafeguard } from "@/components/guide/useSafeguard";
 import type { MerchantDetail, MerchantSummary } from "../types";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
 const EDIT_CHECKS = [
     { key: "PATCH_REVIEWED", label: "Proposed changes reviewed" },
     { key: "SOURCE_DOCUMENT_VERIFIED", label: "Source document verified" },
@@ -234,19 +234,19 @@ const MerchantEditDialog = dc(
                         {isDescriptive.value ? (
                             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: "12px" }}>
                                 <FormField label={t("Trade name")}>
-                                    <VTextField v-model={form.value.tradeName} />
+                                    <PgTextField v-model={form.value.tradeName} />
                                 </FormField>
                                 <FormField label={t("Display name")}>
-                                    <VTextField v-model={form.value.displayName} />
+                                    <PgTextField v-model={form.value.displayName} />
                                 </FormField>
                                 <FormField label={t("Logo URL")}>
-                                    <VTextField v-model={form.value.logoUrl} />
+                                    <PgTextField v-model={form.value.logoUrl} />
                                 </FormField>
                                 <FormField label={t("Support email")}>
-                                    <VTextField v-model={form.value.supportEmail} />
+                                    <PgTextField v-model={form.value.supportEmail} />
                                 </FormField>
                                 <FormField label={t("Support phone")}>
-                                    <VTextField v-model={form.value.supportPhone} />
+                                    <PgTextField v-model={form.value.supportPhone} />
                                 </FormField>
                             </div>
                         ) : (
@@ -256,43 +256,43 @@ const MerchantEditDialog = dc(
                                 </VAlert>
                                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: "12px" }}>
                                     <FormField label={t("Legal name")} sensitiveMakerChecker>
-                                        <VTextField v-model={form.value.legalName} />
+                                        <PgTextField v-model={form.value.legalName} />
                                     </FormField>
                                     <FormField label={t("Tax ID")} sensitiveMakerChecker>
-                                        <VTextField v-model={form.value.taxId} />
+                                        <PgTextField v-model={form.value.taxId} />
                                     </FormField>
                                     <FormField label={t("Registration number")} sensitiveMakerChecker>
-                                        <VTextField v-model={form.value.registrationNo} />
+                                        <PgTextField v-model={form.value.registrationNo} />
                                     </FormField>
                                     <FormField label={t("Business category")} sensitiveMakerChecker>
-                                        <VTextField v-model={form.value.businessCategory} />
+                                        <PgTextField v-model={form.value.businessCategory} />
                                     </FormField>
                                     <FormField label={t("Risk tier")} sensitiveMakerChecker>
-                                        <VSelect v-model={form.value.riskTier} items={["LOW", "STANDARD", "HIGH"]} />
+                                        <PgAutocomplete v-model={form.value.riskTier} items={["LOW", "STANDARD", "HIGH"]} />
                                     </FormField>
                                     <FormField label={t("KYB status override")} sensitiveMakerChecker>
-                                        <VSelect v-model={form.value.kybStatus} items={["UNVERIFIED", "PENDING", "VERIFIED", "REJECTED"]} />
+                                        <PgAutocomplete v-model={form.value.kybStatus} items={["UNVERIFIED", "PENDING", "VERIFIED", "REJECTED"]} />
                                     </FormField>
                                     <FormField label={t("Commission receivable ceiling")} sensitiveMakerChecker>
-                                        <VTextField v-model={form.value.commissionReceivableCeiling} />
+                                        <PgTextField v-model={form.value.commissionReceivableCeiling} />
                                     </FormField>
                                     <FormField label={t("Negative balance ceiling")} sensitiveMakerChecker>
-                                        <VTextField v-model={form.value.negativeBalanceCeiling} />
+                                        <PgTextField v-model={form.value.negativeBalanceCeiling} />
                                     </FormField>
                                     <FormField label={t("Contact email")} sensitiveMakerChecker>
-                                        <VTextField v-model={form.value.contactEmail} />
+                                        <PgTextField v-model={form.value.contactEmail} />
                                     </FormField>
                                     <FormField label={t("Contact phone")} sensitiveMakerChecker>
-                                        <VTextField v-model={form.value.contactPhone} />
+                                        <PgTextField v-model={form.value.contactPhone} />
                                     </FormField>
                                     <FormField label={t("Payout bank")} sensitiveMakerChecker>
-                                        <VTextField v-model={form.value.payoutBankName} />
+                                        <PgTextField v-model={form.value.payoutBankName} />
                                     </FormField>
                                     <FormField label={t("Payout account / IBAN")} sensitiveMakerChecker>
-                                        <VTextField v-model={form.value.payoutAccount} />
+                                        <PgTextField v-model={form.value.payoutAccount} />
                                     </FormField>
                                     <FormField label={t("Payout account holder")} sensitiveMakerChecker>
-                                        <VTextField v-model={form.value.payoutHolder} />
+                                        <PgTextField v-model={form.value.payoutHolder} />
                                     </FormField>
                                 </div>
                             </>
@@ -301,7 +301,7 @@ const MerchantEditDialog = dc(
                             <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                                 <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Edit checklist")}</ThemedText>
                                 {EDIT_CHECKS.map((check) => (
-                                    <VCheckbox
+                                    <PgCheckbox
                                         key={check.key}
                                         modelValue={checklist.value[check.key] === true}
                                         onUpdate:modelValue={(value: unknown) => (checklist.value = { ...checklist.value, [check.key]: Boolean(value) })}
@@ -316,7 +316,7 @@ const MerchantEditDialog = dc(
                             </ThemedView>
                         )}
                         <FormField label={isDescriptive.value ? t("Change note (optional)") : t("Maker reason (required)")} required={!isDescriptive.value}>
-                            <VTextarea v-model={form.value.reason} rows={3} autoGrow />
+                            <PgTextarea v-model={form.value.reason} rows={3} autoGrow />
                         </FormField>
             </FormModal>
         );

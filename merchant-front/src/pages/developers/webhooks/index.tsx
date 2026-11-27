@@ -1,20 +1,20 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { StateView } from "@/components/StateView";
-import { DataTable } from "@/components/Table/DataTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { SectionFields } from "@/components/SectionFields";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MonoRef } from "@/components/ui/MonoRef";
+import {PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {SectionFields} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
@@ -276,9 +276,9 @@ const WebhooksPage = dc(() => {
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Webhooks")} subtitle={t("Receive signed notifications when payments, disputes and cash-outs change.")}>canManage.value ? (
-                            <VBtn variant="tonal" onClick={openCreate} disabled={applications.value.length === 0}>
+                            <PgButton variant="tonal" onClick={openCreate} disabled={applications.value.length === 0}>
                                 {t("Add Endpoint")}
-                            </VBtn>
+                            </PgButton>
                         ) : null</PageHeader>
 
                 {shownSecret.value && (
@@ -288,9 +288,9 @@ const WebhooksPage = dc(() => {
                             <p style={{ fontSize: "12px", color: "var(--pg-ink-muted)", margin: 0 }}>
                                 {t("This secret is shown once. Store it securely.")}
                             </p>
-                            <VBtn variant="text" size="small" onClick={() => (shownSecret.value = null)}>
+                            <PgButton variant="text" size="small" onClick={() => (shownSecret.value = null)}>
                                 {t("Close")}
-                            </VBtn>
+                            </PgButton>
                         </div>
                     </SurfaceCard>
                 )}
@@ -302,7 +302,7 @@ const WebhooksPage = dc(() => {
                 )}
 
                 <PageHeader title={t("Deliveries")} subtitle={t("The latest deliveries. A parked delivery failed every attempt and can be redelivered.")}>(
-                        <VSelect
+                        <PgAutocomplete
                             modelValue={deliveryFilter.value}
                             onUpdate:modelValue={(value: string | null) => {
                                 deliveryFilter.value = value;
@@ -335,7 +335,7 @@ const WebhooksPage = dc(() => {
                 <SectionFields title={t("Details")}>
                     {!editing.value && (
                         <FormField label={t("Application")} required>
-                            <VSelect
+                            <PgAutocomplete
                                 modelValue={form.value.applicationId}
                                 onUpdate:modelValue={(v: string) => (form.value.applicationId = v)}
                                 items={applications.value.map((app) => ({ title: app.name, value: app.id }))}
@@ -344,10 +344,10 @@ const WebhooksPage = dc(() => {
                         </FormField>
                     )}
                     <FormField label={t("Endpoint URL")} required hint={t("HTTPS only. Redirects are not followed.")}>
-                        <VTextField modelValue={form.value.url} onUpdate:modelValue={(v: string) => (form.value.url = v)} placeholder="https://" hideDetails />
+                        <PgTextField modelValue={form.value.url} onUpdate:modelValue={(v: string) => (form.value.url = v)} placeholder="https://" hideDetails />
                     </FormField>
                     <FormField label={t("Events")} hint={t("Leave empty to receive every event.")}>
-                        <VSelect
+                        <PgAutocomplete
                             modelValue={form.value.eventTypes}
                             onUpdate:modelValue={(v: string[]) => (form.value.eventTypes = v)}
                             items={eventTypes.value}
@@ -357,7 +357,7 @@ const WebhooksPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Description")}>
-                        <VTextField modelValue={form.value.description} onUpdate:modelValue={(v: string) => (form.value.description = v)} hideDetails />
+                        <PgTextField modelValue={form.value.description} onUpdate:modelValue={(v: string) => (form.value.description = v)} hideDetails />
                     </FormField>
                 </SectionFields>
             </FormModal>

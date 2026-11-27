@@ -1,10 +1,10 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VTextField } from "@/components/vael/VuetifyShim";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import ThemeMenu from "@/components/ThemeMenu";
+import {VAlert, PgButton, PgTextField} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {PgThemeMenu as ThemeMenu} from "@pg/ui";
 import { api, setToken, setUser, type TesterUser } from "@/utils/api";
 
 const LoginPage = dc(() => {
@@ -52,7 +52,7 @@ const LoginPage = dc(() => {
         {error.value ? <VAlert type="error" variant="tonal" class="mb-3">{error.value}</VAlert> : null}
         <div class="pg-field-wrapper mb-3">
           <label>Username</label>
-          <VTextField
+          <PgTextField
             density="compact"
             variant="outlined"
             hideDetails
@@ -62,7 +62,7 @@ const LoginPage = dc(() => {
         </div>
         <div class="pg-field-wrapper mb-3">
           <label>Password</label>
-          <VTextField
+          <PgTextField
             type="password"
             density="compact"
             variant="outlined"
@@ -72,7 +72,7 @@ const LoginPage = dc(() => {
             onKeydown={(event: KeyboardEvent) => { if (event.key === "Enter") void submit(); }}
           />
         </div>
-        <VBtn block loading={loading.value} onClick={submit}>Sign in</VBtn>
+        <PgButton block loading={loading.value} onClick={submit}>Sign in</PgButton>
       </SurfaceCard>
     </div>
   );

@@ -2,7 +2,7 @@ import { type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import { VIcon } from "@/components/vael/VuetifyShim";
+import {PgIcon} from "@pg/ui";
 import { StateIcon } from "./ui/StateIcon";
 import { isArticleOpened, markArticleOpened } from "./readingOpened";
 
@@ -42,7 +42,7 @@ export const ReadingList = defineComponent({
                                     <span class="ac-step__main">
                                         <a class="ac-step__title ac-lesson-link" href={href} target="_blank" rel="noopener" dir="auto" onClick={() => markArticleOpened(id)}>
                                             {props.titles[id] ?? id}
-                                            <VIcon class="ac-lesson-link__icon" icon="mdi-open-in-new" size={14} aria-hidden="true" />
+                                            <PgIcon class="ac-lesson-link__icon" icon="mdi-open-in-new" size={14} aria-hidden="true" />
                                         </a>
                                     </span>
                                     <span class={["ac-step__meta", read ? "ac-lesson-state--read" : ""]}>

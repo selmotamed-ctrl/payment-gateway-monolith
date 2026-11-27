@@ -1,9 +1,9 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
-import { VSelect, VSlider, VSwitch, VTextField } from "@/components/vael/VuetifyShim";
-import { SectionFields } from "@/components/SectionFields";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { TableRowActions } from "@/components/Table/TableRowActions";
+import {PgAutocomplete, PgSlider, PgSwitch, PgTextField} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
 import { api } from "@/utils/api";
 
 interface Scenario {
@@ -128,7 +128,7 @@ export const RailChaosCard = dc(
         <div class="pg-field-wrapper">
           <label>Failure chance</label>
           <div class="d-flex align-center ga-3">
-            <VSlider
+            <PgSlider
               class="flex-grow-1"
               modelValue={draft.value.overallFailureChancePercent}
               onUpdate:modelValue={(value: number) => { draft.value.overallFailureChancePercent = value; }}
@@ -144,7 +144,7 @@ export const RailChaosCard = dc(
         <div class="pg-field-wrapper">
           <label>Latency range (ms)</label>
           <div class="d-flex ga-2">
-            <VTextField
+            <PgTextField
               density="compact"
               variant="outlined"
               hideDetails
@@ -153,7 +153,7 @@ export const RailChaosCard = dc(
               modelValue={draft.value.latencyMs.min}
               onUpdate:modelValue={(value: string) => { draft.value.latencyMs.min = Number(value); }}
             />
-            <VTextField
+            <PgTextField
               density="compact"
               variant="outlined"
               hideDetails
@@ -167,7 +167,7 @@ export const RailChaosCard = dc(
 
         <div class="pg-field-wrapper">
           <label>Primary failure mode</label>
-          <VSelect
+          <PgAutocomplete
             density="compact"
             variant="outlined"
             hideDetails
@@ -183,14 +183,14 @@ export const RailChaosCard = dc(
 
         <div class="pg-field-wrapper">
           <label>Webhook behavior</label>
-          <VSwitch
+          <PgSwitch
             label="Duplicates"
             density="compact"
             hideDetails
             modelValue={draft.value.webhookBehavior.duplicateCount > 1}
             onUpdate:modelValue={(value: boolean | null) => { draft.value.webhookBehavior.duplicateCount = value === true ? 3 : 1; }}
           />
-          <VSwitch
+          <PgSwitch
             label="Out of order"
             density="compact"
             hideDetails
@@ -202,7 +202,7 @@ export const RailChaosCard = dc(
         <div class="pg-field-wrapper">
           <label>Corrupt signature</label>
           <div class="d-flex align-center ga-3">
-            <VSlider
+            <PgSlider
               class="flex-grow-1"
               modelValue={draft.value.webhookBehavior.corruptSignatureChancePercent}
               onUpdate:modelValue={(value: number) => { draft.value.webhookBehavior.corruptSignatureChancePercent = value; }}

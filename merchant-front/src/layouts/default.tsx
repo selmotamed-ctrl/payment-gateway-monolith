@@ -2,21 +2,8 @@ import { dc } from "@/utils/dc";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { RouterLink, RouterView } from "vue-router/experimental/vapor";
-import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
-import {
-    VAppBar,
-    VAvatar,
-    VBtn,
-    VDivider,
-    VIcon,
-    VList,
-    VListItem,
-    VListSubheader,
-    VMain,
-    VMenu,
-    VNavigationDrawer,
-    VProgressLinear,
-} from "@/components/vael/VuetifyShim";
+import { SandboxBanner } from "@/features/sandbox/SandboxBanner";
+import {PgAppBar, PgAvatar, PgButton, PgDivider, PgIcon, PgList, PgListItem, PgListSubheader, PgMain, PgMenu, PgNavigationDrawer, PgProgressBar} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { useDisplay } from "@/utils/vuetify-compat";
 import LogoSvg from "@/assets/images/logo.svg";
@@ -25,8 +12,8 @@ import { sandboxMode } from "@/state/sandbox";
 import { setLocale } from "@/plugins/localization";
 import { showSnackBar } from "@/utils/snackBar";
 import { useSections } from "./sections";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import ThemeMenu from "@/components/ThemeMenu";
+import {StatusBadge} from "@pg/ui";
+import {PgThemeMenu as ThemeMenu} from "@pg/ui";
 import {
     GlobalGuideSearchModal,
     type MerchantGuideSearchEntry,
@@ -217,8 +204,8 @@ const DefaultLayout = dc(() => {
             >
                 {t("Skip to content")}
             </a>
-            <VAppBar>
-                <VBtn
+            <PgAppBar>
+                <PgButton
                     icon
                     variant="text"
                     aria-label={t("Toggle navigation")}
@@ -226,8 +213,8 @@ const DefaultLayout = dc(() => {
                     aria-controls="pg-navigation-drawer"
                     onClick={() => (drawerOpen.value = !drawerOpen.value)}
                 >
-                    <VIcon icon={drawerOpen.value ? "mdi-menu-open" : "mdi-menu"} />
-                </VBtn>
+                    <PgIcon icon={drawerOpen.value ? "mdi-menu-open" : "mdi-menu"} />
+                </PgButton>
 
                 <div class="pg-app-bar__brand">
                     <img src={LogoSvg} alt="" width={24} height={24} />
@@ -253,7 +240,7 @@ const DefaultLayout = dc(() => {
 
                 <div class="pg-spacer" />
 
-                <VBtn
+                <PgButton
                     icon
                     variant="text"
                     size="small"
@@ -261,10 +248,10 @@ const DefaultLayout = dc(() => {
                     aria-label={t("Search guide, rails, cases…")}
                     onClick={() => (guideSearchOpen.value = true)}
                 >
-                    <VIcon icon="mdi-magnify" />
-                </VBtn>
+                    <PgIcon icon="mdi-magnify" />
+                </PgButton>
 
-                <VBtn
+                <PgButton
                     variant="text"
                     size="small"
                     prependIcon="mdi-help-circle-outline"
@@ -274,7 +261,7 @@ const DefaultLayout = dc(() => {
                     onClick={() => (helpDrawerOpen.value = true)}
                 >
                     <span class="pg-help-btn__label">{t("SOP & Help")}</span>
-                </VBtn>
+                </PgButton>
 
                 <ThemeMenu />
 
@@ -283,7 +270,7 @@ const DefaultLayout = dc(() => {
                     aria-label={t("Language")}
                     style={{ display: "inline-flex", alignItems: "center", gap: "2px" }}
                 >
-                    <VBtn
+                    <PgButton
                         size="small"
                         variant="text"
                         style={{
@@ -299,8 +286,8 @@ const DefaultLayout = dc(() => {
                         onClick={() => setLocale("ar")}
                     >
                         AR
-                    </VBtn>
-                    <VBtn
+                    </PgButton>
+                    <PgButton
                         size="small"
                         variant="text"
                         style={{
@@ -316,13 +303,13 @@ const DefaultLayout = dc(() => {
                         onClick={() => setLocale("en")}
                     >
                         EN
-                    </VBtn>
+                    </PgButton>
                 </div>
 
-                <VMenu location="bottom end">
+                <PgMenu location="bottom end">
                     {{
                         activator: ({ props }: any) => (
-                            <VBtn
+                            <PgButton
                                 {...props}
                                 variant="text"
                                 rounded="pill"
@@ -330,21 +317,21 @@ const DefaultLayout = dc(() => {
                                 aria-label={t("Account")}
                                 aria-haspopup="menu"
                             >
-                                <VAvatar size={30} class="pg-avatar">
+                                <PgAvatar size={30} class="pg-avatar">
                                     {initial.value}
-                                </VAvatar>
+                                </PgAvatar>
                                 <span class="pg-user-btn__name">{displayName.value}</span>
-                            </VBtn>
+                            </PgButton>
                         ),
                         default: () => (
-                            <VList density="compact" class="pg-menu" {...{ role: "menu" }}>
-                                <VListItem
+                            <PgList density="compact" class="pg-menu" {...{ role: "menu" }}>
+                                <PgListItem
                                     title={displayName.value}
                                     subtitle={role.value}
                                     prependIcon="mdi-account-circle-outline"
                                 />
-                                <VDivider />
-                                <VListItem
+                                <PgDivider />
+                                <PgListItem
                                     title={t("Logout")}
                                     prependIcon="mdi-logout"
                                     {...{ role: "menuitem" }}
@@ -353,13 +340,13 @@ const DefaultLayout = dc(() => {
                                         void logout();
                                     }}
                                 />
-                            </VList>
+                            </PgList>
                         ),
                     }}
-                </VMenu>
-            </VAppBar>
+                </PgMenu>
+            </PgAppBar>
 
-            <VNavigationDrawer
+            <PgNavigationDrawer
                 {...{ id: "pg-navigation-drawer" }}
                 modelValue={drawerOpen.value}
                 onUpdate:modelValue={(value: boolean) => (drawerOpen.value = value)}
@@ -385,12 +372,12 @@ const DefaultLayout = dc(() => {
                 </div>
                 <div class="pg-drawer__search">
                     <button type="button" class="pg-search-pill" onClick={() => (guideSearchOpen.value = true)}>
-                        <VIcon icon="mdi-magnify" size={16} />
+                        <PgIcon icon="mdi-magnify" size={16} />
                         <span class="pg-search-pill__label">{t("Search guide, rails, cases…")}</span>
                         <span class="pg-search-pill__kbd">Ctrl K</span>
                     </button>
                 </div>
-                <VDivider />
+                <PgDivider />
 
                 <ul class="pg-list pg-nav">
                     {sections.value.map((section, index) => {
@@ -410,19 +397,19 @@ const DefaultLayout = dc(() => {
                                         }
                                     }}
                                 >
-                                    <VListSubheader
+                                    <PgListSubheader
                                         class={["pg-nav__section", { "pg-nav__section--collapsed": collapsed }]}
                                     >
                                         <span class="pg-nav__section-title">{section.title}</span>
-                                        <VIcon
+                                        <PgIcon
                                             icon={collapsed ? "mdi-chevron-down" : "mdi-chevron-up"}
                                             size={18}
                                         />
-                                    </VListSubheader>
+                                    </PgListSubheader>
                                 </div>
                                 {!collapsed &&
                                     section.routes.map((item) => (
-                                        <VListItem
+                                        <PgListItem
                                             key={item.name}
                                             to={{ name: item.name }}
                                             prependIcon={item.icon}
@@ -454,7 +441,7 @@ const DefaultLayout = dc(() => {
                                 <span class="pg-operator-card__dot pg-operator-card__dot--checker" title={t("Checker")} style={{ opacity: isChecker.value ? 1 : 0.25 }} />
                             </div>
                         </div>
-                        <VBtn
+                        <PgButton
                             icon="mdi-logout"
                             variant="text"
                             size="x-small"
@@ -466,14 +453,14 @@ const DefaultLayout = dc(() => {
                         />
                     </div>
                 </div>
-            </VNavigationDrawer>
+            </PgNavigationDrawer>
 
             {routeLoading.value && (
                 <div class="pg-route-progress" role="status" aria-live="polite" aria-label={t("Loading")}>
-                    <VProgressLinear indeterminate color="primary" height={3} aria-hidden="true" />
+                    <PgProgressBar indeterminate color="primary" height={3} aria-hidden="true" />
                 </div>
             )}
-            <VMain
+            <PgMain
                 class="pg-main"
                 {...{ id: "pg-main-content", tabindex: "-1", "aria-busy": routeLoading.value ? "true" : "false" }}
             >
@@ -483,7 +470,7 @@ const DefaultLayout = dc(() => {
                     </div>
                 ) : null}
                 <RouterView />
-            </VMain>
+            </PgMain>
 
             <GlobalGuideSearchModal
                 modelValue={guideSearchOpen.value}

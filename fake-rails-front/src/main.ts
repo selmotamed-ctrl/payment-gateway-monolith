@@ -5,9 +5,7 @@ import App from "./App";
 import router from "./router";
 import { initTheme } from "./state/theme";
 import "./assets/fonts/fonts.css";
-import "./styles/fintech-minimal.css";
-import "./styles/vael-theme.css";
-import "./styles/vael-shim.css";
+import "@pg/ui/tokens/index.css";
 
 const app = createVaporApp(App);
 app.use(i18n);

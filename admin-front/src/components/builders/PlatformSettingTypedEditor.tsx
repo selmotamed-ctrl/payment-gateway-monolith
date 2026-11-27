@@ -1,8 +1,8 @@
 import { ref, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import { VBtn, VSelect, VSwitch, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
+import {PgButton, PgAutocomplete, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
-import { FormField } from "@/components/ui/FormField";
+import {FormField} from "@pg/ui";
 import { ChipListInput } from "./ChipListInput";
 import { StructuredValueEditor } from "./StructuredValueEditor";
 import { SETTING_ERROR_MESSAGES } from "./messages";
@@ -58,7 +58,7 @@ export const PlatformSettingTypedEditor = defineComponent({
                 case "boolean":
                     return (
                         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                            <VSwitch
+                            <PgSwitch
                                 modelValue={value === true}
                                 onUpdate:modelValue={(next: boolean | null) => setValue(field.key, next === true)}
                                 color="primary"
@@ -72,7 +72,7 @@ export const PlatformSettingTypedEditor = defineComponent({
                 case "select":
                     return (
                         <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                            <VSelect
+                            <PgAutocomplete
                                 modelValue={typeof value === "string" && value ? value : null}
                                 onUpdate:modelValue={(next: string | null) => setValue(field.key, next ?? "")}
                                 items={selectOptions(field, props.modelValue.originals[field.key]).map((option) => ({ title: humanizeOption(option), value: option }))}
@@ -105,7 +105,7 @@ export const PlatformSettingTypedEditor = defineComponent({
                                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
                                         <strong dir="auto" style={{ fontSize: "12.5px" }}>{name}</strong>
                                         {!props.readOnly && (
-                                            <VBtn
+                                            <PgButton
                                                 icon="mdi-delete-outline"
                                                 variant="text"
                                                 size="small"
@@ -129,7 +129,7 @@ export const PlatformSettingTypedEditor = defineComponent({
                             ))}
                             {!props.readOnly && (
                                 <div style={{ display: "flex", gap: "6px", alignItems: "flex-start" }}>
-                                    <VTextField
+                                    <PgTextField
                                         modelValue={newCategory.value}
                                         onUpdate:modelValue={(next: string) => (newCategory.value = next)}
                                         placeholder={t("New category name")}
@@ -138,7 +138,7 @@ export const PlatformSettingTypedEditor = defineComponent({
                                         hideDetails
                                         style={{ flex: 1, minInlineSize: 0 }}
                                     />
-                                    <VBtn
+                                    <PgButton
                                         variant="tonal"
                                         size="small"
                                         prependIcon="mdi-plus"
@@ -150,7 +150,7 @@ export const PlatformSettingTypedEditor = defineComponent({
                                         }}
                                     >
                                         {t("Add category")}
-                                    </VBtn>
+                                    </PgButton>
                                 </div>
                             )}
                         </div>
@@ -159,11 +159,11 @@ export const PlatformSettingTypedEditor = defineComponent({
                 case "tree":
                     return <StructuredValueEditor modelValue={value} onUpdate:modelValue={(next: unknown) => setValue(field.key, next)} ariaLabel={t(field.label)} lockStructure={props.readOnly} />;
                 case "longtext":
-                    return <VTextarea modelValue={typeof value === "string" ? value : ""} onUpdate:modelValue={(next: string) => setValue(field.key, next)} rows={2} autoGrow density="compact" hideDetails readonly={props.readOnly} />;
+                    return <PgTextarea modelValue={typeof value === "string" ? value : ""} onUpdate:modelValue={(next: string) => setValue(field.key, next)} rows={2} autoGrow density="compact" hideDetails readonly={props.readOnly} />;
                 case "secret": {
                     const stored = value === "••••";
                     return (
-                        <VTextField
+                        <PgTextField
                             modelValue={stored ? "" : typeof value === "string" ? value : ""}
                             onUpdate:modelValue={(next: string) => setValue(field.key, next)}
                             type="password"
@@ -178,7 +178,7 @@ export const PlatformSettingTypedEditor = defineComponent({
                 }
                 default:
                     return (
-                        <VTextField
+                        <PgTextField
                             modelValue={typeof value === "string" ? value : ""}
                             onUpdate:modelValue={(next: string) => setValue(field.key, next)}
                             density="compact"

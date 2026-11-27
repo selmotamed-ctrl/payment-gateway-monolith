@@ -1,13 +1,13 @@
 import { computed, onMounted, ref } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VIcon } from "@/components/vael/VuetifyShim";
+import {PgButton, PgIcon} from "@pg/ui";
 import { AcademyShell, Skeleton } from "@/components/academy/AcademyShell";
 import { Callout } from "@/components/academy/ui/Callout";
 import { MarkdownView } from "@/components/guide/MarkdownView";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {MetaPill} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
 import { loadDrills, loadPages, type AcademyPage, type Drill } from "@/content/academy";
 
 const PAGE_IDS = ["page-how-it-works", "page-scoring", "page-integrity", "page-learner-faq", "page-trainer"];
@@ -45,9 +45,9 @@ export const AdminAcademyHelpPage = defineComponent({
         };
         const header = () => (
             <PageHeader title={t("Help")} subtitle={t("How the Academy works, how scoring works, and common questions.")}>(
-                    <VBtn variant="tonal" prependIcon="mdi-link-variant" onClick={() => void copyHelpLink()}>
+                    <PgButton variant="tonal" prependIcon="mdi-link-variant" onClick={() => void copyHelpLink()}>
                         {linkCopied.value ? t("Link copied") : t("Copy help link")}
-                    </VBtn>
+                    </PgButton>
                 )</PageHeader>
         );
 
@@ -92,7 +92,7 @@ export const AdminAcademyHelpPage = defineComponent({
                                         {drill.minutes} {t("min")}
                                     </span>
                                 </MetaPill>
-                                <VIcon class="ac-help-drill__chev" icon="mdi-chevron-down" size={20} aria-hidden="true" />
+                                <PgIcon class="ac-help-drill__chev" icon="mdi-chevron-down" size={20} aria-hidden="true" />
                             </summary>
                             <div class="ac-help-drill__body" dir="auto">
                                 <MarkdownView source={drill.markdown} compact />

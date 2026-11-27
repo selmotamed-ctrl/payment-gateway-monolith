@@ -1,9 +1,9 @@
 import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
+import {VAlert, PgButton} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
 import type { RedirectClientAction } from "./types";
 
 export type RedirectRendererProps = {
@@ -77,9 +77,9 @@ export const RedirectRenderer = dc(
                     </VAlert>
                 )}
 
-                <VBtn color="primary" size="large" block loading={redirecting.value} onClick={perform}>
+                <PgButton color="primary" size="large" block loading={redirecting.value} onClick={perform}>
                     {t("Redirecting")}
-                </VBtn>
+                </PgButton>
             </ThemedView>
         );
     },

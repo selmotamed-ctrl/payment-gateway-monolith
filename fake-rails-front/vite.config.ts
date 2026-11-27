@@ -13,8 +13,12 @@ export default ({ mode }: { mode: string }) => {
       assetsInlineLimit: 0,
     },
     resolve: {
-      alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
-    },
+            dedupe: ["vue", "@vue/runtime-vapor", "@vue/runtime-dom", "vue-router", "vue-i18n"],
+            alias: {
+                "@": fileURLToPath(new URL("./src", import.meta.url)),
+                "@pg/ui": fileURLToPath(new URL("../packages/ui/src", import.meta.url)),
+            },
+        },
     server: {
       port: 5104,
       // Same convention as the other portals: one extra hostname (LAN/Tailscale/Codespaces forwarded host).

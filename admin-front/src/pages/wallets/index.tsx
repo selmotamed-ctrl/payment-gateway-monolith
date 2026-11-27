@@ -2,28 +2,28 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn } from "@/components/vael/VuetifyShim";
+import {PgButton} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import type { TableHeader } from "@/components/Table/types";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { useOpenQuery } from "@/composables/useOpenQuery";
 import { urlsMap } from "@/constants/urlsMap";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {MetricStrip, type MetricItem} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 import { GlAccountDrawer } from "@/components/ledger/GlAccountDrawer";
 import ReasonModal from "@/pages/merchants/components/ReasonModal";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {FormChecklist} from "@pg/ui";
 import {
     ApprovalSubmittedNotice,
     MoneyOrRestricted,
@@ -190,9 +190,9 @@ const WalletsPage = dc(() => {
             label: "Wallet",
             value: (row) => row.id,
             Value: ({ row }: { row: WalletRow }) => (
-                <VBtn size="small" variant="text" style={{ paddingInline: "2px", textTransform: "none" }} aria-label={`${t("Open wallet")} ${row.id}`} onClick={() => openWallet(row.id)}>
+                <PgButton size="small" variant="text" style={{ paddingInline: "2px", textTransform: "none" }} aria-label={`${t("Open wallet")} ${row.id}`} onClick={() => openWallet(row.id)}>
                     <MonoRef value={row.id} truncate={12} />
-                </VBtn>
+                </PgButton>
             ),
         },
         {
@@ -200,14 +200,14 @@ const WalletsPage = dc(() => {
             label: "Merchant",
             value: (row) => row.merchant.tradeName,
             Value: ({ row }: { row: WalletRow }) => (
-                <VBtn
+                <PgButton
                     size="small"
                     variant="text"
                     style={{ paddingInline: "2px", textTransform: "none", justifyContent: "flex-start" }}
                     onClick={() => void router.push({ name: "MerchantDetail", params: { id: row.merchantId } })}
                 >
                     {row.merchant.tradeName || row.merchant.legalName}
-                </VBtn>
+                </PgButton>
             ),
         },
         { key: "currency", label: "Currency", sortKey: "currency", value: (row) => row.currency },
@@ -278,7 +278,7 @@ const WalletsPage = dc(() => {
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("Wallets")} subtitle={t("Merchant wallets across the platform: live balances, shards, statement and containment.")} badge={t("Ledger")} badgeTone="info">(
-                        <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                        <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
                     )</PageHeader>
 
                 {notice.value && <ApprovalSubmittedNotice approvalRequestId={notice.value.approvalRequestId} onDismiss={() => (notice.value = null)} />}

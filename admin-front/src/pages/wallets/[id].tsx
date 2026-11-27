@@ -2,21 +2,21 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { StateView } from "@/components/StateView";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import type { TableHeader } from "@/components/Table/types";
-import type { TableFilter } from "@/components/Table/filters";
+import {VAlert, PgButton} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {StateView} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {MetricStrip, type MetricItem} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {EmptyState} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import type { TableFilter } from "@pg/ui";
 import { AccountLinesTable } from "@/components/ledger/AccountLinesTable";
 import { GlAccountDrawer } from "@/components/ledger/GlAccountDrawer";
 import { JournalEntryDrawer } from "@/components/ledger/JournalEntryDrawer";
@@ -30,7 +30,7 @@ import { notifyOutcome, reportCommerceError, runGoverned } from "@/pages/merchan
 import { ApplicationDetailDrawer } from "@/pages/merchants/components/ApplicationDetailDrawer";
 import MerchantResourceTable from "@/pages/merchants/components/MerchantResourceTable";
 import ReasonModal from "@/pages/merchants/components/ReasonModal";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {FormChecklist} from "@pg/ui";
 import { showSnackBar } from "@/utils/snackBar";
 import { areChecklistsVisible } from "@/constants/env";
 import {
@@ -285,14 +285,14 @@ const WalletDetailPage = dc(() => {
                             {
                                 label: t("Merchant"),
                                 value: (
-                                    <VBtn
+                                    <PgButton
                                         size="small"
                                         variant="text"
                                         style={{ paddingInline: "4px", textTransform: "none" }}
                                         onClick={() => void router.push({ name: "MerchantDetail", params: { id: current.merchantId } })}
                                     >
                                         {merchantName(current)}
-                                    </VBtn>
+                                    </PgButton>
                                 ),
                             },
                             { label: t("Currency"), value: current.currency },
@@ -302,7 +302,7 @@ const WalletDetailPage = dc(() => {
                                 value: (
                                     <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
                                         <MonoRef value={current.glAccountId} truncate={18} />
-                                        <VBtn size="x-small" variant="text" icon="mdi-open-in-new" aria-label={t("Inspect GL account")} onClick={() => (glAccountId.value = current.glAccountId)} />
+                                        <PgButton size="x-small" variant="text" icon="mdi-open-in-new" aria-label={t("Inspect GL account")} onClick={() => (glAccountId.value = current.glAccountId)} />
                                     </span>
                                 ),
                             },
@@ -352,9 +352,9 @@ const WalletDetailPage = dc(() => {
                             key: "name",
                             label: t("Application"),
                             render: (row: WalletDetail["applications"][number]) => (
-                                <VBtn size="small" variant="text" style={{ textTransform: "none", paddingInline: "4px" }} onClick={() => (applicationId.value = row.id)}>
+                                <PgButton size="small" variant="text" style={{ textTransform: "none", paddingInline: "4px" }} onClick={() => (applicationId.value = row.id)}>
                                     {row.name}
-                                </VBtn>
+                                </PgButton>
                             ),
                         },
                         { key: "status", label: t("Status"), render: (row: WalletDetail["applications"][number]) => <StatusBadge status={row.status} toneOverride={toBadgeTone(row.status)} /> },
@@ -364,7 +364,7 @@ const WalletDetailPage = dc(() => {
             <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
                     <h3 style={SECTION_TITLE}>{t("Recent cash-outs")}</h3>
-                    <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "CashOuts" })}>{t("Open cash-outs")}</VBtn>
+                    <PgButton size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "CashOuts" })}>{t("Open cash-outs")}</PgButton>
                 </div>
                 {isRestricted(current.redactedFields, "cashouts") ? (
                     <RestrictedValue />
@@ -468,9 +468,9 @@ const WalletDetailPage = dc(() => {
             value: (row) => row.approvalRequestId ?? "",
             Value: ({ row }: { row: WalletAuditEvent }) =>
                 row.approvalRequestId ? (
-                    <VBtn size="x-small" variant="text" style={{ textTransform: "none" }} onClick={() => void router.push({ name: "Approvals", query: { open: row.approvalRequestId! } })}>
+                    <PgButton size="x-small" variant="text" style={{ textTransform: "none" }} onClick={() => void router.push({ name: "Approvals", query: { open: row.approvalRequestId! } })}>
                         {t("Open in Approvals")}
-                    </VBtn>
+                    </PgButton>
                 ) : (
                     <span style={{ color: "var(--pg-ink-faint)" }}>—</span>
                 ),
@@ -509,7 +509,7 @@ const WalletDetailPage = dc(() => {
                     <PageHeader title={title} subtitle={current ? `${t("Wallet")} · ${current.currency}` : ""} badge={current ? current.status.replaceAll("_", " ") : ""} badgeTone={current ? toBadgeTone(current.status) : "neutral"}>(
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                 {actions.value.map((action) => (
-                                    <VBtn
+                                    <PgButton
                                         key={action.key}
                                         variant="tonal"
                                         color={action.danger ? "error" : "primary"}
@@ -523,11 +523,11 @@ const WalletDetailPage = dc(() => {
                                         }}
                                     >
                                         {t(action.label)}
-                                    </VBtn>
+                                    </PgButton>
                                 ))}
-                                <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "Wallets" })}>{t("Back to wallets")}</VBtn>
-                                <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={refreshAll}>{t("Refresh")}</VBtn>
-                                <VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!current} onClick={() => void copyWalletSummary()}>{t("Copy summary")}</VBtn>
+                                <PgButton variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "Wallets" })}>{t("Back to wallets")}</PgButton>
+                                <PgButton variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={refreshAll}>{t("Refresh")}</PgButton>
+                                <PgButton variant="tonal" prependIcon="mdi-content-copy" disabled={!current} onClick={() => void copyWalletSummary()}>{t("Copy summary")}</PgButton>
                             </ThemedView>
                         )</PageHeader>
 

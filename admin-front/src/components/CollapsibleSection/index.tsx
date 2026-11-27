@@ -2,10 +2,10 @@ import { ref, watch, type PropType, createSlot } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
 import { useDisplay, useTheme } from "@/utils/vuetify-compat";
-import { VCard, VCardText, VIcon } from "@/components/vael/VuetifyShim";
-import { ThemedText } from "../ThemedText";
-import { ThemedView } from "../ThemedView";
-import { StatusChip, type StatusTone } from "../StatusChip";
+import {PgCard, PgCardText, PgIcon} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {StatusChip, type StatusTone} from "@pg/ui";
 
 export type SectionCommand = { id: number; open: boolean };
 
@@ -72,7 +72,7 @@ const CollapsibleSection = defineComponent({
         return () => {
             const colors = theme.current.value.colors;
             return (
-                <VCard
+                <PgCard
                     variant="flat"
                     style={{
                         border: `1px solid ${colors.outlineVariant}30`,
@@ -80,7 +80,7 @@ const CollapsibleSection = defineComponent({
                         overflow: "hidden",
                     }}
                 >
-                    <VCardText style={{ padding: "0" }}>
+                    <PgCardText style={{ padding: "0" }}>
                         <button
                             type="button"
                             aria-expanded={open.value ? "true" : "false"}
@@ -103,7 +103,7 @@ const CollapsibleSection = defineComponent({
                         >
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flex: "1", minWidth: "0" }}>
                                 {!props.alwaysOpen && (
-                                    <VIcon icon={open.value ? "mdi-chevron-down" : "mdi-chevron-right"} size="20" style={{ opacity: 0.65, flex: "0 0 auto" }} />
+                                    <PgIcon icon={open.value ? "mdi-chevron-down" : "mdi-chevron-right"} size="20" style={{ opacity: 0.65, flex: "0 0 auto" }} />
                                 )}
                                 <ThemedView style={{ gap: "3px", minWidth: "0" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t(props.title)}</ThemedText>
@@ -123,8 +123,8 @@ const CollapsibleSection = defineComponent({
                                 {createSlot("default")}
                             </div>
                         )}
-                    </VCardText>
-                </VCard>
+                    </PgCardText>
+                </PgCard>
             );
         };
     },

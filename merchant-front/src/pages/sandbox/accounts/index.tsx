@@ -1,26 +1,26 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VAlert, VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { StateView } from "@/components/StateView";
-import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
-import SandboxResourceTable from "@/components/sandbox/SandboxResourceTable";
-import { accountFilters, ACCOUNT_STATUS, ACCOUNT_TYPE } from "@/components/sandbox/sandboxFilters";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { DataTable } from "@/components/Table/DataTable";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { SectionFields } from "@/components/SectionFields";
+import {VAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { SandboxBanner } from "@/features/sandbox/SandboxBanner";
+import { SandboxResourceTable } from "@/features/sandbox/SandboxResourceTable";
+import { accountFilters, ACCOUNT_STATUS, ACCOUNT_TYPE } from "@/features/sandbox/sandboxFilters";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import { DataTable } from "@/tables/DataTable";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { sandboxGet, sandboxPatch, sandboxPost, type FakeRailsAccount, type SandboxSummaryResponse } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -218,15 +218,15 @@ const SandboxAccountsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={t("Fake Rails Test Accounts")} subtitle={t("Control the sandbox customer cards, wallets, bank accounts and vouchers.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => { refresh.value?.(); void loadSummary(); }}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn><VBtn color="primary" prependIcon="mdi-plus" onClick={() => { formError.value = ""; createOpen.value = true; }}>{t("Create account")}</VBtn></div></PageHeader>
+            <PageHeader title={t("Fake Rails Test Accounts")} subtitle={t("Control the sandbox customer cards, wallets, bank accounts and vouchers.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => { refresh.value?.(); void loadSummary(); }}>{t("Refresh")}</PgButton><PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</PgButton><PgButton color="primary" prependIcon="mdi-plus" onClick={() => { formError.value = ""; createOpen.value = true; }}>{t("Create account")}</PgButton></div></PageHeader>
             <SandboxBanner />
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             <StateView loading={loading.value && !summary.value} minHeight="180px">
                 <div class="d-flex flex-column ga-4">
                     <SummaryExportCard title={t("Test customer health")} metrics={metrics.value} exportLoading={exportLoading.value} exportLabel={t("Export summary")} onExport={() => void exportSummary()}>
                         <div class="d-flex flex-wrap ga-2">
-                            <VBtn variant="tonal" loading={busy.value === "reset"} onClick={() => void reset()}>{t("Reset accounts to defaults")}</VBtn>
-                            <VBtn variant="tonal" color="primary" loading={busy.value === "reconcile"} onClick={() => void importStatement()}>{t("Import Fake Rails settlement")}</VBtn>
+                            <PgButton variant="tonal" loading={busy.value === "reset"} onClick={() => void reset()}>{t("Reset accounts to defaults")}</PgButton>
+                            <PgButton variant="tonal" color="primary" loading={busy.value === "reconcile"} onClick={() => void importStatement()}>{t("Import Fake Rails settlement")}</PgButton>
                         </div>
                     </SummaryExportCard>
                     <SandboxResourceTable<FakeRailsAccount> title={t("Fake Rails accounts")} url="/v1/merchant/sandbox/fake-rails/accounts" listKey="accounts" headers={headers} filters={accountFilters()} pageSize={20} showNumber={true} onRefreshReady={(next) => (refresh.value = next)} />
@@ -249,11 +249,11 @@ const SandboxAccountsPage = dc(() => {
                         { label: t("Status"), value: <StatusBadge status={selected.value.status} /> },
                     ]} />
                     <div class="d-flex flex-wrap ga-2">
-                        {selected.value.merchant_id ? <VTextField density="compact" variant="outlined" hideDetails style={{ maxWidth: "160px" }} label={t("Set available LYD")} modelValue={exact.value[selected.value!.id] ?? ""} onUpdate:modelValue={(v: string) => (exact.value = { ...exact.value, [selected.value!.id]: v })} /> : null}
-                        {selected.value.merchant_id ? <VBtn variant="tonal" onClick={() => void patch(selected.value!, { availableBalanceLyd: exact.value[selected.value!.id] ?? "0" })}>{t("Apply balance")}</VBtn> : null}
-                        {selected.value.merchant_id ? <VTextField density="compact" variant="outlined" hideDetails style={{ maxWidth: "140px" }} label={t("OTP")} modelValue={otp.value[selected.value!.id] ?? selected.value!.static_otp ?? ""} onUpdate:modelValue={(v: string) => (otp.value = { ...otp.value, [selected.value!.id]: v })} /> : null}
-                        {selected.value.merchant_id ? <VBtn variant="tonal" onClick={() => void patch(selected.value!, { staticOtp: otp.value[selected.value!.id] || "123456" })}>{t("Save OTP")}</VBtn> : null}
-                        {selected.value.merchant_id ? <VBtn variant="tonal" onClick={() => void patch(selected.value!, { status: selected.value!.status === "ACTIVE" ? "FROZEN" : "ACTIVE" })}>{selected.value!.status === "ACTIVE" ? t("Freeze") : t("Activate")}</VBtn> : null}
+                        {selected.value.merchant_id ? <PgTextField density="compact" variant="outlined" hideDetails style={{ maxWidth: "160px" }} label={t("Set available LYD")} modelValue={exact.value[selected.value!.id] ?? ""} onUpdate:modelValue={(v: string) => (exact.value = { ...exact.value, [selected.value!.id]: v })} /> : null}
+                        {selected.value.merchant_id ? <PgButton variant="tonal" onClick={() => void patch(selected.value!, { availableBalanceLyd: exact.value[selected.value!.id] ?? "0" })}>{t("Apply balance")}</PgButton> : null}
+                        {selected.value.merchant_id ? <PgTextField density="compact" variant="outlined" hideDetails style={{ maxWidth: "140px" }} label={t("OTP")} modelValue={otp.value[selected.value!.id] ?? selected.value!.static_otp ?? ""} onUpdate:modelValue={(v: string) => (otp.value = { ...otp.value, [selected.value!.id]: v })} /> : null}
+                        {selected.value.merchant_id ? <PgButton variant="tonal" onClick={() => void patch(selected.value!, { staticOtp: otp.value[selected.value!.id] || "123456" })}>{t("Save OTP")}</PgButton> : null}
+                        {selected.value.merchant_id ? <PgButton variant="tonal" onClick={() => void patch(selected.value!, { status: selected.value!.status === "ACTIVE" ? "FROZEN" : "ACTIVE" })}>{selected.value!.status === "ACTIVE" ? t("Freeze") : t("Activate")}</PgButton> : null}
                     </div>
                     <DataTable title={t("Movements")} data={movements.value} headers={movementHeaders} loading={false} showNumber={false} xlsx={false} noElevation={true} numberOfItemsPerPage={10} />
                     <DataTable title={t("Holds")} data={holds.value} headers={holdHeaders} loading={false} showNumber={false} xlsx={false} noElevation={true} numberOfItemsPerPage={10} />
@@ -261,16 +261,16 @@ const SandboxAccountsPage = dc(() => {
             </SlideOverDrawer>
             <FormModal modelValue={createOpen.value} onUpdate:modelValue={(v: any) => (createOpen.value = v)} title={t("Create test account")} size="md" loading={busy.value === "create"} errorMessage={formError.value} submitLabel={t("Create")} onSubmit={() => void create()}>
                 <SectionFields title={t("Account details")}>
-                    <FormField label={t("Rail code")} required><VTextField modelValue={form.value.railCode} onUpdate:modelValue={(v: string) => (form.value.railCode = v)} hideDetails /></FormField>
-                    <FormField label={t("Gateway code")} required><VTextField modelValue={form.value.gatewayCode} onUpdate:modelValue={(v: string) => (form.value.gatewayCode = v)} hideDetails /></FormField>
-                    <FormField label={t("Instrument type")}><VSelect items={ACCOUNT_TYPE.map((value) => ({ title: value.replaceAll("_", " "), value }))} modelValue={form.value.instrumentType} onUpdate:modelValue={(v: string) => (form.value.instrumentType = v)} hideDetails /></FormField>
-                    <FormField label={t("Identifier")} required><VTextField modelValue={form.value.identifier} onUpdate:modelValue={(v: string) => (form.value.identifier = v)} hideDetails /></FormField>
-                    <FormField label={t("Holder name")} required><VTextField modelValue={form.value.holderName} onUpdate:modelValue={(v: string) => (form.value.holderName = v)} hideDetails /></FormField>
-                    <FormField label="PIN / CVV"><VTextField modelValue={form.value.secretPin} onUpdate:modelValue={(v: string) => (form.value.secretPin = v)} hideDetails /></FormField>
-                    <FormField label={t("Expiry")}><VTextField modelValue={form.value.expiry} onUpdate:modelValue={(v: string) => (form.value.expiry = v)} hideDetails /></FormField>
-                    <FormField label={t("Available balance")}><VTextField type="number" modelValue={form.value.availableBalanceLyd} onUpdate:modelValue={(v: string) => (form.value.availableBalanceLyd = v)} hideDetails /></FormField>
-                    <FormField label={t("Daily limit")}><VTextField type="number" modelValue={form.value.dailyLimitLyd} onUpdate:modelValue={(v: string) => (form.value.dailyLimitLyd = v)} hideDetails /></FormField>
-                    <FormField label={t("Static OTP")}><VTextField modelValue={form.value.staticOtp} onUpdate:modelValue={(v: string) => (form.value.staticOtp = v)} hideDetails /></FormField>
+                    <FormField label={t("Rail code")} required><PgTextField modelValue={form.value.railCode} onUpdate:modelValue={(v: string) => (form.value.railCode = v)} hideDetails /></FormField>
+                    <FormField label={t("Gateway code")} required><PgTextField modelValue={form.value.gatewayCode} onUpdate:modelValue={(v: string) => (form.value.gatewayCode = v)} hideDetails /></FormField>
+                    <FormField label={t("Instrument type")}><PgAutocomplete items={ACCOUNT_TYPE.map((value) => ({ title: value.replaceAll("_", " "), value }))} modelValue={form.value.instrumentType} onUpdate:modelValue={(v: string) => (form.value.instrumentType = v)} hideDetails /></FormField>
+                    <FormField label={t("Identifier")} required><PgTextField modelValue={form.value.identifier} onUpdate:modelValue={(v: string) => (form.value.identifier = v)} hideDetails /></FormField>
+                    <FormField label={t("Holder name")} required><PgTextField modelValue={form.value.holderName} onUpdate:modelValue={(v: string) => (form.value.holderName = v)} hideDetails /></FormField>
+                    <FormField label="PIN / CVV"><PgTextField modelValue={form.value.secretPin} onUpdate:modelValue={(v: string) => (form.value.secretPin = v)} hideDetails /></FormField>
+                    <FormField label={t("Expiry")}><PgTextField modelValue={form.value.expiry} onUpdate:modelValue={(v: string) => (form.value.expiry = v)} hideDetails /></FormField>
+                    <FormField label={t("Available balance")}><PgTextField type="number" modelValue={form.value.availableBalanceLyd} onUpdate:modelValue={(v: string) => (form.value.availableBalanceLyd = v)} hideDetails /></FormField>
+                    <FormField label={t("Daily limit")}><PgTextField type="number" modelValue={form.value.dailyLimitLyd} onUpdate:modelValue={(v: string) => (form.value.dailyLimitLyd = v)} hideDetails /></FormField>
+                    <FormField label={t("Static OTP")}><PgTextField modelValue={form.value.staticOtp} onUpdate:modelValue={(v: string) => (form.value.staticOtp = v)} hideDetails /></FormField>
                 </SectionFields>
             </FormModal>
         </ScreenContainer>

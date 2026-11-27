@@ -2,8 +2,8 @@ import { computed, onMounted, ref } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRoute } from "vue-router";
 import { RouterLink } from "vue-router/experimental/vapor";
-import { PageHeader } from "@/components/ui/PageHeader";
-import ScreenContainer from "@/components/ScreenContainer";
+import {PageHeader, PgAutocomplete, PgSearchInput} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
 import { MarkdownView } from "@/components/guide/MarkdownView";
 import { useGuideLocale } from "@/components/guide/widgets/useGuideLocale";
 import {
@@ -94,19 +94,20 @@ export const AdminGuidePlaybookPage = defineComponent({
                 ) : (
                     <div class="guide-playbook-page">
                         <div class="guide-playbook-tools">
-                            <input
-                                type="search"
-                                value={query.value}
+                            <PgSearchInput
+                                modelValue={query.value}
+                                onUpdate:modelValue={(value: string) => (query.value = value)}
                                 placeholder={L("Search situations…", "ابحث في المواقف…")}
-                                aria-label={L("Search situations", "البحث في المواقف")}
-                                onInput={(event) => (query.value = (event.target as HTMLInputElement).value)}
+                                ariaLabel={L("Search situations", "البحث في المواقف")}
                             />
-                            <select value={screenFilter.value} onChange={(event) => (screenFilter.value = (event.target as HTMLSelectElement).value)}>
-                                <option value="">{L("All screens", "كل الشاشات")}</option>
-                                {screens.value.map((screen) => (
-                                    <option key={screen} value={screen}>{screen}</option>
-                                ))}
-                            </select>
+                            <PgAutocomplete
+                                density="compact"
+                                searchable={false}
+                                clearable={false}
+                                items={[{ value: "", label: L("All screens", "كل الشاشات") }, ...screens.value.map((screen) => ({ value: screen, label: screen }))]}
+                                modelValue={screenFilter.value}
+                                onUpdate:modelValue={(value: string) => (screenFilter.value = value)}
+                            />
                         </div>
                         <div class="guide-playbook-layout">
                             <ul class="guide-playbook-list">

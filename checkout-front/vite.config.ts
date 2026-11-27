@@ -11,7 +11,13 @@ export default ({ mode }: any) => {
         build: { assetsInlineLimit: 0 },
         optimizeDeps: { exclude: ["vue-router"] },
         define: { "process.env": {} },
-        resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
+        resolve: {
+            dedupe: ["vue", "@vue/runtime-vapor", "@vue/runtime-dom", "vue-router", "vue-i18n"],
+            alias: {
+                "@": fileURLToPath(new URL("./src", import.meta.url)),
+                "@pg/ui": fileURLToPath(new URL("../packages/ui/src", import.meta.url)),
+            },
+        },
         server: {
             proxy: { "/api": { target: process.env.VITE_API_URL || "http://localhost:4103", changeOrigin: true } },
             port: 5103,

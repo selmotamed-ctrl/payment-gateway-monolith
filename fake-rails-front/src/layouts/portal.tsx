@@ -1,10 +1,10 @@
 import { createSlot } from "vue";
 import { dc } from "@/utils/dc";
 import { useRoute, useRouter } from "vue-router";
-import { VAppBar, VAppBarTitle, VBtn, VMain, VSpacer } from "@/components/vael/VuetifyShim";
-import { ScreenContainer } from "@/components/ScreenContainer";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import ThemeMenu from "@/components/ThemeMenu";
+import {PgAppBar, PgAppBarTitle, PgButton, PgMain, PgSpacer} from "@pg/ui";
+import {ScreenContainer} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {PgThemeMenu as ThemeMenu} from "@pg/ui";
 import { clearSession, getUser } from "@/utils/api";
 
 export const PortalLayout = dc(
@@ -24,21 +24,21 @@ export const PortalLayout = dc(
     };
     return () => (
       <div class="pg-portal">
-        <VAppBar color="surface" flat height={64}>
-          <VAppBarTitle class="pg-portal__title">FAKE PAYMENT RAILS</VAppBarTitle>
+        <PgAppBar color="surface" flat height={64}>
+          <PgAppBarTitle class="pg-portal__title">FAKE PAYMENT RAILS</PgAppBarTitle>
           <div class="d-flex ga-2 align-center">
             {links.map((link) => (
-              <VBtn
+              <PgButton
                 key={link.to}
                 variant={route.path === link.to ? "flat" : "text"}
                 color={route.path === link.to ? "primary" : undefined}
                 to={link.to}
               >
                 {link.label}
-              </VBtn>
+              </PgButton>
             ))}
           </div>
-          <VSpacer />
+          <PgSpacer />
           <ThemeMenu />
           <StatusBadge
             status={user?.environment ?? "SANDBOX"}
@@ -46,11 +46,11 @@ export const PortalLayout = dc(
             toneOverride="info"
             showDot={false}
           />
-          <VBtn variant="text" onClick={logout}>Logout</VBtn>
-        </VAppBar>
-        <VMain>
+          <PgButton variant="text" onClick={logout}>Logout</PgButton>
+        </PgAppBar>
+        <PgMain>
           <ScreenContainer>{createSlot("default")}</ScreenContainer>
-        </VMain>
+        </PgMain>
       </div>
     );
   },

@@ -1,10 +1,10 @@
 import { computed, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn } from "@/components/vael/VuetifyShim";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {PgButton} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 import { GuideMarkdown } from "@/components/guide/GuideMarkdown";
 import { MERCHANT_DEVELOPER_CHAPTERS } from "@/content/guide/merchantDeveloperApiGuide";
 import { MERCHANT_OPERATIONS_CHAPTERS } from "@/content/guide/merchantOperationsGuide";
@@ -100,13 +100,13 @@ export const ContextualHelpDrawer = defineComponent({
                 subtitle={title.value}
                 v-slots={{
                     footer: () => (
-                        <VBtn
+                        <PgButton
                             variant="tonal"
                             prependIcon="mdi-book-open-variant"
                             onClick={() => props.onOpenFullGuide?.()}
                         >
                             {isArabic.value ? "فتح الدليل الكامل" : "Open the full guide"}
-                        </VBtn>
+                        </PgButton>
                     ),
                 }}
             >

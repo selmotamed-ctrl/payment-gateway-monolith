@@ -2,18 +2,18 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VProgressCircular, VSelect, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { statusTone } from "@/components/Table/statusTone";
-import { ApiTable } from "@/components/Table/ApiTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import TableFilters from "@/components/Table/TableFilters";
-import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
-import { tableRegistry } from "@/components/Table/tableRegistry";
-import type { TableHeader } from "@/components/Table/types";
+import {VAlert, PgButton, PgSpinner, PgAutocomplete, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {statusTone} from "@pg/ui";
+import {ApiTable} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {TableFilters} from "@pg/ui";
+import {buildFilterQuery, type FilterValues} from "@pg/ui";
+import { tableRegistry } from "@/tables/tableRegistry";
+import type { TableHeader } from "@pg/ui";
 import { api } from "@/state/api";
 import { useOpenQuery } from "@/composables/useOpenQuery";
 import { urlsMap } from "@/constants/urlsMap";
@@ -21,19 +21,19 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { useSafeguard } from "@/components/guide/useSafeguard";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { MetaPill } from "@/components/ui/MetaPill";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
 import { listVersionChips } from "./listVersions";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
-import { SectionFields } from "@/components/SectionFields";
+import {EmptyState} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 type Screening = {
     id: string;
     subjectType: string;
@@ -460,8 +460,8 @@ const AmlScreeningsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader title={t("AML Screenings")} subtitle={t("Review sanctions and PEP screening results and disposition unresolved matches.")} badge="AML-CONFIDENTIAL" badgeTone="danger">(
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</VBtn>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</PgButton>
                         </ThemedView>
                     )</PageHeader>
                 <VAlert type="error" variant="tonal">
@@ -508,7 +508,7 @@ const AmlScreeningsPage = dc(() => {
                     searchValue={search.value}
                     setSearchValue={(value) => (search.value = value)}
                     headers={headers.value}
-                    rowColor={(row) => (row.result === "CONFIRMED_MATCH" ? "#dc2626" : row.result === "POTENTIAL_MATCH" ? "#d97706" : row.result === "ERROR" ? "#dc2626" : undefined)}
+                    rowColor={(row) => (row.result === "CONFIRMED_MATCH" ? "var(--pg-status-danger-dot)" : row.result === "POTENTIAL_MATCH" ? "var(--pg-status-warning-dot)" : row.result === "ERROR" ? "var(--pg-status-danger-dot)" : undefined)}
                     apiDataExtractor={(data) => {
                         const payload = data as { screenings?: Screening[]; rows?: Screening[] };
                         return payload.screenings ?? payload.rows ?? [];
@@ -559,16 +559,16 @@ const AmlScreeningsPage = dc(() => {
                     footer: () => (
                         <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
                             {unresolvedMatches.value.length > 0 && (
-                                <VBtn color="primary" onClick={() => { actionError.value = ""; dispositionOpen.value = true; }}>{t("Disposition an unresolved match")}</VBtn>
+                                <PgButton color="primary" onClick={() => { actionError.value = ""; dispositionOpen.value = true; }}>{t("Disposition an unresolved match")}</PgButton>
                             )}
-                            <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
+                            <PgButton variant="text" onClick={closeDetails}>{t("Close")}</PgButton>
                         </ThemedView>
                     ),
                 }}
             >
                 {detailLoading.value || !selected.value ? (
                     <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "280px", gap: "12px" }}>
-                        <VProgressCircular indeterminate size={52} color="primary" />
+                        <PgSpinner indeterminate size={52} color="primary" />
                         <ThemedText style={{ opacity: 0.65 }}>{t("Loading screening")}</ThemedText>
                     </ThemedView>
                 ) : (
@@ -676,7 +676,7 @@ const AmlScreeningsPage = dc(() => {
             >
                 <SectionFields title={t("Disposition details")}>
                     <FormField label={t("Unresolved match")} required sensitiveMakerChecker>
-                        <VSelect
+                        <PgAutocomplete
                             items={unresolvedMatches.value.map((match) => ({ title: `${match.matchedName} · ${match.listType} · ${match.score}`, value: match.id }))}
                             modelValue={selectedMatchId.value}
                             onUpdate:modelValue={(value: string) => (selectedMatchId.value = value)}
@@ -684,7 +684,7 @@ const AmlScreeningsPage = dc(() => {
                         />
                     </FormField>
                     <FormField label={t("Disposition")} required sensitiveMakerChecker>
-                        <VSelect
+                        <PgAutocomplete
                             items={DISPOSITIONS}
                             modelValue={disposition.value}
                             onUpdate:modelValue={(value: string) => (disposition.value = value)}
@@ -697,7 +697,7 @@ const AmlScreeningsPage = dc(() => {
                         required
                         sensitiveMakerChecker
                     >
-                        <VTextarea
+                        <PgTextarea
                             modelValue={note.value}
                             onUpdate:modelValue={(value: string) => (note.value = value)}
                             rows={3}

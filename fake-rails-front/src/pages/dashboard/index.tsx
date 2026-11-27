@@ -1,12 +1,12 @@
 import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
-import { VAlert, VCol, VDivider, VRow } from "@/components/vael/VuetifyShim";
+import {VAlert, PgCol, PgDivider, PgRow} from "@pg/ui";
 import PortalLayout from "@/layouts/portal";
 import LiveTransactionFeed from "@/components/LiveTransactionFeed";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { TableRowActions } from "@/components/Table/TableRowActions";
+import {SurfaceCard} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
 import { api } from "@/utils/api";
 
 interface PendingAction {
@@ -61,9 +61,9 @@ const DashboardPage = dc(() => {
   return () => (
     <PortalLayout>
       {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
-      <VRow>
+      <PgRow>
         {metrics().map((metric) => (
-          <VCol key={metric.label} cols={12} md={3}>
+          <PgCol key={metric.label} cols={12} md={3}>
             <SurfaceCard>
               <div class="text-caption text-medium-emphasis">{metric.label}</div>
               <div class="d-flex align-center justify-space-between mt-2">
@@ -71,15 +71,15 @@ const DashboardPage = dc(() => {
                 <StatusBadge status={metric.tone.toUpperCase()} label={metric.tone} toneOverride={metric.tone} showDot={false} />
               </div>
             </SurfaceCard>
-          </VCol>
+          </PgCol>
         ))}
-      </VRow>
+      </PgRow>
 
-      <VRow class="mt-2">
-        <VCol cols={12} lg={7}>
+      <PgRow class="mt-2">
+        <PgCol cols={12} lg={7}>
           <LiveTransactionFeed max={60} />
-        </VCol>
-        <VCol cols={12} lg={5}>
+        </PgCol>
+        <PgCol cols={12} lg={5}>
           <SurfaceCard
             title="Pending customer actions"
             v-slots={{
@@ -141,13 +141,13 @@ const DashboardPage = dc(() => {
                       ]}
                     />
                   </div>
-                  <VDivider class="mt-3" />
+                  <PgDivider class="mt-3" />
                 </div>
               ))}
             </div>
           </SurfaceCard>
-        </VCol>
-      </VRow>
+        </PgCol>
+      </PgRow>
     </PortalLayout>
   );
 });

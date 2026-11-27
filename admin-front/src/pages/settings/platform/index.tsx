@@ -3,12 +3,12 @@ import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VCheckbox, VFileInput, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
+import {VAlert, PgButton, PgCheckbox, PgFileUpload, PgTextField, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {ThemedView} from "@pg/ui";
+import {ThemedText} from "@pg/ui";
+import {StateView} from "@pg/ui";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
@@ -16,13 +16,13 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {MetricStrip, type MetricItem} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
 import { NotificationTemplatesTab } from "./components/NotificationTemplatesTab";
 import { CommunicationTab } from "./components/CommunicationTab";
 import { SettingsSectionNav } from "./components/SettingsSectionNav";
@@ -488,22 +488,22 @@ const PlatformSettingsPage = dc(() => {
                 >
                     {tab.value !== "settings" ? null : (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
+                            <PgButton variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
                                 {t("Refresh")}
-                            </VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" onClick={() => (backupExportOpen.value = true)}>
+                            </PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-download" onClick={() => (backupExportOpen.value = true)}>
                                 {t("Export backup")}
-                            </VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-chart-box-outline" onClick={() => (summaryExportOpen.value = true)}>
+                            </PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-chart-box-outline" onClick={() => (summaryExportOpen.value = true)}>
                                 {t("Export summary")}
-                            </VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-backup-restore" onClick={openRestore}>
+                            </PgButton>
+                            <PgButton variant="tonal" prependIcon="mdi-backup-restore" onClick={openRestore}>
                                 {t("Restore preview")}
-                            </VBtn>
+                            </PgButton>
                             {canWrite.value && (
-                                <VBtn color="primary" variant="flat" prependIcon="mdi-plus" onClick={openNew}>
+                                <PgButton color="primary" variant="flat" prependIcon="mdi-plus" onClick={openNew}>
                                     {t("New setting")}
-                                </VBtn>
+                                </PgButton>
                             )}
                         </ThemedView>
                     )}
@@ -537,7 +537,7 @@ const PlatformSettingsPage = dc(() => {
 
                         <SurfaceCard bodyPadding="14px 16px">
                             <div class="pg-settings-toolbar">
-                                <VTextField
+                                <PgTextField
                                     modelValue={search.value}
                                     onUpdate:modelValue={(value: string) => (search.value = value)}
                                     prependInnerIcon="mdi-magnify"
@@ -550,7 +550,7 @@ const PlatformSettingsPage = dc(() => {
                                 />
                                 <div class="pg-settings-toolbar__filters" role="group" aria-label={t("Filter by status")}>
                                     {STATUS_FILTERS.map((filter) => (
-                                        <VBtn
+                                        <PgButton
                                             key={filter.id}
                                             size="small"
                                             variant={statusFilter.value === filter.id ? "tonal" : "text"}
@@ -558,7 +558,7 @@ const PlatformSettingsPage = dc(() => {
                                             onClick={() => setStatusFilter(filter.id)}
                                         >
                                             {t(filter.label)} <span class="pg-settings-toolbar__count">{statusCounts.value[filter.id]}</span>
-                                        </VBtn>
+                                        </PgButton>
                                     ))}
                                 </div>
                             </div>
@@ -578,7 +578,7 @@ const PlatformSettingsPage = dc(() => {
                                     </div>
                                     <div class="pg-settings-results__meta">
                                         <span>{t("{count} settings", { count: filtered.value.length })}</span>
-                                        {hasFilters.value && <VBtn size="x-small" variant="text" onClick={clearFilters}>{t("Clear filters")}</VBtn>}
+                                        {hasFilters.value && <PgButton size="x-small" variant="text" onClick={clearFilters}>{t("Clear filters")}</PgButton>}
                                     </div>
                                 </div>
 
@@ -690,9 +690,9 @@ const PlatformSettingsPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <>
-                            <VBtn variant="outlined" disabled={restoreApplying.value} onClick={() => (restoreOpen.value = false)}>{t("Close")}</VBtn>
+                            <PgButton variant="outlined" disabled={restoreApplying.value} onClick={() => (restoreOpen.value = false)}>{t("Close")}</PgButton>
                             {restorePreview.value && (
-                                <VBtn
+                                <PgButton
                                     color="warning"
                                     variant="flat"
                                     {...{ type: "submit" }}
@@ -700,7 +700,7 @@ const PlatformSettingsPage = dc(() => {
                                     disabled={!restoreConfirm.value || !restoreChecklistComplete.value || restoreReason.value.trim().length < 3 || restorePreview.value.summary.invalid > 0}
                                 >
                                     {t("Apply restore")}
-                                </VBtn>
+                                </PgButton>
                             )}
                         </>
                     ),
@@ -710,7 +710,7 @@ const PlatformSettingsPage = dc(() => {
                     {t("Choose a settings backup JSON. This preview does not write anything.")}
                 </VAlert>
                 <FormField label={t("Settings backup JSON")}>
-                    <VFileInput
+                    <PgFileUpload
                         {...{ accept: ".json,application/json" }}
                         modelValue={null}
                         prependIcon="mdi-file-upload-outline"
@@ -754,7 +754,7 @@ const PlatformSettingsPage = dc(() => {
                                 {t("Fix or remove invalid backup entries before applying.")}
                             </VAlert>
                         )}
-                        <VTextarea
+                        <PgTextarea
                             modelValue={restoreReason.value}
                             onUpdate:modelValue={(value: string) => (restoreReason.value = value)}
                             label={t("Restore reason")}
@@ -770,7 +770,7 @@ const PlatformSettingsPage = dc(() => {
                             complete={restoreChecklistComplete.value}
                             incompleteMessage={t("Complete all restore checklist items before applying.")}
                         />
-                        <VCheckbox
+                        <PgCheckbox
                             modelValue={restoreConfirm.value}
                             onUpdate:modelValue={(value: boolean | null) => (restoreConfirm.value = !!value)}
                             label={t("I understand this creates new setting versions immediately.")}

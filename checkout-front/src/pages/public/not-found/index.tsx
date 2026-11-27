@@ -1,9 +1,9 @@
 import { dc } from "@/utils/dc";
-import { VBtn } from "@/components/vael/VuetifyShim";
+import {PgButton} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { RouterLink } from "vue-router/experimental/vapor";
 
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
 const NotFoundPage = dc(() => {
     const { t } = useLocale();
     return () => (
@@ -21,7 +21,7 @@ const NotFoundPage = dc(() => {
                     <div style={{ fontSize: "48px", fontWeight: "800" }}>404</div>
                     <div style={{ opacity: 0.7 }}>{t("The page you are looking for does not exist")}</div>
                     <RouterLink to={{ name: "Dashboard" }}>
-                        <VBtn variant="tonal">{t("Dashboard")}</VBtn>
+                        <PgButton variant="tonal">{t("Dashboard")}</PgButton>
                     </RouterLink>
                 </SurfaceCardText>
             </SurfaceCard>

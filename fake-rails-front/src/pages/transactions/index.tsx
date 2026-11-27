@@ -1,15 +1,15 @@
 import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
-import { VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
+import {PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
 import PortalLayout from "@/layouts/portal";
 import WireInspectorDrawer from "@/components/WireInspectorDrawer";
 import WebhookComposerModal from "@/components/WebhookComposerModal";
-import { DataTable } from "@/components/Table/DataTable";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { SectionFields } from "@/components/SectionFields";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MonoRef } from "@/components/ui/MonoRef";
+import { DataTable } from "@/tables/DataTable";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {SectionFields} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
 import { api } from "@/utils/api";
 
 interface TransactionRow {
@@ -122,12 +122,12 @@ const TransactionsPage = dc(() => {
         title="Filter transactions"
         subtitle={`${total.value} matching records`}
         v-slots={{
-          footer: () => <VBtn size="small" onClick={load}>Search</VBtn>,
+          footer: () => <PgButton size="small" onClick={load}>Search</PgButton>,
         }}
       >
         <div class="pg-field-wrapper">
           <label>Reference</label>
-          <VTextField
+          <PgTextField
             density="compact"
             variant="outlined"
             hideDetails
@@ -139,7 +139,7 @@ const TransactionsPage = dc(() => {
         </div>
         <div class="pg-field-wrapper">
           <label>Status</label>
-          <VSelect
+          <PgAutocomplete
             density="compact"
             variant="outlined"
             hideDetails

@@ -2,23 +2,23 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn, VSelect, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
-import type { MetricItem } from "@/components/ui/MetricStrip";
-import { StateView } from "@/components/StateView";
-import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
-import SandboxResourceTable from "@/components/sandbox/SandboxResourceTable";
-import { linkFilters } from "@/components/sandbox/sandboxFilters";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import type { TableHeader } from "@/components/Table/types";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { FormModal } from "@/components/ui/FormModal";
-import { FormField } from "@/components/ui/FormField";
-import { SectionFields } from "@/components/SectionFields";
+import {VAlert, PgButton, PgAutocomplete, PgCheckbox, PgTextField, PgTextarea} from "@pg/ui";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {PageHeader} from "@pg/ui";
+import {SummaryExportCard} from "@pg/ui";
+import type { MetricItem } from "@pg/ui";
+import {StateView} from "@pg/ui";
+import { SandboxBanner } from "@/features/sandbox/SandboxBanner";
+import { SandboxResourceTable } from "@/features/sandbox/SandboxResourceTable";
+import { linkFilters } from "@/features/sandbox/sandboxFilters";
+import {TableRowActions} from "@pg/ui";
+import type { TableHeader } from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {FormModal} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {SectionFields} from "@pg/ui";
 import { sandboxGet, sandboxPost, type SandboxLinkRow, type SandboxStudioOverview, type SandboxSummaryResponse } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -160,7 +160,7 @@ const SandboxLinksPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={t("Sandbox Checkout Links")} subtitle={t("sbx_ links open the Sandbox checkout with the test assistant.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => { refresh.value?.(); void loadSummary(); }}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn><VBtn color="primary" prependIcon="mdi-plus" onClick={() => { formError.value = ""; createOpen.value = true; }}>{t("Create link")}</VBtn></div></PageHeader>
+            <PageHeader title={t("Sandbox Checkout Links")} subtitle={t("sbx_ links open the Sandbox checkout with the test assistant.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => { refresh.value?.(); void loadSummary(); }}>{t("Refresh")}</PgButton><PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</PgButton><PgButton color="primary" prependIcon="mdi-plus" onClick={() => { formError.value = ""; createOpen.value = true; }}>{t("Create link")}</PgButton></div></PageHeader>
             <SandboxBanner />
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             <StateView loading={loading.value && !summary.value} minHeight="180px">
@@ -171,17 +171,17 @@ const SandboxLinksPage = dc(() => {
             </StateView>
             <FormModal modelValue={createOpen.value} onUpdate:modelValue={(v: any) => (createOpen.value = v)} title={t("Create sandbox payment link")} size="md" loading={creating.value} errorMessage={formError.value} submitLabel={t("Create")} onSubmit={() => void create()}>
                 <SectionFields title={t("Link details")}>
-                    <FormField label={t("Application")} required><VSelect items={applications.value.map((app) => ({ title: app.name, value: app.id }))} modelValue={form.value.applicationId} onUpdate:modelValue={(v: string) => (form.value.applicationId = v)} hideDetails /></FormField>
-                    <FormField label={t("Title")} required><VTextField modelValue={form.value.title} onUpdate:modelValue={(v: string) => (form.value.title = v)} hideDetails /></FormField>
-                    <FormField label={t("Description")}><VTextarea modelValue={form.value.description} onUpdate:modelValue={(v: string) => (form.value.description = v)} rows={2} hideDetails /></FormField>
-                    <FormField label={t("Amount")} required><VTextField type="number" modelValue={form.value.amount} onUpdate:modelValue={(v: string) => (form.value.amount = v)} hideDetails /></FormField>
-                    <FormField label={t("Currency")} required><VTextField modelValue={form.value.currency} onUpdate:modelValue={(v: string) => (form.value.currency = v.toUpperCase())} hideDetails /></FormField>
-                    <FormField label={t("Fee bearer")}><VSelect items={["MERCHANT_ABSORBS", "PAYER_SURCHARGE", "SPLIT"].map((value) => ({ title: value.replaceAll("_", " "), value }))} modelValue={form.value.feeBearer} onUpdate:modelValue={(v: string) => (form.value.feeBearer = v)} hideDetails /></FormField>
-                    <FormField label={t("Max uses")}><VTextField type="number" modelValue={form.value.maxUses} onUpdate:modelValue={(v: string) => (form.value.maxUses = v)} disabled={form.value.infiniteUse} hideDetails /></FormField>
-                    <FormField label={t("Infinite use")}><input type="checkbox" checked={form.value.infiniteUse} onChange={(event: Event) => (form.value.infiniteUse = (event.target as HTMLInputElement).checked)} /></FormField>
-                    <FormField label={t("Expires at")}><VTextField type="datetime-local" modelValue={form.value.expiresAt} onUpdate:modelValue={(v: string) => (form.value.expiresAt = v)} hideDetails /></FormField>
-                    <FormField label={t("Redirect URL (optional)")}><VTextField modelValue={form.value.redirectUrl} onUpdate:modelValue={(v: string) => (form.value.redirectUrl = v)} hideDetails /></FormField>
-                    <FormField label={t("Allowed rails")}><VTextField modelValue={form.value.allowedRails} onUpdate:modelValue={(v: string) => (form.value.allowedRails = v)} placeholder={t("Comma separated, empty means all rails.")} hideDetails /></FormField>
+                    <FormField label={t("Application")} required><PgAutocomplete items={applications.value.map((app) => ({ title: app.name, value: app.id }))} modelValue={form.value.applicationId} onUpdate:modelValue={(v: string) => (form.value.applicationId = v)} hideDetails /></FormField>
+                    <FormField label={t("Title")} required><PgTextField modelValue={form.value.title} onUpdate:modelValue={(v: string) => (form.value.title = v)} hideDetails /></FormField>
+                    <FormField label={t("Description")}><PgTextarea modelValue={form.value.description} onUpdate:modelValue={(v: string) => (form.value.description = v)} rows={2} hideDetails /></FormField>
+                    <FormField label={t("Amount")} required><PgTextField type="number" modelValue={form.value.amount} onUpdate:modelValue={(v: string) => (form.value.amount = v)} hideDetails /></FormField>
+                    <FormField label={t("Currency")} required><PgTextField modelValue={form.value.currency} onUpdate:modelValue={(v: string) => (form.value.currency = v.toUpperCase())} hideDetails /></FormField>
+                    <FormField label={t("Fee bearer")}><PgAutocomplete items={["MERCHANT_ABSORBS", "PAYER_SURCHARGE", "SPLIT"].map((value) => ({ title: value.replaceAll("_", " "), value }))} modelValue={form.value.feeBearer} onUpdate:modelValue={(v: string) => (form.value.feeBearer = v)} hideDetails /></FormField>
+                    <FormField label={t("Max uses")}><PgTextField type="number" modelValue={form.value.maxUses} onUpdate:modelValue={(v: string) => (form.value.maxUses = v)} disabled={form.value.infiniteUse} hideDetails /></FormField>
+                    <FormField label={t("Infinite use")}><PgCheckbox modelValue={form.value.infiniteUse} onUpdate:modelValue={(value: boolean) => (form.value.infiniteUse = value)} hideDetails /></FormField>
+                    <FormField label={t("Expires at")}><PgTextField type="datetime-local" modelValue={form.value.expiresAt} onUpdate:modelValue={(v: string) => (form.value.expiresAt = v)} hideDetails /></FormField>
+                    <FormField label={t("Redirect URL (optional)")}><PgTextField modelValue={form.value.redirectUrl} onUpdate:modelValue={(v: string) => (form.value.redirectUrl = v)} hideDetails /></FormField>
+                    <FormField label={t("Allowed rails")}><PgTextField modelValue={form.value.allowedRails} onUpdate:modelValue={(v: string) => (form.value.allowedRails = v)} placeholder={t("Comma separated, empty means all rails.")} hideDetails /></FormField>
                 </SectionFields>
             </FormModal>
         </ScreenContainer>

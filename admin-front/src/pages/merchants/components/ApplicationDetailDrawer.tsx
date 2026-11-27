@@ -2,21 +2,21 @@ import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn } from "@/components/vael/VuetifyShim";
+import {PgButton} from "@pg/ui";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
-import { StateView } from "@/components/StateView";
-import { TableRowActions } from "@/components/Table/TableRowActions";
-import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { FormChecklist } from "@/components/ui/FormChecklist";
+import {StateView} from "@pg/ui";
+import {TableRowActions} from "@pg/ui";
+import {SlideOverDrawer} from "@pg/ui";
+import {SegmentedTabs} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {DescriptionList} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
+import {MoneyDisplay} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
 import {
     applicationActionsFor,
     paymentLinkActionsFor,
@@ -308,9 +308,9 @@ export const ApplicationDetailDrawer = defineComponent({
                             {
                                 label: t("Merchant"),
                                 value: (
-                                    <VBtn size="small" variant="text" style={{ paddingInline: "4px", textTransform: "none" }} onClick={() => void router.push({ name: "MerchantDetail", params: { id: current.merchantId } })}>
+                                    <PgButton size="small" variant="text" style={{ paddingInline: "4px", textTransform: "none" }} onClick={() => void router.push({ name: "MerchantDetail", params: { id: current.merchantId } })}>
                                         {current.merchant.tradeName || current.merchant.legalName}
-                                    </VBtn>
+                                    </PgButton>
                                 ),
                             },
                             {
@@ -320,7 +320,7 @@ export const ApplicationDetailDrawer = defineComponent({
                                         <MonoRef value={current.assignedWallet.id} truncate={14} />
                                         <span>{current.assignedWallet.currency}</span>
                                         <StatusBadge status={current.assignedWallet.status} toneOverride={toBadgeTone(current.assignedWallet.status)} />
-                                        <VBtn
+                                        <PgButton
                                             size="x-small"
                                             variant="text"
                                             icon="mdi-open-in-new"
@@ -520,7 +520,7 @@ export const ApplicationDetailDrawer = defineComponent({
                             footer: () => (
                                 <>
                                     {actions.value.map((action) => (
-                                        <VBtn
+                                        <PgButton
                                             key={action.key}
                                             variant="tonal"
                                             color={action.danger ? "error" : "primary"}
@@ -530,9 +530,9 @@ export const ApplicationDetailDrawer = defineComponent({
                                             onClick={() => runAction(action)}
                                         >
                                             {t(action.label)}
-                                        </VBtn>
+                                        </PgButton>
                                     ))}
-                                    <VBtn variant="text" onClick={() => emit("close")}>{t("Close")}</VBtn>
+                                    <PgButton variant="text" onClick={() => emit("close")}>{t("Close")}</PgButton>
                                 </>
                             ),
                         }}

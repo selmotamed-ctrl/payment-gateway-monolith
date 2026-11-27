@@ -2,13 +2,13 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VSelect, VTextField, VTextarea } from "@/components/vael/VuetifyShim";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { FormField } from "@/components/ui/FormField";
-import { FormChecklist } from "@/components/ui/FormChecklist";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MonoRef } from "@/components/ui/MonoRef";
+import {VAlert, PgButton, PgAutocomplete, PgTextField, PgTextarea} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {FormChecklist} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {StatusBadge} from "@pg/ui";
+import {MonoRef} from "@pg/ui";
 import { WizardSection } from "./WizardSection";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -188,7 +188,7 @@ export const StepSimulator = dc(
                     <WizardSection title={t("Dry Run")}>
                         <div style={gridStyle}>
                             <FormField label={t("Phase")}>
-                                <VSelect
+                                <PgAutocomplete
                                     items={[
                                         "CREDENTIAL_CHECK",
                                         "PRE_INITIATE",
@@ -206,20 +206,20 @@ export const StepSimulator = dc(
                                 />
                             </FormField>
                             <FormField label={t("Amount")}>
-                                <VTextField
+                                <PgTextField
                                     modelValue={sampleAmount.value}
                                     onUpdate:modelValue={(v: string) => (sampleAmount.value = v)}
                                 />
                             </FormField>
                             <FormField label={t("Currency")}>
-                                <VTextField
+                                <PgTextField
                                     modelValue={sampleCurrency.value}
                                     onUpdate:modelValue={(v: string) => (sampleCurrency.value = v.toUpperCase())}
                                 />
                             </FormField>
                         </div>
                         <FormField label={t("Params")}>
-                            <VTextarea
+                            <PgTextarea
                                 modelValue={formData.value}
                                 onUpdate:modelValue={(v: string) => (formData.value = v)}
                                 rows={4}
@@ -235,9 +235,9 @@ export const StepSimulator = dc(
                             complete={dryRunChecklistComplete.value}
                         />
                         <div>
-                            <VBtn color="primary" loading={dryRunning.value} disabled={!dryRunChecklistComplete.value} onClick={() => void runDryRun()}>
+                            <PgButton color="primary" loading={dryRunning.value} disabled={!dryRunChecklistComplete.value} onClick={() => void runDryRun()}>
                                 {t("Dry Run")}
-                            </VBtn>
+                            </PgButton>
                         </div>
                         {dryRunError.value && (
                             <VAlert type="error" variant="tonal" density="compact">
@@ -272,9 +272,9 @@ export const StepSimulator = dc(
                         divider
                         v-slots={{
                             actions: () => (
-                                <VBtn color="primary" size="small" loading={suiteRunning.value} disabled={!suiteChecklistComplete.value} onClick={() => void runSuite()}>
+                                <PgButton color="primary" size="small" loading={suiteRunning.value} disabled={!suiteChecklistComplete.value} onClick={() => void runSuite()}>
                                     {t("Run")}
-                                </VBtn>
+                                </PgButton>
                             ),
                         }}
                     >
@@ -337,7 +337,7 @@ export const StepSimulator = dc(
 
                     <WizardSection title={t("Rollback Version")} divider>
                         <FormField label="rollback_version_id">
-                            <VTextField
+                            <PgTextField
                                 modelValue={rollbackVersionId.value}
                                 onUpdate:modelValue={(v: string) => {
                                     rollbackVersionId.value = v;
@@ -346,7 +346,7 @@ export const StepSimulator = dc(
                             />
                         </FormField>
                         <FormField label={t("Reason")}>
-                            <VTextarea
+                            <PgTextarea
                                 modelValue={submitReason.value}
                                 onUpdate:modelValue={(v: string) => (submitReason.value = v)}
                                 rows={3}
@@ -362,9 +362,9 @@ export const StepSimulator = dc(
                             complete={submitChecklistComplete.value}
                         />
                         <div>
-                            <VBtn color="primary" loading={submitting.value} disabled={!submitChecklistComplete.value} onClick={() => void submitForApproval()}>
+                            <PgButton color="primary" loading={submitting.value} disabled={!submitChecklistComplete.value} onClick={() => void submitForApproval()}>
                                 {t("Submit For Approval")}
-                            </VBtn>
+                            </PgButton>
                         </div>
                     </WizardSection>
                 </SurfaceCardText>

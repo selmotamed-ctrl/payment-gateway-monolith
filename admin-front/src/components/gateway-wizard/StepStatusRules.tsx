@@ -1,11 +1,11 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VSelect, VTextField } from "@/components/vael/VuetifyShim";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { FormField } from "@/components/ui/FormField";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import {PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import {FormField} from "@pg/ui";
+import {DescriptionList} from "@pg/ui";
+import {StatusBadge, type BadgeTone} from "@pg/ui";
 import { WizardSection } from "./WizardSection";
 import { Decimal } from "decimal.js";
 import { formatMoney, toDecimal } from "@/utils/money";
@@ -127,9 +127,9 @@ export const StepStatusRules = dc(
                         title={t("Status Rule")}
                         v-slots={{
                             actions: () => (
-                                <VBtn variant="tonal" size="small" onClick={addStatusRule}>
+                                <PgButton variant="tonal" size="small" onClick={addStatusRule}>
                                     {t("Add")}
-                                </VBtn>
+                                </PgButton>
                             ),
                         }}
                     >
@@ -146,26 +146,26 @@ export const StepStatusRules = dc(
                             >
                                 <div style={gridStyle}>
                                     <FormField label="gateway_code">
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={rule.gatewayCode}
                                             onUpdate:modelValue={(v: string) => updateStatusRule(index, { gatewayCode: v })}
                                         />
                                     </FormField>
                                     <FormField label={t("Status")}>
-                                        <VSelect
+                                        <PgAutocomplete
                                             items={CANONICAL_STATUSES}
                                             modelValue={rule.canonicalStatus}
                                             onUpdate:modelValue={(v: any) => updateStatusRule(index, { canonicalStatus: v })}
                                         />
                                     </FormField>
                                     <FormField label="message_ar">
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={rule.messageAr}
                                             onUpdate:modelValue={(v: string) => updateStatusRule(index, { messageAr: v })}
                                         />
                                     </FormField>
                                     <FormField label="message_en">
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={rule.messageEn}
                                             onUpdate:modelValue={(v: string) => updateStatusRule(index, { messageEn: v })}
                                         />
@@ -180,9 +180,9 @@ export const StepStatusRules = dc(
                         divider
                         v-slots={{
                             actions: () => (
-                                <VBtn variant="tonal" size="small" onClick={addErrorMap}>
+                                <PgButton variant="tonal" size="small" onClick={addErrorMap}>
                                     {t("Add")}
-                                </VBtn>
+                                </PgButton>
                             ),
                         }}
                     >
@@ -203,26 +203,26 @@ export const StepStatusRules = dc(
                             >
                                 <div style={gridStyle}>
                                     <FormField label="gateway_code">
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={entry.gatewayCode}
                                             onUpdate:modelValue={(v: string) => updateErrorMap(index, { gatewayCode: v })}
                                         />
                                     </FormField>
                                     <FormField label={t("Status")}>
-                                        <VSelect
+                                        <PgAutocomplete
                                             items={CANONICAL_STATUSES}
                                             modelValue={entry.canonicalStatus}
                                             onUpdate:modelValue={(v: any) => updateErrorMap(index, { canonicalStatus: v })}
                                         />
                                     </FormField>
                                     <FormField label="message_ar">
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={entry.messageAr}
                                             onUpdate:modelValue={(v: string) => updateErrorMap(index, { messageAr: v })}
                                         />
                                     </FormField>
                                     <FormField label="message_en">
-                                        <VTextField
+                                        <PgTextField
                                             modelValue={entry.messageEn}
                                             onUpdate:modelValue={(v: string) => updateErrorMap(index, { messageEn: v })}
                                         />
@@ -235,7 +235,7 @@ export const StepStatusRules = dc(
                     <WizardSection title={t("Amount Pipeline")} divider>
                         <div style={gridStyle}>
                             <FormField label={t("Amount Scale")}>
-                                <VTextField
+                                <PgTextField
                                     type="number"
                                     modelValue={props.model.amountPipeline.scale}
                                     onUpdate:modelValue={(v: any) =>
@@ -247,7 +247,7 @@ export const StepStatusRules = dc(
                                 />
                             </FormField>
                             <FormField label={t("Amount Precision")}>
-                                <VTextField
+                                <PgTextField
                                     type="number"
                                     modelValue={props.model.amountPipeline.precision}
                                     onUpdate:modelValue={(v: any) =>
@@ -259,7 +259,7 @@ export const StepStatusRules = dc(
                                 />
                             </FormField>
                             <FormField label={t("Amount Rounding")}>
-                                <VSelect
+                                <PgAutocomplete
                                     items={["NONE", "NEAREST", "UP", "DOWN"]}
                                     modelValue={props.model.amountPipeline.rounding}
                                     onUpdate:modelValue={(v: any) =>
@@ -271,7 +271,7 @@ export const StepStatusRules = dc(
                                 />
                             </FormField>
                             <FormField label={t("Currency")}>
-                                <VTextField
+                                <PgTextField
                                     modelValue={props.model.amountPipeline.currency}
                                     onUpdate:modelValue={(v: string) =>
                                         props.onChange({
@@ -282,7 +282,7 @@ export const StepStatusRules = dc(
                                 />
                             </FormField>
                             <FormField label={t("Amount")}>
-                                <VTextField
+                                <PgTextField
                                     modelValue={sampleAmount.value}
                                     onUpdate:modelValue={(v: string) => (sampleAmount.value = v)}
                                 />
@@ -301,7 +301,7 @@ export const StepStatusRules = dc(
                     <WizardSection title={t("Cost Model")} divider>
                         <div style={gridStyle}>
                             <FormField label={t("Cost Model")}>
-                                <VSelect
+                                <PgAutocomplete
                                     items={["FLAT", "PERCENT", "FLAT_PLUS_PERCENT"]}
                                     modelValue={props.model.costModel.model}
                                     onUpdate:modelValue={(v: any) =>
@@ -313,7 +313,7 @@ export const StepStatusRules = dc(
                                 />
                             </FormField>
                             <FormField label="flat_fee">
-                                <VTextField
+                                <PgTextField
                                     modelValue={props.model.costModel.flatFee}
                                     onUpdate:modelValue={(v: string) =>
                                         props.onChange({
@@ -324,7 +324,7 @@ export const StepStatusRules = dc(
                                 />
                             </FormField>
                             <FormField label="percent_fee">
-                                <VTextField
+                                <PgTextField
                                     modelValue={props.model.costModel.percentFee}
                                     onUpdate:modelValue={(v: string) =>
                                         props.onChange({
@@ -335,7 +335,7 @@ export const StepStatusRules = dc(
                                 />
                             </FormField>
                             <FormField label="min_fee">
-                                <VTextField
+                                <PgTextField
                                     modelValue={props.model.costModel.minFee}
                                     onUpdate:modelValue={(v: string) =>
                                         props.onChange({
@@ -346,7 +346,7 @@ export const StepStatusRules = dc(
                                 />
                             </FormField>
                             <FormField label="max_fee">
-                                <VTextField
+                                <PgTextField
                                     modelValue={props.model.costModel.maxFee}
                                     onUpdate:modelValue={(v: string) =>
                                         props.onChange({
@@ -357,7 +357,7 @@ export const StepStatusRules = dc(
                                 />
                             </FormField>
                             <FormField label={t("Currency")}>
-                                <VTextField
+                                <PgTextField
                                     modelValue={props.model.costModel.currency}
                                     onUpdate:modelValue={(v: string) =>
                                         props.onChange({
@@ -368,7 +368,7 @@ export const StepStatusRules = dc(
                                 />
                             </FormField>
                             <FormField label="gateway_fee">
-                                <VTextField
+                                <PgTextField
                                     modelValue={sampleGatewayFee.value}
                                     onUpdate:modelValue={(v: string) => (sampleGatewayFee.value = v)}
                                 />
@@ -398,7 +398,7 @@ export const StepStatusRules = dc(
                         divider
                         v-slots={{
                             actions: () => (
-                                <VBtn
+                                <PgButton
                                     variant="tonal"
                                     size="small"
                                     onClick={() =>
@@ -415,13 +415,13 @@ export const StepStatusRules = dc(
                                     }
                                 >
                                     {t("Add")}
-                                </VBtn>
+                                </PgButton>
                             ),
                         }}
                     >
                         <div style={gridStyle}>
                             <FormField label="source_id">
-                                <VTextField
+                                <PgTextField
                                     modelValue={props.model.statementMapping.sourceId}
                                     onUpdate:modelValue={(v: string) =>
                                         props.onChange({
@@ -432,7 +432,7 @@ export const StepStatusRules = dc(
                                 />
                             </FormField>
                             <FormField label={t("Type")}>
-                                <VSelect
+                                <PgAutocomplete
                                     items={["CSV", "XLSX", "JSON"]}
                                     modelValue={props.model.statementMapping.format}
                                     onUpdate:modelValue={(v: any) =>
@@ -444,7 +444,7 @@ export const StepStatusRules = dc(
                                 />
                             </FormField>
                             <FormField label="delimiter">
-                                <VTextField
+                                <PgTextField
                                     modelValue={props.model.statementMapping.delimiter}
                                     onUpdate:modelValue={(v: string) =>
                                         props.onChange({
@@ -459,7 +459,7 @@ export const StepStatusRules = dc(
                         {props.model.statementMapping.columnMapping.map((mapping, index) => (
                             <div key={index} style={gridStyle}>
                                 <FormField label={t("Column")}>
-                                    <VTextField
+                                    <PgTextField
                                         modelValue={mapping.source}
                                         onUpdate:modelValue={(v: string) => {
                                             const columnMapping = props.model.statementMapping.columnMapping.map(
@@ -474,7 +474,7 @@ export const StepStatusRules = dc(
                                     />
                                 </FormField>
                                 <FormField label={t("Maps To")}>
-                                    <VTextField
+                                    <PgTextField
                                         modelValue={mapping.target}
                                         onUpdate:modelValue={(v: string) => {
                                             const columnMapping = props.model.statementMapping.columnMapping.map(

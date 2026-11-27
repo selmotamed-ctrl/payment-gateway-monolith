@@ -2,9 +2,9 @@ import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import { VAlert, VBtn, VIcon, VProgressCircular } from "@/components/vael/VuetifyShim";
+import {VAlert, PgButton, PgIcon, PgSpinner} from "@pg/ui";
 import CheckoutLayout from "@/layouts/checkout";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import {SurfaceCard, SurfaceCardText} from "@pg/ui";
 import { api } from "@/state/api";
 import { extractApiError } from "@/utils/errors/extractor";
 
@@ -56,19 +56,19 @@ const VerifyCertificatePage = dc(() => {
                 <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                     {loading.value ? (
                         <div style={{ display: "flex", justifyContent: "center", padding: "32px" }}>
-                            <VProgressCircular indeterminate color="primary" />
+                            <PgSpinner indeterminate color="primary" />
                         </div>
                     ) : error.value ? (
                         <>
                             <VAlert type="error" variant="tonal">{error.value}</VAlert>
                             <div style={{ display: "flex", justifyContent: "center" }}>
-                                <VBtn variant="tonal" onClick={() => window.location.reload()}>{t("Try again")}</VBtn>
+                                <PgButton variant="tonal" onClick={() => window.location.reload()}>{t("Try again")}</PgButton>
                             </div>
                         </>
                     ) : certificate.value ? (
                         <>
                             <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-                                <VIcon
+                                <PgIcon
                                     icon={certificate.value.status === "valid" ? "mdi-certificate-outline" : certificate.value.status === "revoked" ? "mdi-cancel" : "mdi-alert-circle-outline"}
                                     color={certificate.value.status === "valid" ? "success" : "warning"}
                                     size={42}

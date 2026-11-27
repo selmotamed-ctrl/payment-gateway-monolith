@@ -2,8 +2,8 @@ import { computed, onBeforeUnmount, onMounted, ref, type PropType, type VNodeChi
 import { defineComponent } from "@/utils/dc";
 import { RouterLink } from "vue-router/experimental/vapor";
 import { useLocale } from "@/utils/vael-compat";
-import ScreenContainer from "@/components/ScreenContainer";
-import { MetaPill } from "@/components/ui/MetaPill";
+import {PgPage as ScreenContainer} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
 import { user } from "@/state/user";
 import {
     loadCatalog,

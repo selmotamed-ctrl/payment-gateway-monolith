@@ -1,7 +1,7 @@
 import { type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import {StatusBadge} from "@pg/ui";
 import type { TrackId } from "@/content/academy";
 import { BADGE_TONE } from "./ui/trackMeta";
 import type { BadgeState } from "./useAcademyProgress";

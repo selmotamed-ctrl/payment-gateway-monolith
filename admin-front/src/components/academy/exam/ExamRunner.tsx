@@ -1,9 +1,9 @@
 import { dc } from "@/utils/dc";
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import { VBtn, VDialog, VIcon } from "@/components/vael/VuetifyShim";
-import { MetaPill } from "@/components/ui/MetaPill";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import {PgButton, PgChoice, PgDialog, PgIcon, PgTextField} from "@pg/ui";
+import {MetaPill} from "@pg/ui";
+import {SurfaceCard} from "@pg/ui";
 import type { ExamAnswer, ExamQuestionPublic, ExamStartResponse } from "@/content/academy/apiTypes";
 import { Callout } from "../ui/Callout";
 import { ProgressBar } from "../ui/ProgressBar";
@@ -194,10 +194,16 @@ export const ExamRunner = dc((props: Props) => {
             return (
                 <div role="radiogroup" aria-labelledby={`stem-${q.qid}`} class="ac-choices">
                     {q.options.map((o) => (
-                        <label key={o.oid} class={["ac-choice", a === o.oid ? "ac-choice--selected" : ""]}>
-                            <input type="radio" name={`q-${q.qid}`} checked={a === o.oid} onChange={() => setAnswer(q, o.oid)} />
-                            <span class="ac-choice__label" dir="auto">{o.text}</span>
-                        </label>
+                        <PgChoice
+                            key={o.oid}
+                            type="radio"
+                            name={`q-${q.qid}`}
+                            checked={a === o.oid}
+                            state={a === o.oid ? "selected" : ""}
+                            onChange={() => setAnswer(q, o.oid)}
+                        >
+                            <span dir="auto">{o.text}</span>
+                        </PgChoice>
                     ))}
                 </div>
             );
@@ -209,17 +215,15 @@ export const ExamRunner = dc((props: Props) => {
                     <span class="ac-muted">{t("Select all that apply.")}</span>
                     <div class="ac-choices">
                         {q.options.map((o) => (
-                            <label key={o.oid} class={["ac-choice", chosen.includes(o.oid) ? "ac-choice--selected" : ""]}>
-                                <input
-                                    type="checkbox"
-                                    checked={chosen.includes(o.oid)}
-                                    onChange={(event: Event) => {
-                                        const on = (event.target as HTMLInputElement).checked;
-                                        setAnswer(q, on ? [...chosen, o.oid] : chosen.filter((id) => id !== o.oid));
-                                    }}
-                                />
-                                <span class="ac-choice__label" dir="auto">{o.text}</span>
-                            </label>
+                            <PgChoice
+                                key={o.oid}
+                                type="checkbox"
+                                checked={chosen.includes(o.oid)}
+                                state={chosen.includes(o.oid) ? "selected" : ""}
+                                onChange={(on: boolean) => setAnswer(q, on ? [...chosen, o.oid] : chosen.filter((id) => id !== o.oid))}
+                            >
+                                <span dir="auto">{o.text}</span>
+                            </PgChoice>
                         ))}
                     </div>
                 </div>
@@ -237,7 +241,7 @@ export const ExamRunner = dc((props: Props) => {
                                 <span class="ac-exam-order__pos ac-num">{position + 1}.</span>
                                 <span class="ac-choice__label" dir="auto">{text(oid)}</span>
                                 <span class="ac-row ac-exam-order__moves">
-                                    <VBtn
+                                    <PgButton
                                         class="ac-exam-move"
                                         size="small"
                                         variant="outlined"
@@ -248,7 +252,7 @@ export const ExamRunner = dc((props: Props) => {
                                         {...{ title: t("Up") }}
                                         onClick={() => moveItem(q, position, -1)}
                                     />
-                                    <VBtn
+                                    <PgButton
                                         class="ac-exam-move"
                                         size="small"
                                         variant="outlined"
@@ -265,9 +269,9 @@ export const ExamRunner = dc((props: Props) => {
                     </ol>
                     {!isAnswered(q) && (
                         <div>
-                            <VBtn size="small" variant="tonal" onClick={() => setAnswer(q, [...list])}>
+                            <PgButton size="small" variant="tonal" onClick={() => setAnswer(q, [...list])}>
                                 {t("Keep this order as my answer")}
-                            </VBtn>
+                            </PgButton>
                         </div>
                     )}
                 </div>
@@ -280,15 +284,16 @@ export const ExamRunner = dc((props: Props) => {
                 <label for={`num-${q.qid}`} class="ac-h3">
                     {t("Your answer (a number; use a dot for decimals)")}
                 </label>
-                <input
+                <PgTextField
                     id={`num-${q.qid}`}
                     class="ac-exam-number"
-                    type="text"
+                    density="compact"
+                    hideDetails
                     inputmode="decimal"
                     autocomplete="off"
                     dir="ltr"
-                    value={numText.value[q.qid] ?? (typeof a === "string" ? a : "")}
-                    onInput={(event: Event) => onNumber(q, (event.target as HTMLInputElement).value)}
+                    modelValue={numText.value[q.qid] ?? (typeof a === "string" ? a : "")}
+                    onUpdate:modelValue={(value: string) => onNumber(q, value)}
                 />
                 {typed !== "" && !NUMBER_RE.test(typed) && <span class="ac-muted">{t("Not counted as answered yet: enter a complete number.")}</span>}
             </div>
@@ -312,8 +317,8 @@ export const ExamRunner = dc((props: Props) => {
                         onClick={() => go(i)}
                     >
                         <span class="ac-exam-qbtn__n ac-num" aria-hidden="true">{i + 1}</span>
-                        {flag && <VIcon class="ac-exam-qbtn__flag" icon="mdi-flag" size={11} />}
-                        {done && <VIcon class="ac-exam-qbtn__check" icon="mdi-check" size={11} />}
+                        {flag && <PgIcon class="ac-exam-qbtn__flag" icon="mdi-flag" size={11} />}
+                        {done && <PgIcon class="ac-exam-qbtn__check" icon="mdi-check" size={11} />}
                     </button>
                 );
             })}
@@ -336,7 +341,7 @@ export const ExamRunner = dc((props: Props) => {
                                     <div class="ac-between">
                                         <span class="ac-eyebrow ac-exam-qeyebrow">{`${t("Question")} ${index.value + 1}`}</span>
                                         <span class={["ac-exam-clock-compact", `ac-exam-clock-compact--${tone}`]} aria-hidden="true" dir="ltr">
-                                            <VIcon icon={CLOCK_ICON[tone]} size={14} />
+                                            <PgIcon icon={CLOCK_ICON[tone]} size={14} />
                                             {formatClock(remaining.value)}
                                         </span>
                                         {flagged.value.includes(q.qid) && (
@@ -349,27 +354,31 @@ export const ExamRunner = dc((props: Props) => {
                                         {q.stem}
                                     </h2>
                                     {renderQuestion(q)}
-                                    <label class="ac-exam-flag">
-                                        <input type="checkbox" checked={flagged.value.includes(q.qid)} onChange={() => toggleFlag(q.qid)} />
-                                        <VIcon icon="mdi-flag-outline" size={16} />
+                                    <PgChoice
+                                        type="checkbox"
+                                        class="ac-exam-flag"
+                                        checked={flagged.value.includes(q.qid)}
+                                        onChange={() => toggleFlag(q.qid)}
+                                    >
+                                        <PgIcon icon="mdi-flag-outline" size={16} />
                                         <span>{t("Flag this question for review")}</span>
-                                    </label>
+                                    </PgChoice>
                                 </div>
                             </SurfaceCard>
                         )}
 
                         <div class="ac-between ac-exam-actions">
                             <span class="ac-row ac-exam-pager">
-                                <VBtn variant="outlined" prependIcon="mdi-chevron-left" disabled={index.value === 0} onClick={() => go(index.value - 1)}>
+                                <PgButton variant="outlined" prependIcon="mdi-chevron-left" disabled={index.value === 0} onClick={() => go(index.value - 1)}>
                                     {t("Previous")}
-                                </VBtn>
-                                <VBtn variant="outlined" appendIcon="mdi-chevron-right" disabled={index.value >= questions.length - 1} onClick={() => go(index.value + 1)}>
+                                </PgButton>
+                                <PgButton variant="outlined" appendIcon="mdi-chevron-right" disabled={index.value >= questions.length - 1} onClick={() => go(index.value + 1)}>
                                     {t("Next")}
-                                </VBtn>
+                                </PgButton>
                             </span>
-                            <VBtn color="primary" loading={props.submitting} disabled={props.submitting} onClick={() => (confirmOpen.value = true)}>
+                            <PgButton color="primary" loading={props.submitting} disabled={props.submitting} onClick={() => (confirmOpen.value = true)}>
                                 {t("Submit exam")}
-                            </VBtn>
+                            </PgButton>
                         </div>
 
                         {props.submitError && (
@@ -378,9 +387,9 @@ export const ExamRunner = dc((props: Props) => {
                                     <span>
                                         {props.submitError} {t("Your answers are still here and nothing has been lost.")}
                                     </span>
-                                    <VBtn size="small" variant="outlined" disabled={props.submitting} onClick={doSubmit}>
+                                    <PgButton size="small" variant="outlined" disabled={props.submitting} onClick={doSubmit}>
                                         {t("Try again")}
-                                    </VBtn>
+                                    </PgButton>
                                 </div>
                             </Callout>
                         )}
@@ -389,7 +398,7 @@ export const ExamRunner = dc((props: Props) => {
                     <aside class="ac-aside ac-exam-aside">
                         <SurfaceCard class="ac-card" color={tone === "warning" ? "warning" : tone === "danger" ? "error" : ""}>
                             <div class={["ac-exam-timer", `ac-exam-timer--${tone}`]}>
-                                <VIcon class="ac-exam-timer__icon" icon={CLOCK_ICON[tone]} size={26} />
+                                <PgIcon class="ac-exam-timer__icon" icon={CLOCK_ICON[tone]} size={26} />
                                 <div class="ac-exam-timer__body">
                                     <span class="ac-exam-timer__label">{t("Time remaining")}</span>
                                     <span role="timer" aria-live="off" aria-label={t("Time remaining")} class="ac-exam-clock ac-num" dir="ltr">
@@ -411,7 +420,7 @@ export const ExamRunner = dc((props: Props) => {
                                     {renderNavigator()}
                                     <ul class="ac-exam-legend">
                                         <li>
-                                            <span class="ac-exam-swatch ac-exam-swatch--done"><VIcon icon="mdi-check" size={11} /></span>
+                                            <span class="ac-exam-swatch ac-exam-swatch--done"><PgIcon icon="mdi-check" size={11} /></span>
                                             {t("Answered")}
                                         </li>
                                         <li>
@@ -419,7 +428,7 @@ export const ExamRunner = dc((props: Props) => {
                                             {t("Not answered")}
                                         </li>
                                         <li>
-                                            <span class="ac-exam-swatch ac-exam-swatch--flag"><VIcon icon="mdi-flag" size={11} /></span>
+                                            <span class="ac-exam-swatch ac-exam-swatch--flag"><PgIcon icon="mdi-flag" size={11} /></span>
                                             {t("Flagged for review")}
                                         </li>
                                         <li>
@@ -433,7 +442,7 @@ export const ExamRunner = dc((props: Props) => {
                     </aside>
                 </div>
 
-                <VDialog modelValue={confirmOpen.value} onUpdate:modelValue={(v: boolean) => (confirmOpen.value = v)} maxWidth="480">
+                <PgDialog modelValue={confirmOpen.value} onUpdate:modelValue={(v: boolean) => (confirmOpen.value = v)} maxWidth="480">
                     <SurfaceCard title={t("Submit your exam?")}>
                         <div class="ac-stack">
                             <ul class="ac-steps">
@@ -448,16 +457,16 @@ export const ExamRunner = dc((props: Props) => {
                             </ul>
                             <p class="ac-text">{t("Once you submit, the exam is graded and you cannot change your answers.")}</p>
                             <div class="ac-row ac-exam-confirm__actions">
-                                <VBtn variant="outlined" onClick={() => (confirmOpen.value = false)}>
+                                <PgButton variant="outlined" onClick={() => (confirmOpen.value = false)}>
                                     {t("Keep working")}
-                                </VBtn>
-                                <VBtn color="primary" onClick={doSubmit}>
+                                </PgButton>
+                                <PgButton color="primary" onClick={doSubmit}>
                                     {t("Submit answers")}
-                                </VBtn>
+                                </PgButton>
                             </div>
                         </div>
                     </SurfaceCard>
-                </VDialog>
+                </PgDialog>
             </div>
         );
     };
