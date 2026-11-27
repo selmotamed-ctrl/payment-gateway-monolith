@@ -1,6 +1,6 @@
 import { computed, ref, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import {VAlert, PgButton} from "@pg/ui";
+import {PgAlert, PgButton} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
@@ -144,17 +144,17 @@ export const ReportingRulesTab = defineComponent({
 
         return (): VNodeChild => (
             <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("Reporting rules decide when a transaction or pattern must be reported to the regulator. A provisional rule becomes confirmed only after a different checker approves its promotion.")}
-                </VAlert>
+                </PgAlert>
                 {submittedApproval.value !== null && (
-                    <VAlert type="success" variant="tonal" closable onClick:close={() => (submittedApproval.value = null)}>
+                    <PgAlert tone="success" closable onClear={() => (submittedApproval.value = null)}>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
                             <span>{t("Promotion submitted for four-eyes approval.")}</span>
                             {submittedApproval.value && <MonoRef value={submittedApproval.value} />}
                             <PgButton size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</PgButton>
                         </div>
-                    </VAlert>
+                    </PgAlert>
                 )}
                 {loadError.value ? (
                     <StateView error={loadError.value} onRetry={() => void load()} />
@@ -240,9 +240,9 @@ export const ReportingRulesTab = defineComponent({
                     submitLabel={t("Submit for approval")}
                     onSubmit={() => void promote()}
                 >
-                    <VAlert type="info" variant="tonal">
+                    <PgAlert tone="info">
                         {t("This does not change the rule yet. It creates a request that a different checker must approve; only then does the rule become confirmed and start driving regulatory reports.")}
-                    </VAlert>
+                    </PgAlert>
                     <FormChecklist
                         checks={[...PROMOTION_CHECKS]}
                         modelValue={promotionChecklist.value}

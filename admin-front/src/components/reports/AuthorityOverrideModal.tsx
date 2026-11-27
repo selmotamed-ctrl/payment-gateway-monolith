@@ -1,7 +1,7 @@
 import { computed, ref, watch, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgCheckbox, PgAutocomplete, PgTextarea} from "@pg/ui";
+import {PgAlert, PgCheckbox, PgAutocomplete, PgTextarea} from "@pg/ui";
 import {FormField, FormModal} from "@pg/ui";
 
 export const OVERRIDE_JUSTIFICATION_MIN = 15;
@@ -105,9 +105,9 @@ export const AuthorityOverrideModal = defineComponent({
           onUpdate:modelValue={(value: boolean | null) => (amlBypass.value = Boolean(value))}
         />
         {amlBypass.value && (
-          <VAlert type="info" variant="tonal">
+          <PgAlert tone="info">
             {t("AML bypass requested; a different MLRO or Security Admin must approve it")}
-          </VAlert>
+          </PgAlert>
         )}
         <FormField
           label={t("Justification")}

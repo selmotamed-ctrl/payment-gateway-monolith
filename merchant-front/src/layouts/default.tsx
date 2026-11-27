@@ -1,5 +1,5 @@
 import { dc } from "@/utils/dc";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { RouterLink, RouterView } from "vue-router/experimental/vapor";
 import { SandboxBanner } from "@/features/sandbox/SandboxBanner";
@@ -59,10 +59,6 @@ const DefaultLayout = dc(() => {
             if (isCompact.value) {
                 drawerOpen.value = false;
             }
-            void nextTick(() => {
-                const main = document.getElementById("pg-main-content");
-                main?.focus({ preventScroll: true });
-            });
         },
     );
 
@@ -198,7 +194,11 @@ const DefaultLayout = dc(() => {
                 onClick={(event: MouseEvent) => {
                     event.preventDefault();
                     const main = document.getElementById("pg-main-content");
-                    main?.focus();
+                    const heading = main?.querySelector<HTMLElement>("h1");
+                    if (heading) {
+                        heading.tabIndex = -1;
+                        heading.focus({ preventScroll: true });
+                    }
                     main?.scrollIntoView({ block: "start" });
                 }}
             >
@@ -362,13 +362,27 @@ const DefaultLayout = dc(() => {
                     </div>
                     <div class="pg-drawer__brand-text">
                         <span class="pg-drawer__title">{t("Payment Gateway")}</span>
-                        <span class="pg-drawer__subtitle">{t("Merchant Portal")}</span>
+                        <span class="pg-drawer__meta">
+                            <span class="pg-drawer__subtitle">{t("Merchant Portal")}</span>
+                            {sandboxMode.value ? (
+                                <StatusBadge
+                                    status="SANDBOX"
+                                    label="SANDBOX"
+                                    toneOverride="warning"
+                                    showDot={false}
+                                    size="sm"
+                                />
+                            ) : (
+                                <StatusBadge
+                                    status="LIVE"
+                                    label="LIVE"
+                                    toneOverride="success"
+                                    showDot={false}
+                                    size="sm"
+                                />
+                            )}
+                        </span>
                     </div>
-                    {sandboxMode.value ? (
-                        <StatusBadge status="SANDBOX" label="SANDBOX" toneOverride="warning" showDot={false} />
-                    ) : (
-                        <StatusBadge status="LIVE" label="LIVE" toneOverride="success" showDot={false} />
-                    )}
                 </div>
                 <div class="pg-drawer__search">
                     <button type="button" class="pg-search-pill" onClick={() => (guideSearchOpen.value = true)}>
@@ -462,7 +476,7 @@ const DefaultLayout = dc(() => {
             )}
             <PgMain
                 class="pg-main"
-                {...{ id: "pg-main-content", tabindex: "-1", "aria-busy": routeLoading.value ? "true" : "false" }}
+                {...{ id: "pg-main-content", "aria-busy": routeLoading.value ? "true" : "false" }}
             >
                 {route.meta.sandboxMirror ? (
                     <div style={{ padding: "16px 24px 0" }}>

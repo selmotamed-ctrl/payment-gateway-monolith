@@ -207,7 +207,6 @@ export const TeamTable = dc(
 
         return () => {
             const total = props.rows.length;
-            const shown = visible.value.length;
             const headers = [t("Person"), t("Role"), t("Active track"), t("Lessons"), t("Labs"), t("Badges"), t("Last activity"), t("Status")];
             return (
                 <div class="ac-team">
@@ -254,14 +253,14 @@ export const TeamTable = dc(
                             </div>
                             <div class="pg-table-toolbar__right ac-team-actions">
                                 <span class="pg-record-count pg-tabular" aria-hidden="true">
-                                    {shown}/{total}
+                                    {visible.value.length}/{total}
                                 </span>
-                                <PgButton variant="outlined" prependIcon="mdi-download" disabled={shown === 0} onClick={exportCsv}>
-                                    {`${t("Export CSV")} (${shown})`}
+                                <PgButton variant="outlined" prependIcon="mdi-download" disabled={visible.value.length === 0} onClick={exportCsv}>
+                                    {`${t("Export CSV")} (${visible.value.length})`}
                                 </PgButton>
                             </div>
                         </div>
-                        {shown === 0 ? (
+                        {visible.value.length === 0 ? (
                             <EmptyState
                                 icon="mdi-account-search-outline"
                                 title={t("No one matches these filters.")}
@@ -286,7 +285,7 @@ export const TeamTable = dc(
                             </div>
                         )}
                         <div class="pg-table-footer" role="status" aria-live="polite">
-                            <span class="ac-num">{`${shown} / ${total} ${t("people shown")}`}</span>
+                            <span class="ac-num">{`${visible.value.length} / ${total} ${t("people shown")}`}</span>
                         </div>
                     </div>
                 </div>

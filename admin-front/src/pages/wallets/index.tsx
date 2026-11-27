@@ -2,11 +2,10 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import {PgButton} from "@pg/ui";
+import {PgButton, PgStack} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import {ApiTable} from "@pg/ui";
 import {TableRowActions} from "@pg/ui";
@@ -276,10 +275,10 @@ const WalletsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Wallets")} subtitle={t("Merchant wallets across the platform: live balances, shards, statement and containment.")} badge={t("Ledger")} badgeTone="info">(
+            <PgStack gap="lg">
+                <PageHeader title={t("Wallets")} subtitle={t("Merchant wallets across the platform: live balances, shards, statement and containment.")} badge={t("Ledger")} badgeTone="info">
                         <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
-                    )</PageHeader>
+                </PageHeader>
 
                 {notice.value && <ApprovalSubmittedNotice approvalRequestId={notice.value.approvalRequestId} onDismiss={() => (notice.value = null)} />}
 
@@ -333,7 +332,7 @@ const WalletsPage = dc(() => {
                         />
                     )}
                 />
-            </ThemedView>
+            </PgStack>
 
             <GlAccountDrawer accountId={glAccountId.value} onClose={() => (glAccountId.value = null)} onChanged={refreshAll} />
 

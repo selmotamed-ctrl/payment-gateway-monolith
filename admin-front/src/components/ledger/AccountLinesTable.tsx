@@ -189,6 +189,7 @@ export const AccountLinesTable = defineComponent({
                     setNumberOfItemsPerPage={(value) => (pageSize.value = value)}
                     searchValue={search.value}
                     setSearchValue={(value) => (search.value = value)}
+                    rowKey={(row) => row.lineId}
                     headers={headers()}
                     apiDataExtractor={(data) => {
                         const payload = data as { lines?: AccountLine[]; totals?: AccountLinesTotals };

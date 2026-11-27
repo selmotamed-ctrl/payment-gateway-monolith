@@ -1,9 +1,8 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {PgButton, PgTextarea} from "@pg/ui";
+import {PgButton, PgTextarea, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
 import {ApiTable} from "@pg/ui";
 import { DataTable } from "@/tables/DataTable";
 import {TableRowActions} from "@pg/ui";
@@ -243,7 +242,7 @@ const MerchantReportsPage = dc(() => {
 
   return () => (
     <ScreenContainer>
-      <ThemedView style={{ gap: "18px" }}>
+    <PgStack gap="lg">
         <PageHeader
           title={t("Merchant Report Studio oversight")}
           subtitle={t("Read merchant-authored reports and their executions; suspend the Studio when needed")}
@@ -356,7 +355,7 @@ const MerchantReportsPage = dc(() => {
             incompleteMessage={t("Complete all suspension checklist items before continuing")}
           />
         </FormModal>
-      </ThemedView>
+      </PgStack>
     </ScreenContainer>
   );
 });

@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRoute, useRouter } from "vue-router";
-import {VAlert, PgButton, PgFileUpload, PgSpinner, PgTextarea, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgFileUpload, PgSpinner, PgTextarea, PgTextField, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -672,17 +672,17 @@ const DisputesPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Disputes")} subtitle={t("Track chargeback disputes, evidence deadlines, and adjustment linkage. No money moves until a finance checker approves the adjustment.")} badge={t("Chargebacks")} badgeTone="info">(
+            <PgStack gap="lg">
+                <PageHeader title={t("Disputes")} subtitle={t("Track chargeback disputes, evidence deadlines, and adjustment linkage. No money moves until a finance checker approves the adjustment.")} badge={t("Chargebacks")} badgeTone="info">
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("A dispute creates a chargeback adjustment draft. No money moves until a finance checker approves it. Submit evidence before the due date.")}
-                </VAlert>
+                </PgAlert>
 
                 {summary.value && (
                     <SummaryExportCard
@@ -772,7 +772,7 @@ const DisputesPage = dc(() => {
                         />
                     )}
                 />
-            </ThemedView>
+            </PgStack>
 
             <SlideOverDrawer
                 modelValue={detailsOpen.value}
@@ -814,13 +814,13 @@ const DisputesPage = dc(() => {
                         </ThemedView>
 
                         {selected.value.evidenceBlockedReason && (
-                            <VAlert type="warning" variant="tonal">
+                            <PgAlert tone="warning">
                                 {selected.value.evidenceBlockedReason === "EVIDENCE_ALREADY_SUBMITTED"
                                     ? t("Evidence has already been submitted for this dispute.")
                                     : selected.value.evidenceBlockedReason === "EVIDENCE_WINDOW_CLOSED"
                                       ? t("The evidence window has closed.")
                                       : t("This dispute is not open for evidence submission.")}
-                            </VAlert>
+                            </PgAlert>
                         )}
 
                         <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "20px" }}>
@@ -919,7 +919,7 @@ const DisputesPage = dc(() => {
                 submitLabel={t("Export")}
                 onSubmit={() => void exportExcel()}
             >
-                <VAlert type="warning" variant="tonal">{t("The export contains dispute references, amounts and evidence deadlines. Handle it as confidential operational evidence.")}</VAlert>
+                <PgAlert tone="warning">{t("The export contains dispute references, amounts and evidence deadlines. Handle it as confidential operational evidence.")}</PgAlert>
                 <FormChecklist
                     checks={[...EXPORT_CHECKS]}
                     modelValue={exportChecklist.value}

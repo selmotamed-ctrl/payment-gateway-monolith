@@ -31,6 +31,24 @@ test.describe("admin shell", () => {
     expect(content!.x).toBeGreaterThanOrEqual(drawer!.width - 1);
   });
 
+  test("the drawer brand title stays on a single line", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/dashboard");
+    const title = await page.locator(".pg-drawer__title").evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        height: element.getBoundingClientRect().height,
+        lineHeight: Number.parseFloat(style.lineHeight),
+        scrollWidth: element.scrollWidth,
+        clientWidth: element.clientWidth,
+        text: element.textContent?.trim(),
+      };
+    });
+    expect(title.text).toBe("Payment Gateway");
+    expect(title.height).toBeLessThanOrEqual(title.lineHeight * 1.5);
+    expect(title.scrollWidth).toBeLessThanOrEqual(title.clientWidth + 1);
+  });
+
   test("the hamburger collapses and restores the drawer", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/dashboard");

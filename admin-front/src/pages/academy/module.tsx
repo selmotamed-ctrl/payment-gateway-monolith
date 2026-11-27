@@ -16,6 +16,7 @@ import { roleTrackFor } from "@/content/academy";
 
 export const AdminAcademyModulePage = defineComponent({
     name: "AdminAcademyModulePage",
+    rerender: true,
     setup() {
         const { t } = useLocale();
         const route = useRoute();
@@ -143,11 +144,11 @@ export const AdminAcademyModulePage = defineComponent({
                                           { label: t("Tracks"), to: router.resolve({ name: "AdminAcademyTracks" }).fullPath },
                                           { label: m?.title ?? t("Module") },
                                       ]
-                            }>(
+                            }>
                                 <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyModuleSummary()}>
                                     {t("Copy module summary")}
                                 </PgButton>
-                            )</PageHeader>
+                        </PageHeader>
                     )}
                 >
                     {body()}

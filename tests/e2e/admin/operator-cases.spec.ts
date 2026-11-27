@@ -209,10 +209,11 @@ test("opens the case details page, acknowledges it, and shows the narrative and 
   await expect(page.getByText("Acknowledged").first()).toBeVisible();
   await expect(page.getByText("Technical identifiers")).toBeVisible();
   await page.getByText("Technical identifiers").click();
-  await expect(page.getByText("Operator case ID").first()).toBeVisible();
-  await expect(page.getByText("oc_1").first()).toBeVisible();
-  await expect(page.getByText("Payment attempt ID").first()).toBeVisible();
-  await expect(page.getByText("att_1").first()).toBeVisible();
+  const openPanel = page.locator(".pg-expansion-panel--open > .pg-expansion__body").first();
+  await expect(openPanel.getByText("Operator case ID").first()).toBeVisible();
+  await expect(openPanel.getByText("oc_1").first()).toBeVisible();
+  await expect(openPanel.getByText("Payment attempt ID").first()).toBeVisible();
+  await expect(openPanel.getByText("att_1").first()).toBeVisible();
 });
 
 const backupCase = {

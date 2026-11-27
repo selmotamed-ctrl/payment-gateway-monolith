@@ -8,7 +8,9 @@ import { computed, ref } from "vue";
 export type ThemeMode = "system" | "light" | "dark";
 export type ResolvedTheme = "light" | "dark";
 
-export const THEME_STORAGE_KEY = "theme";
+export const THEME_STORAGE_KEY = "pg-theme";
+/** Legacy key kept readable so an existing operator choice survives the upgrade. */
+const LEGACY_THEME_STORAGE_KEY = "theme";
 export const DARK_MEDIA_QUERY = "(prefers-color-scheme: dark)";
 
 export const isThemeMode = (value: unknown): value is ThemeMode =>
@@ -16,8 +18,15 @@ export const isThemeMode = (value: unknown): value is ThemeMode =>
 
 export const readThemeMode = (): ThemeMode => {
     if (typeof window === "undefined") return "system";
-    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-    return isThemeMode(stored) ? stored : "system";
+    try {
+        const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+        if (isThemeMode(stored)) return stored;
+        const legacy = window.localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
+        if (isThemeMode(legacy)) return legacy;
+    } catch {
+        /* storage unavailable */
+    }
+    return "system";
 };
 
 export const systemPrefersDark = (): boolean =>
@@ -50,9 +59,16 @@ const apply = (mode: ThemeMode) => {
 };
 
 export const setThemeMode = (mode: ThemeMode) => {
-    themeMode.value = mode;
-    if (typeof window !== "undefined") window.localStorage.setItem(THEME_STORAGE_KEY, mode);
-    apply(mode);
+    const next = isThemeMode(mode) ? mode : "system";
+    themeMode.value = next;
+    if (typeof window !== "undefined") {
+        try {
+            window.localStorage.setItem(THEME_STORAGE_KEY, next);
+        } catch {
+            /* storage unavailable */
+        }
+    }
+    apply(next);
 };
 
 export const toggleTheme = () => {
@@ -79,53 +95,50 @@ export const initTheme = () => {
     if (typeof media.addEventListener === "function") media.addEventListener("change", onSystemChange);
     else media.addListener(onSystemChange);
     window.addEventListener("storage", (event) => {
-        if (event.key !== THEME_STORAGE_KEY) return;
+        if (event.key !== THEME_STORAGE_KEY && event.key !== LEGACY_THEME_STORAGE_KEY) return;
         const next = isThemeMode(event.newValue) ? event.newValue : "system";
         themeMode.value = next;
         apply(next);
     });
 };
 
-const LIGHT_COLORS = {
-    background: "#f7f8fa",
-    surface: "#ffffff",
-    primary: "#0f172a",
-    secondary: "#475569",
-    accent: "#4f46e5",
-    success: "#16a34a",
-    warning: "#d97706",
-    error: "#dc2626",
-    info: "#2563eb",
-    onSurface: "#0f172a",
-    onSurfaceVariant: "#64748b",
-    onBackground: "#0f172a",
-    outlineVariant: "#d1d5db",
+/**
+ * Reads a live `--pg-*` custom property so the JS-side bridge can never drift
+ * from the single CSS token source.
+ */
+export const readToken = (name: string, fallback: string): string => {
+    if (typeof window === "undefined" || typeof document === "undefined") return fallback;
+    try {
+        const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        return value || fallback;
+    } catch {
+        return fallback;
+    }
 };
 
-const DARK_COLORS = {
-    background: "#09090b",
-    surface: "#111114",
-    primary: "#f4f4f5",
-    secondary: "#a1a1aa",
-    accent: "#6366f1",
-    success: "#4ade80",
-    warning: "#fbbf24",
-    error: "#f87171",
-    info: "#60a5fa",
-    onSurface: "#f4f4f5",
-    onSurfaceVariant: "#71717a",
-    onBackground: "#f4f4f5",
-    outlineVariant: "#32323a",
-};
+const palette = computed(() => {
+    const dark = resolvedTheme.value === "dark";
+    return {
+        background: readToken("--pg-bg-canvas", dark ? "#09090b" : "#f7f8fa"),
+        surface: readToken("--pg-bg-surface", dark ? "#111114" : "#ffffff"),
+        primary: readToken("--pg-accent-primary", dark ? "#f4f4f5" : "#0f172a"),
+        secondary: readToken("--pg-ink-secondary", dark ? "#a1a1aa" : "#475569"),
+        accent: readToken("--pg-accent-brand", dark ? "#6366f1" : "#4f46e5"),
+        success: readToken("--pg-status-success-dot", dark ? "#22c55e" : "#16a34a"),
+        warning: readToken("--pg-status-warning-dot", dark ? "#f59e0b" : "#d97706"),
+        error: readToken("--pg-status-danger-dot", dark ? "#ef4444" : "#dc2626"),
+        info: readToken("--pg-status-info-dot", dark ? "#3b82f6" : "#2563eb"),
+        onSurface: readToken("--pg-ink-primary", dark ? "#f4f4f5" : "#0f172a"),
+        onSurfaceVariant: readToken("--pg-ink-muted", dark ? "#71717a" : "#64748b"),
+        onBackground: readToken("--pg-ink-primary", dark ? "#f4f4f5" : "#0f172a"),
+        outlineVariant: readToken("--pg-border-default", dark ? "#32323a" : "#d1d5db"),
+    };
+});
 
-const current = computed(() => ({
-    dark: resolvedTheme.value === "dark",
-    colors: resolvedTheme.value === "dark" ? DARK_COLORS : LIGHT_COLORS,
-}));
-
+/** vael-ui compatibility theme derived from the CSS tokens. */
 export const useTheme = () => ({
-    current,
-    global: { current },
+    current: computed(() => ({ dark: resolvedTheme.value === "dark", colors: palette.value })),
+    global: { current: computed(() => ({ dark: resolvedTheme.value === "dark", colors: palette.value })) },
     change: () => undefined,
 });
 

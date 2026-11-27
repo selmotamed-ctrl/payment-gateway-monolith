@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import {VAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField, PgTextarea, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -691,19 +691,19 @@ const RailsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Rails")} subtitle={t("Customer payment methods, collection modes, and catalog fields.")}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Rails")} subtitle={t("Customer payment methods, collection modes, and catalog fields.")}>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</PgButton>
                             <PgButton color="primary" variant="flat" prependIcon={"mdi-plus"} onClick={() => openCreateRail()}>
                                 {t("Add Rail")}
                             </PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("Rails define the customer-facing payment methods. Route health and circuit breaker state come from the live catalog.")}
-                </VAlert>
+                </PgAlert>
 
                 {summary.value && (
                     <SummaryExportCard
@@ -774,7 +774,7 @@ const RailsPage = dc(() => {
                         />
                     )}
                 />
-            </ThemedView>
+            </PgStack>
 
             {/* Customer catalog: list + add/edit/delete fields */}
             <FormModal
@@ -840,12 +840,13 @@ const RailsPage = dc(() => {
                             <MetaPill size="x-small" variant="tonal">{field.type}</MetaPill>
                             {field.required && <StatusBadge status="REQUIRED" label={t("Required")} toneOverride="warning" showDot={false} />}
                             {field.sensitive && <StatusBadge status="SENSITIVE" label={t("Sensitive")} toneOverride="danger" showDot={false} />}
-                            <PgButton size="small" variant="text" icon="mdi-pencil" onClick={() => editField(index)} />
+                            <PgButton size="small" variant="text" icon="mdi-pencil" ariaLabel={t("Edit field")} onClick={() => editField(index)} />
                             <PgButton
                                 size="small"
                                 variant="text"
                                 icon="mdi-delete-outline"
                                 color="error"
+                                ariaLabel={t("Remove field")}
                                 onClick={() => void removeField(index)}
                             />
                         </ThemedView>
@@ -929,7 +930,7 @@ const RailsPage = dc(() => {
                 submitLabel={t("Export")}
                 onSubmit={() => void exportExcel()}
             >
-                <VAlert type="warning" variant="tonal">{t("The export contains rail configuration, limits and route-health details. Handle it as confidential operational evidence.")}</VAlert>
+                <PgAlert tone="warning">{t("The export contains rail configuration, limits and route-health details. Handle it as confidential operational evidence.")}</PgAlert>
                 <FormChecklist
                     checks={[...EXPORT_CHECKS]}
                     modelValue={exportChecklist.value}

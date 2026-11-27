@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgAutocomplete, PgTextarea} from "@pg/ui";
+import {PgAlert, PgAutocomplete, PgTextarea} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -84,11 +84,11 @@ const KybActionDialog = dc(
 <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
                             {props.document?.docType} · {props.document?.merchantName}
                         </ThemedText>
-                        <VAlert type={isReplacement.value ? "warning" : "info"} variant="tonal">
+                        <PgAlert tone={isReplacement.value ? "warning" : "info"}>
                             {isReplacement.value
                                 ? t("The current document will be rejected, the join request will move to INFO_REQUESTED, and its SLA will pause until the merchant responds.")
                                 : t("A periodic re-verification request will be opened for the merchant. The current document remains available as historical evidence.")}
-                        </VAlert>
+                        </PgAlert>
                         <FormField label={t("Reason")} required>
                             <PgAutocomplete v-model={reasonCode.value} items={REVIEW_REASON_CODES} />
                         </FormField>

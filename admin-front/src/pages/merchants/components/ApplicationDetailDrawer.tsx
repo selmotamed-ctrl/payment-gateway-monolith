@@ -148,6 +148,7 @@ export const ApplicationDetailDrawer = defineComponent({
         initialTab: { type: String as PropType<ApplicationTab>, default: "config" },
     },
     emits: ["close", "changed"],
+    rerender: true,
     setup(props, { emit }) {
         const { t } = useLocale();
         const router = useRouter();

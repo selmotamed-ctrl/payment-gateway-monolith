@@ -2,11 +2,10 @@ import { buildCheckoutUrl } from "@/utils/security/checkoutUrl";
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {PgButton, PgTextField} from "@pg/ui";
+import {PgButton, PgTextField, PgStack} from "@pg/ui";
 import QRCode from "qrcode";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
 import {StateView} from "@pg/ui";
 import { DataTable } from "@/tables/DataTable";
 import {TableRowActions} from "@pg/ui";
@@ -266,8 +265,8 @@ const LinksPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Payment Links")} subtitle={t("Create, track, and expire customer payment links.")}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Payment Links")} subtitle={t("Create, track, and expire customer payment links.")}>
                         <PgButton
                             variant="tonal"
                             onClick={() => {
@@ -286,7 +285,7 @@ const LinksPage = dc(() => {
                         >
                             {t("Create")}
                         </PgButton>
-                    )</PageHeader>
+                </PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
@@ -303,7 +302,7 @@ const LinksPage = dc(() => {
                         setSearchValue={(value) => (search.value = value)}
                     />
                 )}
-            </ThemedView>
+            </PgStack>
 
             <FormModal
                 modelValue={createOpen.value}

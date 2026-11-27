@@ -8,7 +8,7 @@ import { urlsMap } from "@/constants/urlsMap";
 import {StatusBadge} from "@pg/ui";
 import {FormChecklist} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
-import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import CollapsibleSection, { type SectionCommand } from "@/components/CollapsibleSection";
 import {MonoRef} from "@pg/ui";
 import { notifyOutcome, reportCommerceError, runGoverned } from "../governedRequest";
 import type { MerchantCredentialSet, MerchantToken, MerchantUser } from "../types";
@@ -34,6 +34,9 @@ export const MerchantAccessCard = defineComponent({
         tokens: { type: Array as PropType<MerchantToken[]>, default: () => [] },
         credentialSets: { type: Array as PropType<MerchantCredentialSet[]>, default: () => [] },
         canWrite: { type: Boolean, default: false },
+        merchantId: { type: String, default: "" },
+        command: { type: Object as PropType<SectionCommand | null>, default: null },
+        alwaysOpen: { type: Boolean, default: false },
     },
     emits: ["changed"],
     setup(props, { emit }) {
@@ -71,9 +74,16 @@ export const MerchantAccessCard = defineComponent({
         const heading = (label: string) => <h3 style={{ margin: 0, fontSize: "13px", fontWeight: 600 }}>{label}</h3>;
 
         return (): VNodeChild => (
-            <SurfaceCard>
-                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                    <div style={{ fontSize: "16px", fontWeight: 600 }}>{t("Merchant users and access")}</div>
+            <CollapsibleSection
+                command={props.command}
+                alwaysOpen={props.alwaysOpen}
+                title={t("Merchant users and access")}
+                subtitle={t("Merchant staff, API tokens and credential sets. Access changes are audited.")}
+                count={props.users.length + props.tokens.length + props.credentialSets.length}
+                defaultOpen={false}
+                storageKey={`merchant:${props.merchantId}:users-access`}
+            >
+                <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
 
                     <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                         {heading(t("Users"))}
@@ -175,7 +185,6 @@ export const MerchantAccessCard = defineComponent({
                             ]}
                         />
                     </section>
-                </SurfaceCardText>
 
                 <ReasonModal
                     modelValue={revoking.value !== null}
@@ -201,7 +210,8 @@ export const MerchantAccessCard = defineComponent({
                         incompleteMessage={t("Complete all access action checklist items before submitting")}
                     />
                 </ReasonModal>
-            </SurfaceCard>
+                </div>
+            </CollapsibleSection>
         );
     },
 });

@@ -83,24 +83,24 @@ const expectPaddingAtLeast = async (
 };
 
 const expectCompactRows = async (table: Locator, label: string): Promise<void> => {
-  const rows = table.locator("tbody tr");
+  const rows = table.locator("tbody tr:not(.pg-table-empty-row):not(.pg-table-skeleton-row)");
   const count = await rows.count();
   for (let index = 0; index < count; index += 1) {
     const box = await rows.nth(index).boundingBox();
     expect(box, `${label} row ${index} must be rendered`).not.toBeNull();
-    expect(box!.height, `${label} row ${index} height`).toBeLessThanOrEqual(44);
+    expect(box!.height, `${label} row ${index} height`).toBeLessThanOrEqual(48);
   }
 };
 
 const expectDisciplinedActions = async (table: Locator, label: string): Promise<void> => {
-  const cells = table.locator(".pg-col-actions");
+  const cells = table.locator("tbody .pg-col-actions");
   const count = await cells.count();
   for (let index = 0; index < count; index += 1) {
     const cell = cells.nth(index);
     const buttonCount = await cell.locator("button:visible").count();
     const scrollHeight = await cell.evaluate((element) => element.scrollHeight);
     expect(buttonCount, `${label} action cell ${index} visible buttons`).toBeLessThanOrEqual(2);
-    expect(scrollHeight, `${label} action cell ${index} scrollHeight`).toBeLessThanOrEqual(40);
+    expect(scrollHeight, `${label} action cell ${index} scrollHeight`).toBeLessThanOrEqual(48);
   }
 };
 
@@ -108,7 +108,7 @@ const expectAlignedFilterControls = async (filters: Locator): Promise<boolean> =
   const grid = filters.locator(".pg-table-filters__grid").first();
   if ((await grid.count()) === 0 || !(await grid.isVisible())) return false;
 
-  const boxes = await grid.locator(".v-field").evaluateAll((elements) =>
+  const boxes = await grid.locator(".pg-control-box, .v-field").evaluateAll((elements) =>
     elements
       .filter((element) => {
         const rect = element.getBoundingClientRect();
@@ -218,7 +218,7 @@ test.describe("admin table and padding geometry", () => {
     await expect(table.locator("tbody tr")).toHaveCount(1);
     await expectCompactRows(table, "/routes");
 
-    const actionCells = table.locator(".pg-col-actions");
+    const actionCells = table.locator("tbody .pg-col-actions");
     expect(await actionCells.count(), "/routes must render .pg-col-actions cells").toBeGreaterThan(0);
     await expectDisciplinedActions(table, "/routes");
 

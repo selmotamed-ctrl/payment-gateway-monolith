@@ -1,6 +1,6 @@
 import { GOOGLE_REDIRECT_PATHS, isAllowedIdentityRedirect, parseIdentityHosts } from "@/utils/security/identityRedirect";
 import { dc } from "@/utils/dc";
-import {VAlert, PgButton, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { computed, ref } from "vue";
 import { api } from "@/state/api";
@@ -92,9 +92,9 @@ const RegisterPage = dc(() => {
                 <SurfaceCard title={t("Create Account")} subtitle={t("Register")}>
                     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                         {error.value && (
-                            <VAlert type="error" variant="tonal" density="compact">
+                            <PgAlert tone="danger" density="compact">
                                 {error.value}
-                            </VAlert>
+                            </PgAlert>
                         )}
 
                         <FormField label={t("Full Name")} required>
@@ -146,11 +146,11 @@ const RegisterPage = dc(() => {
 
                         <PgButton
                             block
+                            variant="primary"
                             size="large"
                             loading={loading.value}
                             disabled={!fullName.value || !email.value || !password.value || !confirmPassword.value}
                             onClick={() => void submit()}
-                            style={{ height: "38px" }}
                         >
                             {t("Register")}
                         </PgButton>
@@ -162,15 +162,14 @@ const RegisterPage = dc(() => {
                                 prependIcon="mdi-google"
                                 loading={loading.value}
                                 onClick={() => void registerWithGoogle()}
-                                style={{ height: "38px" }}
-                            >
+                                >
                                 {t("Register With Google")}
                             </PgButton>
                         )}
 
-                        <VAlert type="info" variant="tonal" density="compact">
+                        <PgAlert tone="info" density="compact">
                             {t("We will send a six-digit verification code to your email address.")}
-                        </VAlert>
+                        </PgAlert>
 
                         <div
                             style={{

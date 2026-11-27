@@ -11,6 +11,7 @@ export interface RefPreview {
 
 export const ReferencePreviewPopover = defineComponent({
     name: "ReferencePreviewPopover",
+    rerender: true,
     props: {
         preview: { type: Object as PropType<RefPreview | null>, default: null },
         anchor: { type: Object as PropType<DOMRect | null>, default: null },

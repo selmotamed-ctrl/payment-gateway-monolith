@@ -2,7 +2,7 @@ import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgTextarea} from "@pg/ui";
 import {FormModal} from "@pg/ui";
 import {FormField} from "@pg/ui";
 import {DescriptionList} from "@pg/ui";
@@ -125,16 +125,16 @@ export const ShardRepairModal = defineComponent({
             const current = plan.value;
             if (!current) return null;
             if (!current.needsRepair) {
-                return <VAlert type="success" variant="tonal" density="compact">{t("This shard already matches its journal. Nothing to repair.")}</VAlert>;
+                return <PgAlert tone="success" density="compact">{t("This shard already matches its journal. Nothing to repair.")}</PgAlert>;
             }
             const recompute = current.kind === "RECOMPUTE";
             return (
                 <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                    <VAlert type={recompute ? "info" : "warning"} variant="tonal" density="compact">
+                    <PgAlert tone={recompute ? "info" : "warning"} density="compact">
                         {recompute
                             ? t("The shard's postings are complete and in order. Only its stored balance or checkpoint disagrees with the journal, so they will be recomputed from the journal. No ledger entry is created.")
                             : t("The shard's postings are NOT complete or in order (a line is missing or a number is used twice). Recomputing from the journal could remove money the shard holds, so a second person must approve it. The damaged history is then exempted from the proof and the shard continues from its highest number.")}
-                    </VAlert>
+                    </PgAlert>
                     <DescriptionList
                         items={[
                             { label: t("Status"), value: <StatusBadge status={current.status} label={current.status} toneOverride={current.status === "OK" ? "success" : "danger"} showDot={false} /> },
@@ -146,10 +146,10 @@ export const ShardRepairModal = defineComponent({
                         ]}
                     />
                     {submitted.value !== null ? (
-                        <VAlert type="success" variant="tonal" density="compact">
+                        <PgAlert tone="success" density="compact">
                             {t("Submitted for approval. The repair is applied only after an independent checker approves it.")}{" "}
                             <PgButton size="small" variant="text" onClick={() => void router.push({ name: "Approvals", query: submitted.value ? { open: submitted.value } : {} })}>{t("Open Approvals")}</PgButton>
-                        </VAlert>
+                        </PgAlert>
                     ) : (
                         <FormField label={t("Reason")} required hint={t("At least 10 characters; written to the audit log")}>
                             <PgTextarea modelValue={reason.value} onUpdate:modelValue={(value: string) => void (reason.value = value)} rows={3} autoGrow {...{ maxlength: 500 }} />

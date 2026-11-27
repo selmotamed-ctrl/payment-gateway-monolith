@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton} from "@pg/ui";
+import {PgAlert, PgButton} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import {StateView} from "@pg/ui";
@@ -250,9 +250,9 @@ const MerchantTransactionDialog = dc(
             return (
                 <ThemedView style={{ gap: "18px" }}>
                     {attempt.substatus && (
-                        <VAlert type="info" variant="tonal" density="compact">
+                        <PgAlert tone="info" density="compact">
                             {attempt.substatus}
-                        </VAlert>
+                        </PgAlert>
                     )}
                     <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "16px" }}>
                         <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
@@ -436,9 +436,9 @@ const MerchantTransactionDialog = dc(
                         {t("Attempts of the same payer on this payment link")}: {view.attempts.length} · {t("Successful")}: {data.attemptGroup.successCount}
                     </ThemedText>
                     {view.recoveredAfterFailure && (
-                        <VAlert type="info" variant="tonal" density="compact">
+                        <PgAlert tone="info" density="compact">
                             {t("The customer failed on an earlier attempt and then paid successfully on another rail or retry.")}
-                        </VAlert>
+                        </PgAlert>
                     )}
                     {view.attempts.map((entry, index) => {
                         const current = entry.id === data.attempt.id;
@@ -506,9 +506,9 @@ const MerchantTransactionDialog = dc(
                     </ThemedView>
 
                     {data.redactedFields.length > 0 && (
-                        <VAlert type="info" variant="tonal">
+                        <PgAlert tone="info">
                             {t("Some transaction fields are restricted for your role.")}
-                        </VAlert>
+                        </PgAlert>
                     )}
 
                     <SegmentedTabs modelValue={tab.value} onUpdate:modelValue={(value: string) => (tab.value = value as TabKey)} tabs={tabs.value} ariaLabel={t("Transaction sections")} />

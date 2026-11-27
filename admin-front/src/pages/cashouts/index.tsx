@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import {VAlert, PgButton, PgSpinner, PgAutocomplete, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgSpinner, PgAutocomplete, PgTextarea, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -528,17 +528,17 @@ const CashoutsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Cash-Outs")} subtitle={t("Review and process merchant cash-out requests with wallet, destination, and AML checks.")} badge={t("Payouts")} badgeTone="info">(
+            <PgStack gap="lg">
+                <PageHeader title={t("Cash-Outs")} subtitle={t("Review and process merchant cash-out requests with wallet, destination, and AML checks.")} badge={t("Payouts")} badgeTone="info">
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("A cash-out moves money only when a finance checker approves it. Pending requests show the current wallet balance and the masked destination.")}
-                </VAlert>
+                </PgAlert>
 
                 {summary.value && (
                     <SummaryExportCard
@@ -624,7 +624,7 @@ const CashoutsPage = dc(() => {
                         />
                     )}
                 />
-            </ThemedView>
+            </PgStack>
 
             <SlideOverDrawer
                 modelValue={detailsOpen.value}
@@ -663,9 +663,9 @@ const CashoutsPage = dc(() => {
                         </ThemedView>
 
                         {!selected.value.canProcess && (
-                            <VAlert type="info" variant="tonal">
+                            <PgAlert tone="info">
                                 {t("Only a PENDING cash-out can be processed. This request is read-only.")}
-                            </VAlert>
+                            </PgAlert>
                         )}
 
                         <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "20px" }}>
@@ -708,7 +708,7 @@ const CashoutsPage = dc(() => {
                 submitLabel={t("Export")}
                 onSubmit={() => void exportExcel()}
             >
-                <VAlert type="warning" variant="tonal">{t("The export contains merchant, wallet, amount and approval-state details. Handle it as confidential financial evidence.")}</VAlert>
+                <PgAlert tone="warning">{t("The export contains merchant, wallet, amount and approval-state details. Handle it as confidential financial evidence.")}</PgAlert>
                 <FormChecklist
                     checks={[...EXPORT_CHECKS]}
                     modelValue={exportChecklist.value}

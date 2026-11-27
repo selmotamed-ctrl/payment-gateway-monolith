@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField} from "@pg/ui";
 import {SurfaceCard, SurfaceCardText} from "@pg/ui";
 import {FormField} from "@pg/ui";
 import {SegmentedTabs} from "@pg/ui";
@@ -213,9 +213,6 @@ export const StepFlowBuilder = dc(
         };
 
         return () => {
-            const phase = activePhase.value;
-            const steps = flowForPhase(phase).steps;
-
             return (
                 <SurfaceCard
                     title={t("Flow Builder")}
@@ -234,7 +231,7 @@ export const StepFlowBuilder = dc(
                 >
                     <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
                         <SegmentedTabs
-                            modelValue={phase}
+                            modelValue={activePhase.value}
                             tabs={FLOW_PHASES.map((item) => ({
                                 value: item,
                                 label: item,
@@ -245,16 +242,16 @@ export const StepFlowBuilder = dc(
                         />
 
                         {validationErrors.value.length > 0 && (
-                            <VAlert type="error" variant="tonal" density="compact">
+                            <PgAlert tone="danger" density="compact">
                                 <ul style={{ margin: 0, paddingInlineStart: "18px" }}>
                                     {validationErrors.value.map((error, index) => (
                                         <li key={index}>{error}</li>
                                     ))}
                                 </ul>
-                            </VAlert>
+                            </PgAlert>
                         )}
 
-                        {steps.map((step, stepIndex) => {
+                        {flowForPhase(activePhase.value).steps.map((step, stepIndex) => {
                             const errors = validateFlowStep(step);
                             return (
                                 <WizardSection
@@ -282,17 +279,17 @@ export const StepFlowBuilder = dc(
                                                     label={errors.length === 0 ? t("Passed") : t("Failed")}
                                                     toneOverride={errors.length === 0 ? "success" : "danger"}
                                                 />
-                                                <PgButton size="x-small" variant="text" onClick={() => moveStep(phase, stepIndex, -1)}>
+                                                <PgButton size="x-small" variant="text" onClick={() => moveStep(activePhase.value, stepIndex, -1)}>
                                                     ↑
                                                 </PgButton>
-                                                <PgButton size="x-small" variant="text" onClick={() => moveStep(phase, stepIndex, 1)}>
+                                                <PgButton size="x-small" variant="text" onClick={() => moveStep(activePhase.value, stepIndex, 1)}>
                                                     ↓
                                                 </PgButton>
                                                 <PgButton
                                                     size="x-small"
                                                     variant="text"
                                                     color="error"
-                                                    onClick={() => removeStep(phase, stepIndex)}
+                                                    onClick={() => removeStep(activePhase.value, stepIndex)}
                                                 >
                                                     ×
                                                 </PgButton>
@@ -304,61 +301,61 @@ export const StepFlowBuilder = dc(
                                         <FormField label={t("Merchant Name")}>
                                             <PgTextField
                                                 modelValue={step.name}
-                                                onUpdate:modelValue={(v: string) => updateStep(phase, stepIndex, { name: v })}
+                                                onUpdate:modelValue={(v: string) => updateStep(activePhase.value, stepIndex, { name: v })}
                                             />
                                         </FormField>
                                         <FormField label={t("Step Type")}>
                                             <PgAutocomplete
                                                 items={["HTTP", "COMPUTE", "RENDER", "WAIT", "ASSERT", "BRANCH"]}
                                                 modelValue={step.type}
-                                                onUpdate:modelValue={(v: any) => updateStep(phase, stepIndex, { type: v })}
+                                                onUpdate:modelValue={(v: any) => updateStep(activePhase.value, stepIndex, { type: v })}
                                             />
                                         </FormField>
                                         <FormField label="method">
                                             <PgTextField
                                                 modelValue={step.method}
-                                                onUpdate:modelValue={(v: string) => updateStep(phase, stepIndex, { method: v })}
+                                                onUpdate:modelValue={(v: string) => updateStep(activePhase.value, stepIndex, { method: v })}
                                             />
                                         </FormField>
                                         <FormField label={t("Base URL")}>
                                             <PgTextField
                                                 modelValue={step.url}
-                                                onUpdate:modelValue={(v: string) => updateStep(phase, stepIndex, { url: v })}
+                                                onUpdate:modelValue={(v: string) => updateStep(activePhase.value, stepIndex, { url: v })}
                                             />
                                         </FormField>
                                         <FormField label={t("Side Effect")}>
                                             <PgAutocomplete
                                                 items={["READ_ONLY", "SAFE_WITH_COOLDOWN", "SENDS_NOTIFICATION", "MOVES_MONEY"]}
                                                 modelValue={step.sideEffect}
-                                                onUpdate:modelValue={(v: any) => updateStep(phase, stepIndex, { sideEffect: v })}
+                                                onUpdate:modelValue={(v: any) => updateStep(activePhase.value, stepIndex, { sideEffect: v })}
                                             />
                                         </FormField>
                                         <FormField label={t("Retry Policy")}>
                                             <PgAutocomplete
                                                 items={["NEVER", "SAFE", "IDEMPOTENT"]}
                                                 modelValue={step.retryPolicy}
-                                                onUpdate:modelValue={(v: any) => updateStep(phase, stepIndex, { retryPolicy: v })}
+                                                onUpdate:modelValue={(v: any) => updateStep(activePhase.value, stepIndex, { retryPolicy: v })}
                                             />
                                         </FormField>
                                         <FormField label={t("Idempotency")}>
                                             <PgTextField
                                                 modelValue={step.idempotencyConfig}
                                                 onUpdate:modelValue={(v: string) =>
-                                                    updateStep(phase, stepIndex, { idempotencyConfig: v })
+                                                    updateStep(activePhase.value, stepIndex, { idempotencyConfig: v })
                                                 }
                                             />
                                         </FormField>
                                         <FormField label="output">
                                             <PgTextField
                                                 modelValue={step.outputName}
-                                                onUpdate:modelValue={(v: string) => updateStep(phase, stepIndex, { outputName: v })}
+                                                onUpdate:modelValue={(v: string) => updateStep(activePhase.value, stepIndex, { outputName: v })}
                                             />
                                         </FormField>
                                         <FormField label={t("Point Of No Return")}>
                                             <PgSwitch
                                                 modelValue={step.pointOfNoReturn}
                                                 onUpdate:modelValue={(v: boolean | null) =>
-                                                    updateStep(phase, stepIndex, { pointOfNoReturn: !!v })
+                                                    updateStep(activePhase.value, stepIndex, { pointOfNoReturn: !!v })
                                                 }
                                                 density="compact"
                                                 hideDetails
@@ -371,7 +368,7 @@ export const StepFlowBuilder = dc(
                                             <PgTextField
                                                 modelValue={step.assertExpression}
                                                 onUpdate:modelValue={(v: string) =>
-                                                    updateStep(phase, stepIndex, { assertExpression: v })
+                                                    updateStep(activePhase.value, stepIndex, { assertExpression: v })
                                                 }
                                             />
                                         </FormField>
@@ -382,7 +379,7 @@ export const StepFlowBuilder = dc(
                                         divider
                                         v-slots={{
                                             actions: () => (
-                                                <PgButton size="x-small" variant="tonal" onClick={() => addTransform(phase, stepIndex)}>
+                                                <PgButton size="x-small" variant="tonal" onClick={() => addTransform(activePhase.value, stepIndex)}>
                                                     {t("Add")}
                                                 </PgButton>
                                             ),
@@ -403,7 +400,7 @@ export const StepFlowBuilder = dc(
                                                         items={TRANSFORM_OPS}
                                                         modelValue={transform.op}
                                                         onUpdate:modelValue={(v: string) =>
-                                                            updateTransform(phase, stepIndex, transformIndex, { op: v })
+                                                            updateTransform(activePhase.value, stepIndex, transformIndex, { op: v })
                                                         }
                                                     />
                                                 </FormField>
@@ -411,7 +408,7 @@ export const StepFlowBuilder = dc(
                                                     <PgTextField
                                                         modelValue={(transform.args ?? []).join(",")}
                                                         onUpdate:modelValue={(v: string) =>
-                                                            updateTransform(phase, stepIndex, transformIndex, {
+                                                            updateTransform(activePhase.value, stepIndex, transformIndex, {
                                                                 args: v
                                                                     .split(",")
                                                                     .map((entry) => entry.trim())
@@ -424,7 +421,7 @@ export const StepFlowBuilder = dc(
                                                     size="x-small"
                                                     variant="text"
                                                     color="error"
-                                                    onClick={() => removeTransform(phase, stepIndex, transformIndex)}
+                                                    onClick={() => removeTransform(activePhase.value, stepIndex, transformIndex)}
                                                 >
                                                     ×
                                                 </PgButton>
@@ -433,13 +430,13 @@ export const StepFlowBuilder = dc(
                                     </WizardSection>
 
                                     {errors.length > 0 && (
-                                        <VAlert type="warning" variant="tonal" density="compact">
+                                        <PgAlert tone="warning" density="compact">
                                             <ul style={{ margin: 0, paddingInlineStart: "18px" }}>
                                                 {errors.map((error, index) => (
                                                     <li key={index}>{error}</li>
                                                 ))}
                                             </ul>
-                                        </VAlert>
+                                        </PgAlert>
                                     )}
                                 </WizardSection>
                             );

@@ -24,6 +24,7 @@
     "@mdi/js": "7.4.47",
     "@vue/runtime-vapor": "3.6.0-rc.16",
     "decimal.js": "^10.6.0",
+    "echarts": "^6.1.0",
     "vael-ui": "0.5.8",
     "vue": "3.6.0-rc.16",
     "vue-i18n": "^11.1.12",
@@ -33,6 +34,7 @@
   "devDependencies": {
     "@types/node": "^22.18.11",
     "@vue/tsconfig": "^0.8.1",
+    "jsdom": "^31.0.1",
     "typescript": "~5.9.0",
     "vite": "npm:rolldown-vite@7.3.1",
     "vitest": "^5.0.5",

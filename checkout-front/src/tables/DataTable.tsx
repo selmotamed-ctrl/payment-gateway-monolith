@@ -307,7 +307,7 @@ export const DataTable = defineComponent(
                 : undefined;
 
             return (
-                <SurfaceCard noPadding class="pg-table-card pg-unified-table">
+                <SurfaceCard noPadding class={["pg-table-card pg-unified-table", props.noElevation ? "pg-table-card--flat" : ""].filter(Boolean).join(" ")}>
                     <TableHeader
                         loading={!!effectiveLoading.value}
                         onSearch={onSearch}
@@ -351,7 +351,7 @@ export const DataTable = defineComponent(
                         <PgAlert tone="danger" density="compact">
                             <PgView class="pg-inline" style={{ justifyContent: "space-between", width: "100%" }}>
                                 <ThemedText>{serverError.value}</ThemedText>
-                                <PgButton size="sm" variant="tonal" color="error" onClick={() => scheduleServerFetch()}>
+                                <PgButton size="sm" variant="outlined" onClick={() => scheduleServerFetch()}>
                                     {t("Retry")}
                                 </PgButton>
                             </PgView>

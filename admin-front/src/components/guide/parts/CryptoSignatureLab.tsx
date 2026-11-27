@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
-import {VAlert, PgButton, PgCard, PgCardText, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgCard, PgCardText, PgAutocomplete, PgTextField} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import {StatusChip} from "@pg/ui";
@@ -160,7 +160,7 @@ export const CryptoSignatureLab = dc(() => {
                                 label="Value"
                                 style={{ flex: "2 1 220px" }}
                             />
-                            <PgButton icon="mdi-delete-outline" variant="text" color="error" onClick={() => remove(row.id)} />
+                            <PgButton icon="mdi-delete-outline" variant="text" color="error" ariaLabel="Delete row" onClick={() => remove(row.id)} />
                         </ThemedView>
                     ))}
                     <PgButton size="small" variant="tonal" prependIcon="mdi-plus" onClick={add} style={{ alignSelf: "flex-start" }}>
@@ -209,15 +209,15 @@ export const CryptoSignatureLab = dc(() => {
                     <StatusChip label={encoding.value === "HEX" ? "Moamalat-safe HEX key" : "UTF-8 key"} tone={encoding.value === "HEX" ? "success" : "warning"} size="x-small" />
                 </ThemedView>
                 {error.value ? (
-                    <VAlert type="error" variant="tonal" density="compact">
+                    <PgAlert tone="danger" density="compact">
                         {error.value}
-                    </VAlert>
+                    </PgAlert>
                 ) : null}
                 {signature.value ? (
-                    <VAlert type="success" variant="tonal" density="compact">
+                    <PgAlert tone="success" density="compact">
                         <ThemedText style={{ fontSize: "12px", marginBottom: "4px" }}>HEX_UPPER HMAC-SHA256</ThemedText>
                         <pre style={MONO}>{signature.value}</pre>
-                    </VAlert>
+                    </PgAlert>
                 ) : null}
             </PgCardText>
         </PgCard>

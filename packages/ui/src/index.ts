@@ -9,9 +9,9 @@
  */
 
 /* === Services & utilities === */
-export { dc, defineComponent } from "./lib/dc";
+export { dc, defineComponent, type DCExpose, type SetupCtx } from "./lib/dc";
 export { useLocale, type IconProps } from "./lib/locale";
-export { useDisplay, useRtl } from "./lib/display";
+export { useDisplay, useRtl, setDisplayViewport, type PgDisplay } from "./lib/display";
 export {
     DARK_MEDIA_QUERY,
     THEME_STORAGE_KEY,
@@ -20,6 +20,7 @@ export {
     initialTheme,
     isThemeMode,
     readThemeMode,
+    readToken,
     resolvedTheme,
     resolveTheme,
     setThemeMode,
@@ -43,6 +44,27 @@ export {
     type MoneyInput,
 } from "./lib/money";
 export { fromIsoDate, sameDay, startOfDay, toIsoDate } from "./lib/date";
+export {
+    addDays,
+    formatDisplayDate,
+    isoMonthKey,
+    last7Days,
+    last30Days,
+    last90Days,
+    lastMonth,
+    lastNDaysRange,
+    monthLabel,
+    monthToDate,
+    quarterToDate,
+    shiftIsoMonth,
+    startOfCalendarDay,
+    todayIso,
+    todayRange,
+    weekdayLabels,
+    yearToDate,
+    type PgDateRange,
+} from "./lib/date";
+export { LOCALE_STORAGE_KEY, currentLocale, isRtlLocale, readLocale, setLocale, syncDocumentLocale, type AppLocale } from "./lib/locale";
 export { formatHumanStatus, statusToTone, type BadgeTone } from "./lib/status";
 export { normalizeOptions, sameValue, normalizeSize, controlSize, iconName, pick, type PgOption } from "./lib/options";
 export { isEmpty, runRules, visibleError } from "./lib/rules";
@@ -55,7 +77,16 @@ export {
     useEscape,
     useFocusTrap,
 } from "./lib/dom";
-export { providePgUiConfig, usePgUiConfig, type PgUiApiClient, type PgUiConfig } from "./lib/config";
+export { providePgUiConfig, usePgUiConfig, resetPgUiConfigWarning, type PgUiApiClient, type PgUiConfig } from "./lib/config";
+export {
+    nextFormControlId,
+    providePgForm,
+    usePgFormApi,
+    usePgFormControl,
+    type PgFormApi,
+    type PgFormControlHandle,
+    type PgFormValidationError,
+} from "./lib/formRegistry";
 
 /* === Provider === */
 export { PgProvider } from "./provider/PgProvider";
@@ -71,10 +102,10 @@ export { PgFieldShell } from "./inputs/PgFieldShell";
 export { PgTextField, VTextField } from "./inputs/PgTextField";
 export { PgTextarea, VTextarea } from "./inputs/PgTextarea";
 export { PgSearchInput } from "./inputs/PgSearchInput";
-export { PgAutocomplete, VAutocomplete, VCombobox, VSelect } from "./inputs/PgAutocomplete";
-export { PgApiAutocomplete } from "./inputs/PgApiAutocomplete";
+export { PgAutocomplete, Autocomplete, VAutocomplete, VCombobox, VSelect } from "./inputs/PgAutocomplete";
+export { PgApiAutocomplete, ApiAutocomplete } from "./inputs/PgApiAutocomplete";
 export { PgCodeEditor } from "./inputs/PgCodeEditor";
-export { PgDateInput, PgDateRangeInput, VDateInput, type PgDateRange } from "./inputs/PgDateInput";
+export { PgDateInput, PgDateRangeInput, DateInput, VDateInput, VDateRangeInput } from "./inputs/PgDateInput";
 export { PgChoice, type PgChoiceState } from "./inputs/PgChoice";
 export { PgCheckbox, VCheckbox } from "./inputs/PgCheckbox";
 export { PgRadio, PgRadioGroup, PgSwitch, VRadio, VRadioGroup, VSwitch } from "./inputs/PgToggle";
@@ -199,7 +230,7 @@ export {
 } from "./layout/PgShellPrimitives";
 
 /* === Data === */
-export { PgMetricStrip, MetricStrip, PgMiniStats, MiniStats, type MetricTone, type PgMetricItem, type PgMetricItem as MetricItem } from "./data/PgMetricStrip";
+export { PgMetricStrip, MetricStrip, PgMiniStats, MiniStats, PageStats, type MetricTone, type PgMetricItem, type PgMetricItem as MetricItem } from "./data/PgMetricStrip";
 export { PgMoneyText, MoneyDisplay, MoneyText } from "./data/PgMoneyText";
 export { PgMonoRef, MonoRef } from "./data/PgMonoRef";
 export { PgDescriptionList, DescriptionList, type PgDescriptionItem, type PgDescriptionItem as DescriptionItem } from "./data/PgDescriptionList";
@@ -227,3 +258,35 @@ export { criticalRowTone, statusTone, rowTone } from "./data/table/statusTone";
 
 /* === Patterns === */
 export { PgThemeMenu, PgThemeLanguageControls, ThemeMenu, ThemeAndLanguageControls } from "./patterns/PgThemeControls";
+
+/* === Charts === */
+export {
+    PgChart,
+    EChart,
+    PgStatChartCard,
+    StatsChartCard,
+    PgStatBarChartCard,
+    StatsBarChartCard,
+    CHART_TEXT,
+    CHART_GRID,
+    CHART_INDIGO,
+    CHART_EMERALD,
+    CHART_SLATE,
+    CHART_DANGER,
+    CHART_WARNING,
+    CHART_INFO,
+    CHART_DARK_TEXT,
+    CHART_DARK_GRID,
+    CHART_DARK_INDIGO,
+    CHART_DARK_EMERALD,
+    CHART_DARK_SLATE,
+    CHART_DARK_DANGER,
+    CHART_DARK_WARNING,
+    CHART_DARK_INFO,
+    CHART_CATEGORICAL_LIGHT,
+    CHART_CATEGORICAL_DARK,
+    chartPalette,
+    chartText,
+    chartGrid,
+    chartToneColor,
+} from "./charts";

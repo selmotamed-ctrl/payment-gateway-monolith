@@ -1,5 +1,5 @@
 import { dc } from "@/utils/dc";
-import {VAlert, PgButton, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { computed, ref } from "vue";
 import { useRoute } from "vue-router";
@@ -80,17 +80,17 @@ const AcceptInvitationPage = dc(() => {
                     </div>
 
                     {error.value && (
-                        <VAlert type="error" variant="tonal" density="compact">
+                        <PgAlert tone="danger" density="compact">
                             {error.value}
-                        </VAlert>
+                        </PgAlert>
                     )}
 
                     {done.value ? (
                         <>
-                            <VAlert type="success" variant="tonal" density="compact">
+                            <PgAlert tone="success" density="compact">
                                 {t("Invitation accepted. Your account becomes active once a second administrator approves it.")}
-                            </VAlert>
-                            <PgButton block size="large" onClick={() => void router.push({ name: "Login" })}>
+                            </PgAlert>
+                            <PgButton block variant="primary" size="large" onClick={() => void router.push({ name: "Login" })}>
                                 {t("Back to sign in")}
                             </PgButton>
                         </>
@@ -147,7 +147,7 @@ const AcceptInvitationPage = dc(() => {
                                     </div>
                                 ))}
                             </div>
-                            <PgButton block size="large" loading={loading.value} disabled={!canSubmit.value} onClick={() => void submit()}>
+                            <PgButton block variant="primary" size="large" loading={loading.value} disabled={!canSubmit.value} onClick={() => void submit()}>
                                 {t("Accept invitation")}
                             </PgButton>
                             <PgButton variant="text" size="small" onClick={() => void router.push({ name: "Login" })}>

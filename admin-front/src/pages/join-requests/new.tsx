@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import {VAlert, PgAutocomplete, PgButton, PgTextField, PgTextarea} from "@pg/ui";
+import {PgAlert, PgAutocomplete, PgButton, PgTextField, PgTextarea, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -256,18 +256,18 @@ const JoinRequestNewPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("New admin-assisted join request")} subtitle={t("Prepare a complete onboarding package on behalf of a merchant without bypassing maker-checker controls.")} badge={t("Admin assisted")} badgeTone="info">(
+            <PgStack gap="lg">
+                <PageHeader title={t("New admin-assisted join request")} subtitle={t("Prepare a complete onboarding package on behalf of a merchant without bypassing maker-checker controls.")} badge={t("Admin assisted")} badgeTone="info">
                         <PgButton variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "JoinRequests" })}>
                             {t("Back to queue")}
                         </PgButton>
-                    )</PageHeader>
+                </PageHeader>
 
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t(
                         "Admin-assisted onboarding prepares the merchant package on the merchant's behalf. The operator who creates it cannot approve or reject it.",
                     )}
-                </VAlert>
+                </PgAlert>
 
                 <SurfaceCard>
                     <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
@@ -385,7 +385,7 @@ const JoinRequestNewPage = dc(() => {
                         {t("Create draft")}
                     </PgButton>
                 </ThemedView>
-            </ThemedView>
+            </PgStack>
 
             <FormModal
                 modelValue={inviteOpen.value}
@@ -417,9 +417,9 @@ const JoinRequestNewPage = dc(() => {
 <ThemedText>
                             {t("Share this one-time invitation token with the merchant administrator. It is shown only once.")}
                         </ThemedText>
-                        <VAlert type="warning" variant="tonal">
+                        <PgAlert tone="warning">
                             <MonoRef value={created.value?.invitationToken ?? ""} />
-                        </VAlert>
+                        </PgAlert>
                         <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
                             {t("Expires")}: {formatDateTime(created.value?.invitationExpiresAt)}
                         </ThemedText>

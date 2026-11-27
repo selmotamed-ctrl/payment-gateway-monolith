@@ -1,7 +1,7 @@
 import Decimal from "decimal.js";
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import {VAlert, PgButton, PgTextarea, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgTextarea, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import {SlideOverDrawer} from "@pg/ui";
 import {StatusBadge, formatHumanStatus} from "@pg/ui";
@@ -396,9 +396,9 @@ export const GlAccountDrawer = defineComponent({
                     errorMessage={rollupError.value}
                     onSubmit={() => void runRollup()}
                 >
-                    <VAlert type="info" variant="tonal" density="compact">
+                    <PgAlert tone="info" density="compact">
                         {t("A shard whose lines do not add up to its balance is not advanced and the action names that shard. Payments are not blocked. The action is audited.")}
-                    </VAlert>
+                    </PgAlert>
                     <FormField label={t("Reason")} required hint={t("At least 10 characters; written to the audit log")}>
                         <PgTextarea
                             modelValue={rollupReason.value}
@@ -419,9 +419,9 @@ export const GlAccountDrawer = defineComponent({
                     errorMessage={scaleError.value}
                     onSubmit={() => void runScale()}
                 >
-                    <VAlert type="info" variant="tonal" density="compact">
+                    <PgAlert tone="info" density="compact">
                         {t("Widening adds shards for new postings. Narrowing only changes where new postings go; existing shards keep their balances and checkpoints. Nothing is moved. The action is audited.")}
-                    </VAlert>
+                    </PgAlert>
                     <FormField label={t("Shard count")} required hint={t("1 to 256")}>
                         <PgTextField
                             modelValue={scaleWidth.value}

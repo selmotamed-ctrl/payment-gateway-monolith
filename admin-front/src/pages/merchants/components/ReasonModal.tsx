@@ -1,7 +1,7 @@
 import { computed, ref, watch, type PropType, type VNodeChild, createSlot } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgTextarea} from "@pg/ui";
+import {PgAlert, PgTextarea} from "@pg/ui";
 import {FormModal} from "@pg/ui";
 import {FormField} from "@pg/ui";
 import { REASON_MAX_LENGTH, reasonProblem, reasonProblemMessage, type GovernanceMode } from "../commerceGovernance";
@@ -58,11 +58,11 @@ export const ReasonModal = defineComponent({
             >
                 {props.description && <p style={{ margin: 0, fontSize: "13px", color: "var(--pg-ink-secondary)", lineHeight: 1.5 }}>{props.description}</p>}
                 {createSlot("default")}
-                <VAlert type={props.mode === "approval" ? "info" : "warning"} variant="tonal" density="compact">
+                <PgAlert tone={props.mode === "approval" ? "info" : "warning"} density="compact">
                     {props.mode === "approval"
                         ? t("This change is submitted for four-eyes approval. It is applied only after an independent checker approves it.")
                         : t("This takes effect immediately and is recorded in the audit trail.")}
-                </VAlert>
+                </PgAlert>
                 <FormField
                     label={t("Reason")}
                     required

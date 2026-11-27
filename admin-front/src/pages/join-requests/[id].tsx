@@ -7,7 +7,7 @@ const branch = createIf as any;
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRoute, useRouter } from "vue-router";
-import {VAlert, PgButton, PgCheckbox, PgAutocomplete, PgFileUpload, PgTextField, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgCheckbox, PgAutocomplete, PgFileUpload, PgTextField, PgTextarea, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -714,8 +714,8 @@ const JoinRequestDetailPage = dc(() => {
                     () => (() => {
         return (
             <ScreenContainer>
-                <ThemedView style={{ gap: "18px" }}>
-                    <PageHeader title={merchant.value?.tradeName || t("Join request")} subtitle={t("Inspect merchant and owner evidence, keep the review checklist current, and record a defensible decision.")} badge={entry.fourEyesRequired ? t("Four eyes") : t("KYB review")} badgeTone={entry.fourEyesRequired ? "warning" : "info"}>(
+                <PgStack gap="lg">
+                    <PageHeader title={merchant.value?.tradeName || t("Join request")} subtitle={t("Inspect merchant and owner evidence, keep the review checklist current, and record a defensible decision.")} badge={entry.fourEyesRequired ? t("Four eyes") : t("KYB review")} badgeTone={entry.fourEyesRequired ? "warning" : "info"}>
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                 <PgButton variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "JoinRequests" })}>
                                     {t("Queue")}
@@ -729,7 +729,7 @@ const JoinRequestDetailPage = dc(() => {
                                     </PgButton>
                                 )}
                             </ThemedView>
-                        )</PageHeader>
+                    </PageHeader>
 
                     <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
                         <span title={statusHelp.value.meaning}>
@@ -767,14 +767,14 @@ const JoinRequestDetailPage = dc(() => {
                     </SurfaceCard>
 
                     {entry.status === "INFO_REQUESTED" && (
-                        <VAlert type="warning" variant="tonal">
+                        <PgAlert tone="warning">
                             <ThemedText type="defaultSemiBold">{t("Information requested")}</ThemedText>
                             {(entry.infoRequestJson ?? []).map((item, index) => (
                                 <div key={index} style={{ fontSize: "13px", marginTop: "4px" }}>
                                     {infoRequestedLabel(item)}
                                 </div>
                             ))}
-                        </VAlert>
+                        </PgAlert>
                     )}
 
                     {entry.approvalRequest?.state === "PENDING_REVIEW" && (
@@ -1168,7 +1168,7 @@ const JoinRequestDetailPage = dc(() => {
                             </SurfaceCardText>
                         </SurfaceCard>
                     )}
-                </ThemedView>
+                </PgStack>
 
                 <FormModal
                     modelValue={profileOpen.value}
@@ -1239,9 +1239,9 @@ const JoinRequestDetailPage = dc(() => {
                     cancelLabel={t("Cancel")}
                     loading={actionLoading.value}
                 >
-                    <VAlert type="info" variant="tonal" density="compact">
+                    <PgAlert tone="info" density="compact">
                         {t("The identity number is encrypted at rest and only its hash is used for duplicate detection.")}
-                    </VAlert>
+                    </PgAlert>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
                         <FormField label={t("Full name (Arabic)")} required>
                             <PgTextField v-model={ownerForm.value.fullName} />
@@ -1353,7 +1353,7 @@ const JoinRequestDetailPage = dc(() => {
                     danger={decision.value === "REJECTED"}
                 >
                     {decision.value === "APPROVED" && !readiness.value?.ready && (
-                        <VAlert type="warning" variant="tonal">{t("All approval blockers must be cleared before approval.")}</VAlert>
+                        <PgAlert tone="warning">{t("All approval blockers must be cleared before approval.")}</PgAlert>
                     )}
                     {decision.value === "APPROVED" && (
                         <FormField label={t("Activation risk tier")}>
@@ -1399,6 +1399,6 @@ const JoinRequestDetailPage = dc(() => {
         );
         })()));
     };
-});
+}, { rerender: true });
 
 export default JoinRequestDetailPage;

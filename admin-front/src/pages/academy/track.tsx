@@ -26,6 +26,7 @@ const MISSING_SHOWN = 6;
 
 export const AdminAcademyTrackPage = defineComponent({
     name: "AdminAcademyTrackPage",
+    rerender: true,
     setup() {
         const { t } = useLocale();
         const route = useRoute();
@@ -232,11 +233,11 @@ export const AdminAcademyTrackPage = defineComponent({
                         <PageHeader title={tr?.title ?? t("Track")} subtitle={tr?.description ?? ""} breadcrumbs={[
                                 { label: t("Tracks"), to: router.resolve({ name: "AdminAcademyTracks" }).fullPath },
                                 { label: tr?.title ?? t("Track") },
-                            ]}>(
+                            ]}>
                                 <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyTrackSummary()}>
                                     {t("Copy track summary")}
                                 </PgButton>
-                            )</PageHeader>
+                        </PageHeader>
                     )}
                 >
                     {body()}

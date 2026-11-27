@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { ADMIN_KEY, adminSession, seedSession } from "../fixtures";
+import { ADMIN_KEY, adminSession, mockApi, seedSession } from "../fixtures";
 
 const json = (status: number, body: unknown) => ({
   status,
@@ -113,6 +113,23 @@ for (const route of routes) {
     await expect(drawer.locator(".guide-context-card").first()).toBeVisible();
   });
 }
+
+test("the context help for /transactions is the Transactions screen, not OperatorCases", async ({ page }) => {
+  await seedSession(page, ADMIN_KEY, adminSession);
+  await mockApi(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/transactions");
+
+  const button = page.getByRole("button", { name: "How this page works" });
+  await expect(button).toBeVisible();
+  await button.click();
+
+  const drawer = page.locator(".guide-context-drawer");
+  await expect(drawer).toBeVisible();
+  await expect(drawer.locator("h2")).toHaveText("Transactions");
+  await expect(drawer.getByRole("button", { name: "Close help" })).toBeVisible();
+  await expect(drawer).toContainText("The Transactions & Webhooks screen");
+});
 
 test("opening help preserves form state and closing keeps it", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });

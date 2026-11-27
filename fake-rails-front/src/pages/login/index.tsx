@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useRouter } from "vue-router";
-import {VAlert, PgButton, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgTextField} from "@pg/ui";
 import {SurfaceCard} from "@pg/ui";
 import {StatusBadge} from "@pg/ui";
 import {PgThemeMenu as ThemeMenu} from "@pg/ui";
@@ -49,7 +49,7 @@ const LoginPage = dc(() => {
           ),
         }}
       >
-        {error.value ? <VAlert type="error" variant="tonal" class="mb-3">{error.value}</VAlert> : null}
+        {error.value ? <PgAlert tone="danger" class="mb-3">{error.value}</PgAlert> : null}
         <div class="pg-field-wrapper mb-3">
           <label>Username</label>
           <PgTextField
@@ -72,7 +72,7 @@ const LoginPage = dc(() => {
             onKeydown={(event: KeyboardEvent) => { if (event.key === "Enter") void submit(); }}
           />
         </div>
-        <PgButton block loading={loading.value} onClick={submit}>Sign in</PgButton>
+        <PgButton block variant="primary" loading={loading.value} onClick={submit}>Sign in</PgButton>
       </SurfaceCard>
     </div>
   );

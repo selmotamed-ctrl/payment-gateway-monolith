@@ -24,7 +24,6 @@ code:
   - admin-front/src/features/**
   - admin-front/src/forms/**
   - admin-front/src/tables/**
-  - admin-front/src/charts/**
   - admin-front/src/printables/**
   - admin-front/src/components/**
   - admin-front/src/utils/**
@@ -38,7 +37,6 @@ code:
   - merchant-front/src/features/**
   - merchant-front/src/forms/**
   - merchant-front/src/tables/**
-  - merchant-front/src/charts/**
   - merchant-front/src/components/**
   - checkout-front/src/main.ts
   - checkout-front/src/App.tsx
@@ -46,7 +44,6 @@ code:
   - checkout-front/src/layouts/**
   - checkout-front/src/features/**
   - checkout-front/src/tables/**
-  - checkout-front/src/charts/**
   - checkout-front/src/components/**
   - fake-rails-front/src/main.ts
   - fake-rails-front/src/App.tsx
@@ -62,6 +59,7 @@ design_sources:
   - design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md
   - design/06-ui/portal_ui_implementation_plan.md
   - design/06-ui/fintech_2026_vapor_ui_architecture_and_remediation_plan.md
+  - design/06-ui/pg_ui_complete_component_blueprint_and_revision_plan.md
 tests:
   - packages/ui/test/core.test.ts
   - packages/ui/test/toastStore.test.ts
@@ -80,7 +78,7 @@ tests:
   - tests/unit/report-ui-styles.test.ts
 gaps:
   - GAP-084: PgAutocomplete/PgDateInput/PgMenu/PgTooltip/PgDialog/PgDrawer use fixed-position inline panels instead of Vue Teleport because Vue 3.6.0-rc.16 Teleport does not mount inside the Vapor dc render path; revisit when the runtime fixes it.
-  - GAP-085: DataTable/DataPage/InputFields/FiltersContainer/AuthoritiesPicker/ApiImage/CordsInputMap/Printables/Stats* remain per-portal feature composites under src/{tables,forms,features,charts,printables}; they are not UI primitives but still share code by copy.
+  - GAP-085: DataTable/DataPage/InputFields/FiltersContainer/AuthoritiesPicker/ApiImage/CordsInputMap/Printables remain per-portal feature composites under src/{tables,forms,features,printables}; they are not UI primitives but still share code by copy.
   - GAP-086: @pg/ui is consumed through Vite/TS aliases and each portal keeps its own Bun lockfile, not a hoisted root workspace; this was chosen to avoid disturbing the four independent frontend installs.
 ---
 
@@ -201,7 +199,7 @@ Additional exported primitives/extras are `SurfaceCardText`, `MetaPill`, `FormCh
 
 - A skip link targeting `#pg-main-content`.
 - A 56 px flat app bar with menu toggle, brand, breadcrumbs, live ledger invariant pill (for `profit.read` or `liquidity.read`), global search trigger (`Ctrl+K`/`Cmd+K`), help button, theme mode menu (System/Light/Dark), language menu, and user menu.
-- A 248 px `VNavigationDrawer`, permanent on desktop and temporary below the compact breakpoint. It contains brand/environment badge, guide search pill (`Ctrl+Shift+K`/`Cmd+Shift+K`), collapsible navigation sections, and an operator card with role and maker/checker dots.
+- A 248 px `PgNavigationDrawer`, permanent on desktop and temporary below the compact breakpoint. It contains the brand lockup (28 px mark, one-line 13.5 px wordmark with ellipsis, and a meta row with the "Admin Back Office" subtitle plus a small `LAN` environment badge), guide search pill (`Ctrl+Shift+K`/`Cmd+Shift+K`), collapsible navigation sections, and an operator card with role and maker/checker dots. The badge sits on the meta row rather than beside the wordmark so the title never has to compete for the remaining width.
 - Route progress bar, focused `VMain`, global search palette (`Ctrl+K` on every route, including the guide), guide search modal (`Ctrl+Shift+K` on every route), and contextual help drawer.
 - The `?` key opens help when the user is not typing in an input; `Escape` closes the topmost overlay.
 
@@ -481,21 +479,25 @@ snackbar. That is now replaced by one source of truth.
    safeguard row; `PgChoice` wraps the native radio/checkbox for exam/lab/safeguard cards, so no page writes a
    raw checkbox input.
 4. **Text fields/table search:** `PgTextField`/`PgSearchInput` restore label, hint, error, icons, prefix/suffix,
-   clear, password reveal, max-length counter and rules. Focus is the neutral `#0f172a` border plus a soft neutral
-   halo; the blue glow is gone. `PgSearchInput` is the table/toolbar search.
+   clear, password reveal, max-length counter and rules. Focus is one 2 px monochrome outline
+   (`#0f172a` light / `#e4e4e7` dark, danger for errors) with no blue ring, inner outline or grey halo.
+   `PgSearchInput` is the table/toolbar search.
 5. **Snackbar:** the broken shim snackbar is deleted. `showToast` has a guaranteed 4.5 s / 6.5 s timer, a 2 px
    countdown bar, pause-on-hover/focus, a four-toast stack cap, an action button and a close button.
 6. **Alerts:** one `PgAlert` with `tone` mapped 1:1 to `--pg-status-*` replaces `SandboxBanner`, `AlertView`,
    `VAlert` and every hand-styled `role="alert"` banner.
-7. **KPI strips:** `PgMetricStrip` uses `gap: 0` with inset hairlines and negative tile margins, so wrapping rows
-   never expose a gray dead cell; `PageStats`/`MiniStats` are aliases of the same strip and the transparent-text
-   hack is gone.
+7. **KPI strips:** `PgMetricStrip` is one rounded, overflow-hidden parent surface. A 1 px grid gap over the
+   `--pg-border-subtle` parent paints the internal separators; child cells are square, borderless, shadowless and
+   have their legacy negative seam margins reset. The strip wraps 5→2→1 without a grey dead cell.
+   `PageStats`/`MiniStats` remain aliases and the transparent-text hack is gone.
 8. **Dialogs and command palette:** `PgDialog` uses a strict three-row header/body/footer; the close button is a
-   flex-end header item, never absolute, so it cannot overlap a title, input or badge. `PgCommandPalette` has a
-   bare 56 px search header and padded results.
+   flex-end header item, never absolute, so it cannot overlap a title, input or badge. The `bare` prop removes the
+   dialog surface and body padding so a command palette can be the only card. `PgCommandPalette` has a bare 56 px
+   search header and padded results.
 9. **Duplication:** the four `VuetifyShim`/`VaelProvider` copies, the 48 duplicated primitive directories and the
    four drifted `fintech-minimal.css`/`vael-shim.css`/`vael-theme.css` sets are deleted. Feature-only composites
-   moved to `src/features`, `src/forms`, `src/tables`, `src/charts` and `src/printables`.
+   moved to `src/features`, `src/forms`, `src/tables` and `src/printables` (the ECharts wrapper now lives in
+   `packages/ui`).
 
 ### 19.3 Migration and governance
 
@@ -516,9 +518,8 @@ snackbar. That is now replaced by one source of truth.
 
 ### 19.4 Verification and deviations
 
-- All four portals type-check and build (`admin-front`, `merchant-front`, `checkout-front` via `bun run build`;
-  `fake-rails-front` via `bun run build`); `packages/ui` type-checks and its 25 unit tests pass; the root Vitest
-  suite is 546 passing.
+- All four portals type-check and build; `packages/ui` type-checks and its 428 unit tests pass; the root Vitest
+  suite is 564 passing. Admin Playwright is 102 passed / 11 live skips, merchant + checkout 31 passed.
 - Browser smoke (cached Chromium against `vite preview`/`vite dev` with mocked APIs): admin login, dashboard,
   sidebar, KPI strip, checklist, currency autocomplete (open/select), user menu and toast; no page errors and no
   console errors. The login page renders `PgTextField`/`PgButton`/`PgOtpInput` with zero native selects.
@@ -536,6 +537,226 @@ snackbar. That is now replaced by one source of truth.
   four independent portal lockfiles and installs are untouched (GAP-086). The single-source guarantee is the
   alias, the package barrel and the governance gate, not a root install.
 - **Residual:** feature-level `DataTable`, `DataPage`, `InputFields`, `FiltersContainer`, `AuthoritiesPicker`,
-  `ApiImage`, `CordsInputMap`, `Printables` and the stats cards remain per-portal composites under
-  `src/{tables,forms,features,charts,printables}`. They are data-connected feature code, not duplicated
-  primitives, but they still copy some logic (GAP-085).
+  `ApiImage`, `CordsInputMap` and `Printables` remain per-portal composites under
+  `src/{tables,forms,features,printables}`. They are data-connected feature code, not duplicated primitives,
+  but they still copy some logic (GAP-085).
+
+### 19.5 Follow-up interaction and layout pass — 2026-11-27
+
+The first implementation review produced a concrete polish list; every item is implemented at the shared layer,
+not patched per page.
+
+- **Buttons:** `tonal` is now a quiet outlined utility action (surface background, 1 px border) so Refresh, Export
+  Excel/Summary, Copy summary and the other page utilities are never filled. Hover adds the surface-hover tone and
+  `--pg-shadow-xs`; press is a 1 px settle (`translateY(1px)`), not a scale transform, so the label never appears to
+  shrink. Only `primary` and `danger` remain filled. Documented in `packages/ui/CATALOG.md` and enforced by
+  `tests/unit/ui-2026-polish.test.ts`.
+- **Inputs:** every family (text/search/textarea/OTP/code editor/date/autocomplete/checkbox/radio/switch/choice/
+  dropzone/slider) shares one monochrome focus outline with `outline-offset: 1px` and no box-shadow. The final token
+  layer restores `--pg-border-focus` to `#0f172a` in light and `#e4e4e7` in dark after the legacy component palette.
+- **Autocomplete:** the panel is a flat, square popover with a clear 1 px strong border, zero padding and
+  full-width option rows separated by hairlines. Hover/active use `--pg-bg-surface-active` (visibly stronger in dark
+  mode), selected rows use the brand-soft surface. Multi-select still keeps the menu open after each toggle; chips
+  shrink/wrap inside the control instead of breaking the trigger.
+- **Table chrome:** the table card is flat (no outer border, radius or shadow; the page/card surface is the frame).
+  The sticky action column uses a 2 px `--pg-border-strong` end rule and no shadow. The filter surface has no border
+  or radius and is not rendered at all when there are no filter definitions. Empty-state medallions inside a table
+  are flat.
+- **Help:** the contextual-help inspector owns the full viewport height (top `0`, `100dvh`, above the app bar) on
+  every screen. Its disclosure cards have a hover surface and 12 px content top padding. The merchant queue/table
+  help panel renders directly on the page canvas (no `SurfaceCard` wrapper), its panel is its own bordered
+  container, and its body uses symmetric 20/16 px rhythm.
+- **Merchant detail:** section headers are one row (label/subtitle start, count + chevron end), hover with the
+  surface-hover tone, and body padding is 20/16 px. Identifier/detail groups are real collapsible sections;
+  table-only sections use `flush` (0 body padding) so the table is the surface. Expand all/Collapse all update every
+  section through the `command` prop. Page-header actions wrap inside the centered page; Suspend/Reinstate are
+  outlined; the action cluster no longer overflows.
+- **Overlay stack and Vapor branches:** the newest dialog/drawer gets a stack z-index (`1000 + rank among open modal surfaces`) so a
+  confirmation dialog always renders above the page modal that opened it. Outside-click handlers ignore surfaces
+  that are no longer topmost; clicking inside a nested dialog cannot close the drawer below it. Drawer body children
+  keep their content height (`flex: 0 0 auto`) so a card can no longer collapse to a 2 px strip that hides the rest
+  of the drawer. Guide glossary/reference popovers, the application detail drawer and merchant sections use
+  function-based reactive reads or `createIf` instead of a top-level early return.
+- **New gates:** `tests/e2e/admin/ui-polish.spec.ts` covers merchant section commands/layout, the flat table and
+  filter chrome, monochrome focus in light/dark, the autocomplete panel/multi-select, the full-height help drawer,
+  direct-on-canvas merchant help and outlined utility buttons. `packages/ui/test/table-page-swap.test.tsx` pins the
+  stable row-key pagination fix; `tests/unit/ui-2026-polish.test.ts` pins the shared CSS contracts. Playwright:
+  admin 102 passed / 11 live skips, merchant + checkout 31 passed.
+
+
+### 19.6 Audit remediation — 2026-11-27
+
+A second full audit (five parallel reviewers plus real-browser probes) found that the first polish pass had fixed
+symptoms but not all root causes. This pass corrects the shared primitives and the page composition:
+
+- **Autocomplete multiple-select closure (root cause):** `TableFilters` read `props.values` synchronously in
+  `setup()`, which subscribed the creating `TopSlot` effect to the prop. Every selection recreated the whole
+  `TableFilters`/`PgAutocomplete` tree, so the dropdown closed and focus was lost. The filter now copies values in
+  its own `watch`, `PgApiTable` no longer reads `loading.value` inside the `TopSlot` expression, and
+  `SandboxResourceTable` uses one stable `topSlot` function. The option list no longer calls `isSelected` while
+  building rows; selection updates per-option getters and keeps the same DOM nodes. `PgApiAutocomplete` only
+  injects missing selected items and returns the same array otherwise. Table filters cap visible chips at one plus
+  `+N`, and the chip rail is nowrap with a shrinking input, so 300 px filter columns render a full chip instead of
+  clipped text. `PgAutocomplete` no longer changes `activeIndex` on hover, removing the hover-driven row rebuild.
+  Tests: package multi/API multi/hover identity, E2E 800 ms survival + node identity + chip geometry.
+- **Buttons:** `tonal` + `error`/`warning`/`success` map to `outlined-danger`/`outlined-warning`/
+  `outlined-success`; `outlined-danger`/`text-danger` are canonical again; press backgrounds are per-variant
+  (no blue flash on a red action) and heights follow the 36/40/44 control tokens. Retry actions are neutral.
+  Merchant/admin/fake-rails auth CTAs are primary. `Review attention` is pinned to
+  `pg-btn pg-btn--outlined-danger` with a transparent background.
+- **Dashboard:** see §19.7 for the final KPI seam, checklist rhythm, header inset and the Route
+  health / Approval queue list design. A selected checkbox keeps its selected surface on hover.
+- **Cards and sections:** `PgCard` now honours `color` even when `tone` is the default, implements
+  `variant` (`tonal`/`outlined`/`flat`/`elevated`), `bodyPadding` and `bodyGap`. `SurfaceCardText` no longer adds a
+  second inset inside the card body. Merchant sections keep the card surface and shadow; Expand/Collapse all covers
+  identifiers, details, transactions, wallets, applications, finance, pending changes, AML, join requests, KYB,
+  beneficial owners, access and field history. `BeneficialOwnersCard` and `MerchantAccessCard` are now disclosure
+  sections themselves. `defaultExpanded` is respected, `alwaysOpen` no longer persists a forced-open state, and
+  section bodies have `role="region"`/`aria-labelledby`.
+- **Disclosure primitives:** `PgExpansionPanel` no longer renders the legacy default slot twice; the help panels,
+  AI vector results and operator-case logs use the explicit `title` prop/`title` slot and a single body. The
+  legacy `PgExpansionPanelTitle` padding hack and duplicate-render CSS are removed, so header heights and title
+  alignment are consistent.
+- **Layout system:** `PgRow` is a real 12-track grid (gap no longer wraps 2×50% + gap), `PgCol` supports
+  `cols/sm/md/lg/xl`, and the Vuetify-compatible utility subset (`d-flex`, `flex-wrap`, `ga-*`, `mt/mb/pa/px/py`,
+  `text-caption`, …) is defined once in `@pg/ui`. Report Studio, chrome forms, fake-rails dashboard and
+  checklists keep their authored columns. `PgTextField type="date"` delegates to `PgDateInput`.
+- **Chrome:** settings toolbar targets `.pg-field`; card-header actions wrap instead of clipping; dialog bodies keep
+  child height; autocomplete panels are clamped to the viewport and no longer offset inside dialogs
+  (`backdrop-filter` removed from the dialog backdrop); table filter wrapper ids are unique; wallet Links sections
+  and MiniTable frames are flat. The checkout per-rail help banner uses a reactive `createIf` branch (it no longer
+  freezes on the first rail or stays absent when the first rail has no guide), the Fake Rails hosted/portal frame
+  classes are defined, the merchant Webhooks page has one `h1` plus a `PgSubHeader`, and icon-only Rails/Signature
+  actions have accessible names.
+
+### 19.7 Second interaction audit — 2026-11-27
+
+A third browser pass (tabs, palette, navigation, shell, authoring pages, row menus) found these root causes and
+fixes:
+
+- **Segmented tabs:** the last-loaded `parts/actions.css` rule was `height: 36px` with 3 px padding and a 1 px
+  border (28 px content) around a 30 px tab. `overflow-x: auto` therefore forced `overflow-y: auto` and every
+  `SegmentedTabs` became vertically scrollable. The base is now 38 px (`sm` 34, `lg` 42) with an explicit
+  `overflow-y: hidden`; the duplicate legacy rule in `components.css` was deleted.
+- **Search palettes:** the Ctrl+K palette was `PgDialog` (surface, radius, shadow, 24 px body) around
+  `.pg-command-surface` (a second surface). `PgDialog` now supports `bare`, which removes the dialog surface and
+  body padding; the global palette and the Ctrl+Shift+K guide palette are each exactly one card. `UI-20` also
+  rejects the Vapor slot trap below.
+- **Navigation state:** `PgListItem` built its class and `aria-current` in local strings, which Vapor captures once.
+  After the first navigation every later route kept the initial `--active` marker and `aria-current`. The bindings
+  are now inline JSX expressions and a package reactivity test toggles `active` on a mounted row. The route watcher
+  no longer focuses the persistent `<main>`; mouse/keyboard navigation keeps focus on the clicked nav link, and the
+  skip link focuses the page `<h1>`.
+- **Shell scrolling:** `.pg-main` was `position: static`, so absolutely positioned `.pg-sr-only` spans (1 px, but
+  placed at the static position near the bottom of long pages) used the document as their containing block and
+  extended `document.scrollingElement.scrollHeight` by 244-698 px. The window scrolled, taking the sticky drawer
+  and app bar with it. `.pg-app` is now the clipped viewport (`overflow: hidden`) and `.pg-main` is
+  `position: relative; overflow: auto`. The inline `height: 100%` that overrode `100dvh` was removed from the three
+  portal `PgApp` roots.
+- **Focus rings:** the viewport-wide `<main>:focus-visible` 3 px ring is removed; `[tabindex="-1"]` programmatic
+  targets and page headings have no outline; a clickable table row no longer paints a 2 px outline around the whole
+  `<tr>` on `:focus-within` when a row menu opens. The nav section header uses a surface hover instead of a white
+  border. Real inputs and buttons keep their keyboard focus ring.
+- **Report authoring:** `v-slots={condition ? {...} : undefined}` in Vapor `vue-jsx` compiles to slot input without
+  a `default`, so `PgCard` rendered an empty padded body. The five occurrences (Studio Step 2/3/4, Chrome upload,
+  diagnostics) now use an object literal with a function slot value. Studio Step 1 stacks the Domains autocomplete
+  above its two download buttons instead of a 5/7 row with `align="center"`. UI-20 rejects the broken form.
+- **Row action menus:** a fixed panel inside `td.pg-col-actions` is still trapped by the `position: sticky`
+  stacking context even at `z-index: auto`. `TableRowActions` now adopts its panel into a body-level
+  `.pg-floating-layer` before measuring/focusing, so `--pg-z-popover` participates at the root. Outside-click and
+  scroll handling recognise the relocated panel.
+- **Dashboard final:** the checklist title-to-items gap is 4 px and the items gap is 2 px (separate containers);
+  `noPadding` no longer removes the card header/footer inset; Route health is a distribution bar plus a three-row
+  legend; Approval queue is a compact domain list with count, oldest age and urgency dot; both footers are pinned
+  with a top rule and an end-aligned arrow action. The KPI parent seam is the shared border token, visible in both
+  themes.
+- **Checklists:** `PgFormChecklist` no longer draws a frame at all. The legacy `.pg-checklist` root rule in
+  `components.css` painted a zero-padding bordered box around the title, items and warning; it is removed and
+  `data.css` now explicitly resets border/radius/background/overflow. There is also no inner list border/background
+  and no separate select-all box, so the checklist merges with the card, drawer or modal body and all content
+  aligns with the parent inset.
+  `.pg-chk` keeps a 32 px touch box in forms but is sized to its 20 px content inside a checklist row, removing the
+  hidden 12-14 px bottom gap; rows are 10 px top and bottom around the visible label. This fixes the asymmetric
+  "Summary export checklist" items and the flat checklist is covered by an `ui-polish` geometry test.
+
+Audit evidence and screenshots are under `/tmp/opencode/ui-audit/` (`final-autocomplete.png`,
+`final-merchant-detail.png`, `final-settings.png`). Final gates: package 431 tests + typecheck, root Vitest 564,
+admin Playwright 111/11 live skips, merchant+checkout 33, ui audit 0, 294 icons, four portal builds,
+project-design build/check and `git diff --check`.
+
+### 19.8 Drawer brand lockup — 2026-11-27
+
+The sidebar wordmark had **1 px too little room**: "Payment Gateway" measured 123.5 px at 14 px/600 in Plus Jakarta
+Sans, while the brand text column received 122.56 px (248 px drawer − 1 px border − 32 px padding − 28 px mark −
+2 × 10 px gap − 43.44 px `LAN` badge). The browser therefore broke the title between the two words and rendered the
+header 33.59 px tall instead of 16.19 px. The merchant portal had the same defect, and its wider `SANDBOX` badge
+would have truncated the title even after a font reduction.
+
+The brand is now a two-row lockup inside `.pg-drawer__brand-text`: the title is 13.5 px and strictly one line
+(`white-space: nowrap` + ellipsis), and the subtitle shares `.pg-drawer__meta` with a small (`size="sm"`)
+environment badge. The wordmark gains the whole remaining width (176 px measured), which fits the English, Arabic
+and merchant `SANDBOX` variants. `.pg-drawer__brand-text` is `flex: 1 1 auto`, the subtitle truncates with ellipsis,
+and the badge no longer participates in the title's line box. The same markup and CSS are mirrored in
+`merchant-front/src/layouts/default.tsx` and `merchant-front/src/styles/globals/app.scss`.
+
+Regression: `tests/e2e/admin/shell.spec.ts` and `tests/e2e/merchant/shell.spec.ts` assert the title renders on one
+line (`height <= 1.5 × line-height`) and does not overflow its box (`scrollWidth <= clientWidth + 1`) in admin and
+in merchant LIVE/SANDBOX routes.
+
+### 19.9 `dc` re-render context and the merchant detail tables — 2026-11-27
+
+The merchant detail page (`admin-front/src/pages/merchants/[id].tsx`) renders every resource table through the
+`rerender: true` option of the shared `dc` helper. That option exists for render functions with a top-level reactive
+early return: Vapor normally evaluates a render function once, so `rerender` builds a `DynamicFragment` and updates it
+from a `renderEffect`.
+
+The original implementation evaluated the render function inside a `computed`:
+
+```ts
+const block = computed(() => invokeRender(render));
+renderEffect(() => fragment.update(() => block.value));
+```
+
+When the page changed from loading to loaded, the computed was re-evaluated during reactivity propagation
+(`walkDirty`), where no Vapor instance is active. `createIf`/`renderEffect` inside the new branch then had no owner,
+so the branch's child components were mounted **detached from the component tree** and lost every `provide`/`inject`:
+`usePgUiConfig()` returned the empty fallback, so every `PgApiTable` threw "No API client configured" and rendered
+"Could not load data" without sending a request; router and i18n injections were also missing. The same defect
+affected `ApplicationDetailDrawer`, the Platform Settings page and any other `rerender` component that mounts
+provider-dependent children after a reactive branch change.
+
+The render is now evaluated **inside its own `renderEffect`** (so `currentInstance` is the owning Vapor component),
+and a second `renderEffect` applies the stored block to the fragment. Splitting the two effects keeps DOM insertion
+and child setup out of the render pass's dependency set (tracking mount-time writes together with the render caused
+the `PgDetailsDialog` tests to time out under the full package run). Children created after the branch change are
+therefore mounted inside the owning component, inherit `PgProvider`, router and i18n, and the merchant detail
+transactions, wallets, applications, cash-outs, disputes, adjustments, notifications, audit and field-history
+tables load their data.
+
+Regression: `packages/ui/test/dc.test.tsx` (`dc rerender branch`) mounts a `PgProvider` around a `rerender`
+component that flips from a loading branch to a child calling `usePgUiConfig()`; the child must report the injected
+page size (77) rather than the fallback (25). The test fails with the `computed` implementation and passes with the
+split-effect implementation. Live verification uses the real merchant detail page against the local stack; the
+section shows "Could not load data" before the fix and real rows plus `200` responses for `/transactions` and
+`/wallets` after it, with no `usePgUiConfig`/`renderEffect` warnings in the console.
+
+### 19.10 Async detail pages and one-shot render snapshots — 2026-11-27
+
+Vapor evaluates a component render function once. A page that reads async data into a plain local at the top of its
+render function (`const entry = detail.value!`) keeps the initial `null` forever: the loading branch never flips, and
+after a successful API response the page shows its "not found" fallback. `merchants/[id].tsx` already opted into
+`{ rerender: true }`; the join-request and KYB detail pages (and the academy certificate/exam and object-form
+module/lesson/lab/track pages) did not. Every such page now opts in.
+
+The same class was fixed where a local snapshot fed live UI without a full re-render: the exam runner now reads
+`currentQuestion` (a `computed`) so Previous/Next changes the stem and choices, the exam result empty message and the
+Team table visible count are computed, the gateway Flow Builder reads `activePhase.value` directly (and maps
+`flowForPhase(activePhase.value).steps`) so switching phases updates the list, the Customer Catalog reads
+`props.model.rails` directly so rail tabs and add/remove update, and the checkout help drawer opts into `rerender`.
+
+Guards: `admin-front/src/pages/__tests__/vapor-render-reactivity.test.ts` parses every `src/pages/**/*.tsx` file with
+the TypeScript AST and fails when a `dc`/`defineComponent` setup ref is snapshotted in a one-shot render without
+`rerender: true` (it is also checked for the object-form `defineComponent({ setup, rerender })`). Removing the option
+from `join-requests/[id].tsx` makes it fail with `join-requests/[id].tsx:138 snapshots entry = detail.value! without
+{ rerender: true }`. `tests/e2e/admin/detail-pages.spec.ts` loads both reported pages against a mocked API and asserts
+the real sections render and the not-found fallbacks are absent.

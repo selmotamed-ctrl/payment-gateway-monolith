@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgTextarea, PgStack} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
@@ -194,14 +194,14 @@ const InvariantPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Ledger Audit & Invariant")} subtitle={t("Verify the double-entry ledger invariant and inspect account-level balances.")} badge={t("Ledger control")} badgeTone="info">(
+            <PgStack gap="lg">
+                <PageHeader title={t("Ledger Audit & Invariant")} subtitle={t("Verify the double-entry ledger invariant and inspect account-level balances.")} badge={t("Ledger control")} badgeTone="info">
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             {data.value?.checkedAt && <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Last run")} {new Date(data.value.checkedAt).toLocaleTimeString()}</ThemedText>}
                             <PgButton variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export snapshot")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
@@ -209,11 +209,11 @@ const InvariantPage = dc(() => {
                     <StateView loading={true} />
                 ) : (
                     <>
-                        <VAlert type={data.value?.ok ? "success" : "error"} variant="tonal">
+                        <PgAlert tone={data.value?.ok ? "success" : "danger"}>
                             {data.value?.ok
                                 ? t("The double-entry invariant is balanced. Payouts may continue subject to normal policy.")
                                 : t("Ledger drift detected. Automated payouts must halt until finance resolves the drift.")}
-                        </VAlert>
+                        </PgAlert>
 
                         <MetricStrip items={[
                             { key: "drift", label: t("Drift"), moneyAmount: data.value?.drift ?? "0", currency: currency(), badge: data.value?.ok ? t("Passed") : t("Failed"), badgeTone: data.value?.ok ? "success" : "danger" },
@@ -238,7 +238,7 @@ const InvariantPage = dc(() => {
                             </SurfaceCardText>
                         </SurfaceCard>
 
-                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "18px" }}>
+                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))", gap: "18px" }}>
                             <SurfaceCard title={t("Treasury Cover")}>
                                 <DescriptionList
                                     items={[
@@ -315,7 +315,7 @@ const InvariantPage = dc(() => {
                         </SurfaceCard>
                     </>
                 )}
-            </ThemedView>
+            </PgStack>
             <GlAccountDrawer accountId={inspectAccountId.value} onClose={() => (inspectAccountId.value = null)} onChanged={() => void load()} />
             <FormModal
                 modelValue={exportOpen.value}
@@ -326,7 +326,7 @@ const InvariantPage = dc(() => {
                 submitLabel={t("Export")}
                 onSubmit={() => void exportSnapshot()}
             >
-                <VAlert type="warning" variant="tonal">{t("The export contains ledger balances, drift and account checkpoints. Handle it as confidential financial evidence.")}</VAlert>
+                <PgAlert tone="warning">{t("The export contains ledger balances, drift and account checkpoints. Handle it as confidential financial evidence.")}</PgAlert>
                 <FormChecklist
                     checks={[...EXPORT_CHECKS]}
                     modelValue={exportChecklist.value}
@@ -351,9 +351,9 @@ const InvariantPage = dc(() => {
                 onSubmit={() => void runRollup()}
             >
                 {rollupAccountId.value && <MonoRef value={rollupAccountId.value} />}
-                <VAlert type="info" variant="tonal" density="compact">
+                <PgAlert tone="info" density="compact">
                     {t("A shard whose lines do not add up to its balance is not advanced and the action names that shard. Payments are not blocked. The action is audited.")}
-                </VAlert>
+                </PgAlert>
                 <FormField label={t("Reason")} required hint={t("At least 10 characters; written to the audit log")}>
                     <PgTextarea modelValue={rollupReason.value} onUpdate:modelValue={(value: string) => void (rollupReason.value = value)} rows={3} autoGrow {...{ maxlength: 500 }} />
                 </FormField>

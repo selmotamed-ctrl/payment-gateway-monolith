@@ -1,14 +1,14 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton} from "@pg/ui";
+import {PgAlert, PgButton, PgStack} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import {StateView} from "@pg/ui";
-import { LazyEChart as EChart } from "@/charts/EChart/lazy";
+import { PgChart as EChart, CHART_TEXT, CHART_GRID, CHART_INDIGO, CHART_EMERALD, CHART_SLATE } from "@pg/ui";
 import {StatusBadge} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -62,8 +62,6 @@ type Profitability = {
     byGateway?: { gatewayCode: string; volume: string; gross: string; cost: string; net: string }[];
     byDay?: { day: string; volume: string; gross: string; cost: string; net: string }[];
 };
-
-import { CHART_TEXT, CHART_GRID, CHART_INDIGO, CHART_EMERALD, CHART_SLATE } from "@/charts/palette";
 
 const ProfitabilityPage = dc(() => {
     const { t } = useLocale();
@@ -280,8 +278,8 @@ const ProfitabilityPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Profitability")} subtitle={t("Review gross commission, gateway cost, and net contribution across rails and gateways.")} badge={t("Margin control")} badgeTone="info">(
+            <PgStack gap="lg">
+                <PageHeader title={t("Profitability")} subtitle={t("Review gross commission, gateway cost, and net contribution across rails and gateways.")} badge={t("Margin control")} badgeTone="info">
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             <SegmentedTabs
                                 modelValue={period.value}
@@ -301,7 +299,7 @@ const ProfitabilityPage = dc(() => {
                             <PgButton variant="tonal" prependIcon="mdi-content-copy" disabled={!data.value} onClick={() => void copyProfitabilitySummary()}>{t("Copy summary")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export snapshot")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
@@ -309,9 +307,9 @@ const ProfitabilityPage = dc(() => {
                     <StateView loading={true} />
                 ) : (
                     <>
-                        <VAlert type="info" variant="tonal">
+                        <PgAlert tone="info">
                             {t("Period P&L uses succeeded attempts and executed chargeback/refund adjustments. Ledger positions are current balances, not period movements.")}
-                        </VAlert>
+                        </PgAlert>
 
                         <MetricStrip items={[
                             { key: "volume", label: t("Gross volume"), moneyAmount: data.value?.grossVolume ?? "0", currency: currency(), subLabel: `${t("Net to merchants")}: ${formatMoney(data.value?.netMerchantAmount, { currency: currency() })}` },
@@ -321,7 +319,7 @@ const ProfitabilityPage = dc(() => {
                             { key: "netContribution", label: t("Net Contribution"), moneyAmount: data.value?.periodNetContribution ?? "0", currency: currency(), subLabel: `${formatPlainNumber(data.value?.commissionMargin, 2)}% ${t("Commission margin")}` },
                         ]} />
 
-                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "18px" }}>
+                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))", gap: "18px" }}>
                             <SurfaceCard title={t("Period P&L")}>
                                 <ThemedView style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                     <ThemedView style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -368,7 +366,7 @@ const ProfitabilityPage = dc(() => {
                             </SurfaceCard>
                         </ThemedView>
 
-                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "18px" }}>
+                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))", gap: "18px" }}>
                             <SurfaceCard title={t("By rail")}>
                                 {(data.value?.byRail ?? []).length === 0 ? (
                                     <EmptyState title={t("No Data Found")} description={t("No rows match the selected period.")} />
@@ -389,7 +387,7 @@ const ProfitabilityPage = dc(() => {
                         {breakdownTable("By gateway", (data.value?.byGateway ?? []).map((row) => ({ key: row.gatewayCode, ...row })), true)}
                     </>
                 )}
-            </ThemedView>
+            </PgStack>
             <FormModal
                 modelValue={exportOpen.value}
                 onUpdate:modelValue={(value: boolean) => (exportOpen.value = value)}
@@ -399,7 +397,7 @@ const ProfitabilityPage = dc(() => {
                 submitLabel={t("Export")}
                 onSubmit={() => void exportSnapshot()}
             >
-                <VAlert type="warning" variant="tonal">{t("The export contains revenue, gateway cost and margin figures. Handle it as confidential financial evidence.")}</VAlert>
+                <PgAlert tone="warning">{t("The export contains revenue, gateway cost and margin figures. Handle it as confidential financial evidence.")}</PgAlert>
                 <FormChecklist
                     checks={[...EXPORT_CHECKS]}
                     modelValue={exportChecklist.value}

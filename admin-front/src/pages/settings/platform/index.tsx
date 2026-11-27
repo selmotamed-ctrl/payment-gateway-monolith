@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
 import { areChecklistsVisible } from "@/constants/env";
-import {VAlert, PgButton, PgCheckbox, PgFileUpload, PgTextField, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgCheckbox, PgFileUpload, PgTextField, PgTextarea, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -240,6 +240,7 @@ const PlatformSettingsPage = dc(() => {
         window.setTimeout(() => {
             detailOpen.value = true;
             updateQuery({ open: entry.key });
+
         }, 0);
     };
 
@@ -481,7 +482,7 @@ const PlatformSettingsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
+            <PgStack gap="lg">
                 <PageHeader
                     title={t("Platform Settings")}
                     subtitle={t("Searchable, versioned configuration with a reader, effect and hint for every setting.")}
@@ -530,9 +531,9 @@ const PlatformSettingsPage = dc(() => {
                     <StateView loading={true} />
                 ) : (
                     <>
-                        <VAlert type="info" variant="tonal">
+                        <PgAlert tone="info">
                             {t("Every save creates a new immutable version. The effective version is the highest version whose effective date has passed; a future version is shown as scheduled.")}
-                        </VAlert>
+                        </PgAlert>
                         <SettingsHealthStrip entries={entries.value} onReviewDefaults={reviewDefaults} onReviewAttention={reviewAttention} />
 
                         <SurfaceCard bodyPadding="14px 16px">
@@ -613,7 +614,7 @@ const PlatformSettingsPage = dc(() => {
                         </div>
                     </>
                 )}
-            </ThemedView>
+            </PgStack>
 
             <SettingDetailDrawer
                 modelValue={detailOpen.value}
@@ -644,7 +645,7 @@ const PlatformSettingsPage = dc(() => {
                 submitLabel={t("Export")}
                 onSubmit={() => void exportBackup()}
             >
-                <VAlert type="warning" variant="tonal">{t("The backup contains versioned platform settings and may contain sensitive operational values. Handle it as confidential.")}</VAlert>
+                <PgAlert tone="warning">{t("The backup contains versioned platform settings and may contain sensitive operational values. Handle it as confidential.")}</PgAlert>
                 <FormChecklist
                     checks={[...BACKUP_EXPORT_CHECKS]}
                     modelValue={backupExportChecklist.value}
@@ -665,7 +666,7 @@ const PlatformSettingsPage = dc(() => {
                 submitLabel={t("Export summary")}
                 onSubmit={() => void exportSummary()}
             >
-                <VAlert type="info" variant="tonal">{t("The summary contains counts and effective-date health, not the values themselves.")}</VAlert>
+                <PgAlert tone="info">{t("The summary contains counts and effective-date health, not the values themselves.")}</PgAlert>
                 <MetricStrip items={metricItems.value} />
                 <FormChecklist
                     checks={[...SUMMARY_EXPORT_CHECKS]}
@@ -706,9 +707,9 @@ const PlatformSettingsPage = dc(() => {
                     ),
                 }}
             >
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("Choose a settings backup JSON. This preview does not write anything.")}
-                </VAlert>
+                </PgAlert>
                 <FormField label={t("Settings backup JSON")}>
                     <PgFileUpload
                         {...{ accept: ".json,application/json" }}
@@ -750,9 +751,9 @@ const PlatformSettingsPage = dc(() => {
                             </ThemedText>
                         )}
                         {restorePreview.value.summary.invalid > 0 && (
-                            <VAlert type="error" variant="tonal" density="compact">
+                            <PgAlert tone="danger" density="compact">
                                 {t("Fix or remove invalid backup entries before applying.")}
-                            </VAlert>
+                            </PgAlert>
                         )}
                         <PgTextarea
                             modelValue={restoreReason.value}
@@ -781,6 +782,6 @@ const PlatformSettingsPage = dc(() => {
             </FormModal>
         </ScreenContainer>
     );
-});
+}, { rerender: true });
 
 export default PlatformSettingsPage;

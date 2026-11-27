@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import {VAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField} from "@pg/ui";
 import {SurfaceCard, SurfaceCardText} from "@pg/ui";
 import {FormField} from "@pg/ui";
 import {FormChecklist} from "@pg/ui";
@@ -293,14 +293,14 @@ export const StepEnvironments = dc(
                                 {t("Credential Check")}
                             </PgButton>
                             {checkResult.value && (
-                                <VAlert type="success" variant="tonal" density="compact" style={{ flex: 1, minWidth: "220px" }}>
+                                <PgAlert tone="success" density="compact" style={{ flex: 1, minWidth: "220px" }}>
                                     {checkResult.value}
-                                </VAlert>
+                                </PgAlert>
                             )}
                             {checkError.value && (
-                                <VAlert type="error" variant="tonal" density="compact" style={{ flex: 1, minWidth: "220px" }}>
+                                <PgAlert tone="danger" density="compact" style={{ flex: 1, minWidth: "220px" }}>
                                     {checkError.value}
-                                </VAlert>
+                                </PgAlert>
                             )}
                         </div>
                     </WizardSection>

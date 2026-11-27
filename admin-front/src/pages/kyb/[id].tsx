@@ -5,7 +5,7 @@ import { computed, ref, watch } from "vue";
 const branch = createIf as any;
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import {VAlert, PgButton} from "@pg/ui";
+import {PgAlert, PgButton, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -266,8 +266,8 @@ const KybReviewDetailPage = dc(() => {
         const expiry = expiryHelp(entry.expiryState);
         return (
             <ScreenContainer>
-                <ThemedView style={{ gap: "18px" }}>
-                    <PageHeader title={`${typeHelp.label} · ${entry.merchantName}`} subtitle={t("Inspect document identity, scanning status, expiry evidence and duplicate-document risk.")}>(
+                <PgStack gap="lg">
+                    <PageHeader title={`${typeHelp.label} · ${entry.merchantName}`} subtitle={t("Inspect document identity, scanning status, expiry evidence and duplicate-document risk.")}>
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                 <PgButton variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "KybReview" })}>
                                     {t("Queue")}
@@ -303,7 +303,7 @@ const KybReviewDetailPage = dc(() => {
                                     </PgButton>
                                 )}
                             </ThemedView>
-                        )</PageHeader>
+                    </PageHeader>
 
                     <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                         <span title={statusHelp.meaning}>
@@ -341,28 +341,22 @@ const KybReviewDetailPage = dc(() => {
                     </SurfaceCard>
 
                     {entry.avStatus !== "CLEAN" && (
-                        <VAlert type={entry.avStatus === "INFECTED" ? "error" : "warning"} variant="tonal">
+                        <PgAlert tone={entry.avStatus === "INFECTED" ? "danger" : "warning"}>
                             {t(avHelp.meaning)}
-                        </VAlert>
+                        </PgAlert>
                     )}
                     {entry.expiryState === "EXPIRED" && (
-                        <VAlert type="error" variant="tonal">
+                        <PgAlert tone="danger">
                             {t("This document has expired and cannot be accepted as current evidence. Request a replacement or active-merchant re-verification.")}
-                        </VAlert>
+                        </PgAlert>
                     )}
                     {!entry.contentAvailable && (
-                        <VAlert type="info" variant="tonal">
+                        <PgAlert tone="info">
                             {t("The encrypted content is not available for this legacy record. The metadata and decision are still auditable.")}
-                        </VAlert>
+                        </PgAlert>
                     )}
 
-                    {areHelpPanelsVisible() && (
-                        <SurfaceCard>
-                            <SurfaceCardText>
-                                <KybHelpPanel />
-                            </SurfaceCardText>
-                        </SurfaceCard>
-                    )}
+                    {areHelpPanelsVisible() && <KybHelpPanel />}
 
                     {sections.value.map((section) => (
                         <SurfaceCard key={section.title}>
@@ -544,7 +538,7 @@ const KybReviewDetailPage = dc(() => {
                             </SurfaceCardText>
                         </SurfaceCard>
                     )}
-                </ThemedView>
+                </PgStack>
 
                 <KybReviewDialog
                     open={reviewOpen.value}
@@ -583,6 +577,6 @@ const KybReviewDetailPage = dc(() => {
         );
         })()));
     };
-});
+}, { rerender: true });
 
 export default KybReviewDetailPage;

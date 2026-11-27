@@ -75,7 +75,7 @@ export const ReportDiagnosticsPanel = defineComponent({
         <SurfaceCard
           title={heading.value}
           noPadding
-          v-slots={slots.headerActions ? { headerActions: slots.headerActions } : undefined}
+          v-slots={{ headerActions: () => slots.headerActions?.() ?? null }}
         >
           {rows()}
         </SurfaceCard>

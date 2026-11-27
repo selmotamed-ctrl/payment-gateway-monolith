@@ -102,3 +102,22 @@ test("landing: reduced motion shows the final state with no autoplay and nothing
     .evaluateAll((els) => els.filter((el) => getComputedStyle(el).opacity !== "1").length);
   expect(hidden).toBe(0);
 });
+
+test("landing: the standalone page scrolls with the window to its footer", async ({ page }) => {
+  await setLocale(page, "en");
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/");
+  await expect(page.locator(".pgl-footer")).toBeAttached();
+  const heights = await page.evaluate(() => ({
+    document: document.documentElement.scrollHeight,
+    viewport: window.innerHeight,
+  }));
+  expect(heights.document).toBeGreaterThan(heights.viewport + 100);
+  await page.evaluate(() =>
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" as ScrollBehavior }),
+  );
+  await page.waitForFunction(
+    () => Math.abs(window.scrollY - (document.documentElement.scrollHeight - window.innerHeight)) < 4,
+  );
+  await expect(page.locator(".pgl-footer")).toBeInViewport();
+});

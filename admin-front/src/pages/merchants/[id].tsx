@@ -5,7 +5,7 @@ import { computed, ref, watch } from "vue";
 const branch = createIf as any;
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import {VAlert, PgButton, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgTextarea, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -960,8 +960,8 @@ const MerchantDetailPage = dc(() => {
                     () => <ScreenContainer><StateView error={error.value ?? "Merchant not found"} onRetry={() => void load()} /></ScreenContainer>,
                     () => (
             <ScreenContainer>
-                <ThemedView style={{ gap: "18px" }}>
-                    <PageHeader title={entry.displayName || entry.tradeName || t("Merchant")} subtitle={t("Inspect the merchant profile, payment activity, compliance evidence and governed change history.")} v-slots={{ actions: () => <PgButton variant="tonal">SLOT TEST</PgButton> }}>(
+                <PgStack gap="lg">
+                    <PageHeader title={entry.displayName || entry.tradeName || t("Merchant")} subtitle={t("Inspect the merchant profile, payment activity, compliance evidence and governed change history.")}>
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                 <PgButton variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "Merchants" })}>{t("Queue")}</PgButton>
                                 {activeTab.value === "all" && (
@@ -980,16 +980,16 @@ const MerchantDetailPage = dc(() => {
                                     </>
                                 )}
                                 {canWrite.value && entry.status === "ACTIVE" && (
-                                    <PgButton color="error" variant="tonal" onClick={() => openAction("SUSPEND")}>{t("Suspend")}</PgButton>
+                                    <PgButton color="error" variant="outlined" onClick={() => openAction("SUSPEND")}>{t("Suspend")}</PgButton>
                                 )}
                                 {canWrite.value && entry.status === "SUSPENDED" && (
-                                    <PgButton color="success" variant="tonal" onClick={() => openAction("REINSTATE")}>{t("Reinstate")}</PgButton>
+                                    <PgButton color="success" variant="outlined" onClick={() => openAction("REINSTATE")}>{t("Reinstate")}</PgButton>
                                 )}
                                 {canWrite.value && ["ACTIVE", "SUSPENDED"].includes(entry.status) && (
                                     <PgButton color="error" variant="text" onClick={() => openAction("CLOSE")}>{t("Close")}</PgButton>
                                 )}
                             </ThemedView>
-                        )</PageHeader>
+                    </PageHeader>
 
                     <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                         <span title={statusHelp.value.meaning}><StatusBadge status={entry.status} label={statusHelp.value.label} toneOverride={asBadgeTone(statusHelp.value.tone)} /></span>
@@ -1000,34 +1000,38 @@ const MerchantDetailPage = dc(() => {
                         {entry.redactedFields.length > 0 && <StatusBadge status="restricted" label={t("Some fields restricted")} toneOverride="neutral" />}
                     </ThemedView>
 
-                    <SurfaceCard>
-                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Merchant identifiers")}</ThemedText>
-                            <DescriptionList
-                                columns={2}
-                                items={[
-                                    { label: t("Merchant ID"), value: <MonoRef value={entry.id} /> },
-                                    { label: t("Legal name"), value: entry.legalName || "—" },
-                                    { label: t("Status"), value: statusHelp.value.label },
-                                    { label: t("KYB status"), value: entry.kybStatus ? kybStatusHelp(entry.kybStatus).label : "—" },
-                                    { label: t("Risk tier"), value: entry.riskTier ? riskHelp(entry.riskTier).label : "—" },
-                                    { label: t("Version"), value: `v${entry.version}` },
-                                    { label: t("Contact email"), value: entry.contactEmail || "—" },
-                                    { label: t("Next KYB review"), value: formatDateTime(entry.nextKybReviewAt) },
-                                ]}
-                            />
-                        </SurfaceCardText>
-                    </SurfaceCard>
+                    <CollapsibleSection
+                        command={sectionCommand.value}
+                        alwaysOpen={activeTab.value !== "all"}
+                        title={t("Merchant identifiers")}
+                        subtitle={t("Legal identity, lifecycle status, risk tier and the next KYB review.")}
+                        defaultOpen={true}
+                        storageKey={`merchant:${merchantId.value}:identifiers`}
+                    >
+                        <DescriptionList
+                            columns={2}
+                            items={[
+                                { label: t("Merchant ID"), value: <MonoRef value={entry.id} /> },
+                                { label: t("Legal name"), value: entry.legalName || "—" },
+                                { label: t("Status"), value: statusHelp.value.label },
+                                { label: t("KYB status"), value: entry.kybStatus ? kybStatusHelp(entry.kybStatus).label : "—" },
+                                { label: t("Risk tier"), value: entry.riskTier ? riskHelp(entry.riskTier).label : "—" },
+                                { label: t("Version"), value: `v${entry.version}` },
+                                { label: t("Contact email"), value: entry.contactEmail || "—" },
+                                { label: t("Next KYB review"), value: formatDateTime(entry.nextKybReviewAt) },
+                            ]}
+                        />
+                    </CollapsibleSection>
 
                     {entry.redactedFields.length > 0 && (
-                        <VAlert type="info" variant="tonal">
+                        <PgAlert tone="info">
                             {t("Sensitive tax, registration, payout, ceiling, risk or AML information is hidden for your role.")}
-                        </VAlert>
+                        </PgAlert>
                     )}
                     {entry.status === "SUSPENDED" && (
-                        <VAlert type="warning" variant="tonal">
+                        <PgAlert tone="warning">
                             {t("Suspended merchants cannot start new live payments. Reinstatement requires a compliance or MLRO checker.")}
-                        </VAlert>
+                        </PgAlert>
                     )}
 
                     <SegmentedTabs
@@ -1036,18 +1040,20 @@ const MerchantDetailPage = dc(() => {
                         onUpdate:modelValue={setActiveTab}
                     />
 
-                    {activeTab.value === "all" && areHelpPanelsVisible() && <SurfaceCard><SurfaceCardText><MerchantHelpPanel /></SurfaceCardText></SurfaceCard>}
+                    {activeTab.value === "all" && areHelpPanelsVisible() && <MerchantHelpPanel />}
 
                     {show("details") && sections.value.map((section) => (
-                        <SurfaceCard key={section.title}>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{section.title}</ThemedText>
-                                {("description" in section && section.description) && (
-                                    <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{section.description}</ThemedText>
-                                )}
-                                <DescriptionList columns={2} items={section.items} />
-                            </SurfaceCardText>
-                        </SurfaceCard>
+                        <CollapsibleSection
+                            key={section.title}
+                            command={sectionCommand.value}
+                            alwaysOpen={activeTab.value !== "all"}
+                            title={section.title}
+                            subtitle={"description" in section ? String(section.description ?? "") : ""}
+                            defaultOpen={"defaultExpanded" in section ? Boolean(section.defaultExpanded) : true}
+                            storageKey={`merchant:${merchantId.value}:details:${section.title}`}
+                        >
+                            <DescriptionList columns={2} items={section.items} />
+                        </CollapsibleSection>
                     ))}
 
                     {show("transactions") && (
@@ -1061,7 +1067,7 @@ const MerchantDetailPage = dc(() => {
                         storageKey={`merchant:${merchantId.value}:health`}
                     >
                         {healthItems.value.length === 0 ? (
-                            <VAlert type="info" variant="tonal">{t("Health statistics are available to financial roles and could not be loaded.")}</VAlert>
+                            <PgAlert tone="info">{t("Health statistics are available to financial roles and could not be loaded.")}</PgAlert>
                         ) : (
                             <MetricStrip items={healthItems.value} />
                         )}
@@ -1081,7 +1087,8 @@ const MerchantDetailPage = dc(() => {
                         storageKey={`merchant:${merchantId.value}:transactions`}
                         count={stats.value?.totals?.attemptCount}
                         tone="info"
-                    >
+
+                        flush>
                         <MerchantResourceTable<MerchantTransaction>
                             title={t("Transactions")}
                             url={urlsMap.merchantTransactions(merchantId.value)}
@@ -1107,12 +1114,13 @@ const MerchantDetailPage = dc(() => {
                             subtitle={t("Wallet balances are derived from posted journal lines and checkpoint balances. Pending cash-outs are shown per wallet.")}
                             defaultOpen={true}
                             storageKey={`merchant:${merchantId.value}:wallets`}
-                        >
+
+                        flush>
                             {walletNotice.value && (
                                 <ApprovalSubmittedNotice approvalRequestId={walletNotice.value.approvalRequestId} onDismiss={() => (walletNotice.value = null)} />
                             )}
                             {isSupport.value && (
-                                <VAlert type="info" variant="tonal" density="compact">{t("Balances are hidden for your role and shown as Restricted.")}</VAlert>
+                                <PgAlert tone="info" density="compact">{t("Balances are hidden for your role and shown as Restricted.")}</PgAlert>
                             )}
                             <MerchantResourceTable<MerchantWalletRow>
                                 title={t("Wallets")}
@@ -1136,7 +1144,8 @@ const MerchantDetailPage = dc(() => {
                             defaultOpen={false}
                             storageKey={`merchant:${merchantId.value}:applications`}
                             count={entry.applicationCount}
-                        >
+
+                        flush>
                             <MerchantResourceTable<MerchantApplicationRow>
                                 title={t("Applications")}
                                 url={urlsMap.merchantApplications(merchantId.value)}
@@ -1159,7 +1168,8 @@ const MerchantDetailPage = dc(() => {
                                 subtitle={t("Cash-out requests and their adjustment state. This page is read-only; money movement remains in the finance queue.")}
                                 defaultOpen={false}
                                 storageKey={`merchant:${merchantId.value}:cashouts`}
-                            >
+
+                        flush>
                                 <MerchantResourceTable<MerchantCashout>
                                     title={t("Cash-outs")}
                                     url={urlsMap.merchantCashouts(merchantId.value)}
@@ -1178,7 +1188,8 @@ const MerchantDetailPage = dc(() => {
                                 subtitle={t("Disputes linked to this merchant's payment attempts, including evidence due dates and adjustment state.")}
                                 defaultOpen={false}
                                 storageKey={`merchant:${merchantId.value}:disputes`}
-                            >
+
+                        flush>
                                 <MerchantResourceTable<MerchantDispute>
                                     title={t("Disputes")}
                                     url={urlsMap.merchantDisputes(merchantId.value)}
@@ -1197,7 +1208,8 @@ const MerchantDetailPage = dc(() => {
                                 subtitle={t("Refunds, chargebacks, manual credits and debits linked to the merchant wallet or its attempts.")}
                                 defaultOpen={false}
                                 storageKey={`merchant:${merchantId.value}:adjustments`}
-                            >
+
+                        flush>
                                 <MerchantResourceTable<MerchantAdjustment>
                                     title={t("Adjustments")}
                                     url={urlsMap.merchantAdjustments(merchantId.value)}
@@ -1212,9 +1224,16 @@ const MerchantDetailPage = dc(() => {
                     )}
 
                     {show("details") && entry.pendingChanges && entry.pendingChanges.length > 0 && (
-                        <SurfaceCard>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Pending changes")}</ThemedText>
+                        <CollapsibleSection
+                            command={sectionCommand.value}
+                            alwaysOpen={activeTab.value !== "all"}
+                            title={t("Pending changes")}
+                            subtitle={t("Maker-checker changes waiting for an independent checker.")}
+                            count={entry.pendingChanges.length}
+                            defaultOpen={false}
+                            storageKey={`merchant:${merchantId.value}:pending`}
+                        >
+                            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 {entry.pendingChanges.map((change) => (
                                     <SurfaceCard key={change.id} variant="tonal">
                                         <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
@@ -1244,14 +1263,21 @@ const MerchantDetailPage = dc(() => {
                                         </SurfaceCardText>
                                     </SurfaceCard>
                                 ))}
-                            </SurfaceCardText>
-                        </SurfaceCard>
+                            </div>
+                        </CollapsibleSection>
                     )}
 
                     {show("compliance") && entry.amlCases && entry.amlCases.length > 0 && canAml.value && (
-                        <SurfaceCard variant="tonal" color="error">
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("AML cases")}</ThemedText>
+                        <CollapsibleSection
+                            command={sectionCommand.value}
+                            alwaysOpen={activeTab.value !== "all"}
+                            title={t("AML cases")}
+                            subtitle={t("Open AML cases associated with this merchant.")}
+                            count={entry.amlCases.length}
+                            defaultOpen={false}
+                            storageKey={`merchant:${merchantId.value}:aml`}
+                        >
+                            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                 {entry.amlCases.map((amlCase) => (
                                     <ThemedView key={amlCase.id} style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                                         <StatusBadge status={amlCase.status} label={amlCase.status} toneOverride={asBadgeTone(statusTone(amlCase.status))} />
@@ -1270,15 +1296,22 @@ const MerchantDetailPage = dc(() => {
                                         </PgButton>
                                     </ThemedView>
                                 ))}
-                            </SurfaceCardText>
-                        </SurfaceCard>
+                            </div>
+                        </CollapsibleSection>
                     )}
 
                     {show("compliance") && entry.joinRequests && entry.joinRequests.length > 0 && (
-                        <SurfaceCard>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Join requests")}</ThemedText>
+                        <CollapsibleSection
+                            command={sectionCommand.value}
+                            alwaysOpen={activeTab.value !== "all"}
+                            title={t("Join requests")}
+                            subtitle={t("Onboarding applications linked to this merchant.")}
+                            count={entry.joinRequests.length}
+                            defaultOpen={false}
+                            storageKey={`merchant:${merchantId.value}:join-requests`}
+                        >
+                            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px", flexWrap: "wrap" }}>
                                     <PgButton size="small" variant="text" onClick={() => void router.push({ name: "JoinRequests" })}>{t("Open queue")}</PgButton>
                                 </ThemedView>
                                 {(entry.joinRequests ?? []).map((row) => (
@@ -1291,16 +1324,22 @@ const MerchantDetailPage = dc(() => {
                                         </PgButton>
                                     </ThemedView>
                                 ))}
-                            </SurfaceCardText>
-                        </SurfaceCard>
+                            </div>
+                        </CollapsibleSection>
                     )}
 
                     {show("compliance") && !isSupport.value && (
-                        <SurfaceCard>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <CollapsibleSection
+                            command={sectionCommand.value}
+                            alwaysOpen={activeTab.value !== "all"}
+                            title={t("KYB evidence")}
+                            subtitle={t("Identity documents, review status and revalidation requests.")}
+                            defaultOpen={false}
+                            storageKey={`merchant:${merchantId.value}:kyb-evidence`}
+                        >
+                            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
                                     <ThemedView style={{ gap: "2px" }}>
-                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("KYB evidence")}</ThemedText>
                                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                                             {entry.kybStatus ? (
                                                 <StatusBadge status={entry.kybStatus} label={kybStatusHelp(entry.kybStatus).label} toneOverride={asBadgeTone(kybStatusHelp(entry.kybStatus).tone)} />
@@ -1355,8 +1394,8 @@ const MerchantDetailPage = dc(() => {
                                         />
                                     </ThemedView>
                                 )}
-                            </SurfaceCardText>
-                        </SurfaceCard>
+                            </div>
+                        </CollapsibleSection>
                     )}
 
                     {show("compliance") && !isSupport.value && (
@@ -1365,12 +1404,17 @@ const MerchantDetailPage = dc(() => {
                             initialOwners={entry.beneficialOwners ?? []}
                             canWrite={canKyb.value}
                             closed={entry.status === "CLOSED"}
+                            command={sectionCommand.value}
+                            alwaysOpen={activeTab.value !== "all"}
                             onChanged={reloadSilently}
                         />
                     )}
 
                     {show("access") && ((entry.users ?? []).length > 0 || (entry.accessTokens ?? []).length > 0 || (entry.credentialSets ?? []).length > 0) && (
                         <MerchantAccessCard
+                            merchantId={merchantId.value}
+                            command={sectionCommand.value}
+                            alwaysOpen={activeTab.value !== "all"}
                             users={entry.users ?? []}
                             tokens={entry.accessTokens ?? []}
                             credentialSets={entry.credentialSets ?? []}
@@ -1388,7 +1432,8 @@ const MerchantDetailPage = dc(() => {
                         subtitle={t("Notification delivery status for this merchant. Recipient addresses are masked and message payloads are never shown.")}
                         defaultOpen={false}
                         storageKey={`merchant:${merchantId.value}:notifications`}
-                    >
+
+                        flush>
                         <MerchantResourceTable<MerchantNotification>
                             title={t("Notifications")}
                             url={urlsMap.merchantNotifications(merchantId.value)}
@@ -1407,7 +1452,8 @@ const MerchantDetailPage = dc(() => {
                         subtitle={t("Lifecycle and governance events recorded against this merchant. Support sees the event and actor context without raw before/after values.")}
                         defaultOpen={false}
                         storageKey={`merchant:${merchantId.value}:audit`}
-                    >
+
+                        flush>
                         <MerchantResourceTable<MerchantAuditEvent>
                             title={t("Audit events")}
                             url={urlsMap.merchantAuditEvents(merchantId.value)}
@@ -1422,10 +1468,17 @@ const MerchantDetailPage = dc(() => {
                     )}
 
                     {show("access") && (
-                    <SurfaceCard>
-                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                            <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Field history")}</ThemedText>
+                    <CollapsibleSection
+                        command={sectionCommand.value}
+                        alwaysOpen={activeTab.value !== "all"}
+                        title={t("Field history")}
+                        subtitle={t("Recent changes to merchant profile fields.")}
+                        count={entry.fieldHistory.length}
+                        defaultOpen={false}
+                        storageKey={`merchant:${merchantId.value}:field-history`}
+                    >
+                        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                            <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px", flexWrap: "wrap" }}>
                                 <PgButton size="small" variant="text" onClick={() => (historyOpen.value = true)}>{t("View all")}</PgButton>
                             </ThemedView>
                             {entry.fieldHistory.length === 0 && <ThemedText style={{ opacity: 0.6 }}>{t("No field changes recorded")}</ThemedText>}
@@ -1440,10 +1493,10 @@ const MerchantDetailPage = dc(() => {
                                     </ThemedText>
                                 </ThemedView>
                             ))}
-                        </SurfaceCardText>
-                    </SurfaceCard>
+                        </div>
+                    </CollapsibleSection>
                     )}
-                </ThemedView>
+                </PgStack>
 
                 <MerchantActionDialog
                     open={actionOpen.value}
@@ -1512,7 +1565,7 @@ const MerchantDetailPage = dc(() => {
                     submitLabel={t("Export")}
                     onSubmit={() => void exportSummary()}
                 >
-                    <VAlert type="warning" variant="tonal">{t("The summary can include balances, disputes, cash-outs and AML counts. Respect the requester's authority and the merchant's confidentiality.")}</VAlert>
+                    <PgAlert tone="warning">{t("The summary can include balances, disputes, cash-outs and AML counts. Respect the requester's authority and the merchant's confidentiality.")}</PgAlert>
                     <FormChecklist
                         checks={[...SUMMARY_EXPORT_CHECKS]}
                         modelValue={summaryExportChecklist.value}

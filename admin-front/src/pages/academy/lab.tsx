@@ -13,6 +13,7 @@ import { loadLabs, loadMeta, loadModules, type Lab, type Module } from "@/conten
 
 export const AdminAcademyLabPage = defineComponent({
     name: "AdminAcademyLabPage",
+    rerender: true,
     setup() {
         const { t } = useLocale();
         const route = useRoute();

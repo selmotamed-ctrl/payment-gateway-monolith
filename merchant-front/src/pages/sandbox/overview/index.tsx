@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import {VAlert, PgButton} from "@pg/ui";
+import {PgAlert, PgButton} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {SurfaceCard} from "@pg/ui";
@@ -148,14 +148,14 @@ const SandboxOverviewPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={t("Sandbox Overview")} subtitle={t("A separate database, a separate core node, and zero real money.")} badge="SANDBOX" badgeTone="warning">(
+            <PageHeader title={t("Sandbox Overview")} subtitle={t("A separate database, a separate core node, and zero real money.")} badge="SANDBOX" badgeTone="warning">
                     <div class="d-flex flex-wrap ga-2 align-center">
                         <StatusBadge status="SANDBOX" label={`${overview.value?.counts.payments ?? 0} ${t("payments")}`} toneOverride="info" showDot={false} />
                         <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</PgButton>
                     </div>
-                )</PageHeader>
+            </PageHeader>
             <SandboxBanner />
-            {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
+            {error.value ? <PgAlert tone="danger" class="mb-4">{error.value}</PgAlert> : null}
             <StateView loading={loading.value} minHeight="220px">
                 <div class="d-flex flex-column ga-4">
                     <SummaryExportCard

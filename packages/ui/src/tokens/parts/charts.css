@@ -1,0 +1,154 @@
+/* Shared chart wrapper and analytics cards. Loaded after components.css. */
+
+.pg-chart {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  background: transparent;
+  min-width: 0;
+}
+
+.pg-chart__canvas {
+  width: 100%;
+  height: 100%;
+  min-height: inherit;
+}
+
+.pg-chart__state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--pg-space-inline-gap);
+  background: var(--pg-bg-surface);
+}
+
+.pg-chart__state--loading {
+  background: var(--pg-bg-surface);
+}
+
+.pg-chart__state--empty {
+  background: var(--pg-bg-surface);
+}
+
+.pg-chart__state .pg-skeleton {
+  width: 100%;
+  height: 100%;
+}
+
+.pg-chart__state .pg-skeleton__bar {
+  height: 100% !important;
+}
+
+.pg-chart__state .pg-empty {
+  max-width: 100%;
+  padding: 0;
+}
+
+/* === Analytics cards === */
+.pg-stat-chart-card {
+  min-width: 0;
+}
+
+.pg-stat-bar-chart-card {
+  min-width: 0;
+}
+
+.pg-stat-chart-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--pg-space-inline-gap);
+  margin-block-end: 16px;
+  flex-wrap: wrap;
+}
+
+.pg-stat-chart-card__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.pg-stat-chart-card__title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--pg-ink-primary);
+}
+
+.pg-stat-chart-card__subtitle {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--pg-ink-muted);
+}
+
+.pg-stat-chart-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-inline-start: auto;
+}
+
+.pg-stat-chart-card__value {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--pg-ink-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.pg-stat-chart-card__delta {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding-inline: 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pg-stat-chart-card__delta--up {
+  color: var(--pg-status-success-text);
+  background: var(--pg-status-success-bg);
+}
+
+.pg-stat-chart-card__delta--down {
+  color: var(--pg-status-danger-text);
+  background: var(--pg-status-danger-bg);
+}
+
+.pg-stat-chart-card__delta--flat {
+  color: var(--pg-ink-muted);
+  background: var(--pg-bg-surface-subtle);
+}
+
+.pg-stat-chart-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .pg-stat-chart-card__head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pg-stat-chart-card__meta {
+    justify-content: flex-start;
+    margin-inline-start: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pg-chart__canvas {
+    transition: none;
+  }
+}

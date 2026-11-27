@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
-import {PgButton} from "@pg/ui";
+import {PgButton, PgStack} from "@pg/ui";
 import { useRouter } from "vue-router";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
@@ -440,8 +440,8 @@ const JoinRequestsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Join Requests")} subtitle={t("Review onboarding applications, KYB evidence and SLA-bound decisions in one queue.")} badge={t("KYB review")} badgeTone="info">(
+            <PgStack gap="lg">
+                <PageHeader title={t("Join Requests")} subtitle={t("Review onboarding applications, KYB evidence and SLA-bound decisions in one queue.")} badge={t("KYB review")} badgeTone="info">
                         <ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
                             <StatusBadge status="info" label={`${total.value} ${t("requests")}`} toneOverride="info" showDot={false} />
                             <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
@@ -456,7 +456,7 @@ const JoinRequestsPage = dc(() => {
                                 </PgButton>
                             )}
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
                 {summary.value && (
                     <SummaryExportCard
@@ -533,7 +533,7 @@ const JoinRequestsPage = dc(() => {
                         />
                     )}
                 />
-            </ThemedView>
+            </PgStack>
 
             <SlideOverDrawer
                 modelValue={inspectionOpen.value}

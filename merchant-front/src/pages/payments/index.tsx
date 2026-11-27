@@ -1,9 +1,8 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {PgPage as ScreenContainer} from "@pg/ui";
+import {PgPage as ScreenContainer, PgStack} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
 import {StateView} from "@pg/ui";
 import { DataTable } from "@/tables/DataTable";
 import type { TableHeader } from "@pg/ui";
@@ -119,7 +118,7 @@ const PaymentsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
+            <PgStack gap="lg">
                 <PageHeader
                     title={t("Payments")}
                     subtitle={t("Payment attempts, statuses, and settlement references.")}
@@ -140,7 +139,7 @@ const PaymentsPage = dc(() => {
                         setSearchValue={(value) => (search.value = value)}
                     />
                 )}
-            </ThemedView>
+            </PgStack>
         </ScreenContainer>
     );
 });

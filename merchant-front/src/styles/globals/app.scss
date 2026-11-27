@@ -512,16 +512,35 @@ html {
 .pg-drawer__brand-text {
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
+    gap: 1px;
     min-width: 0;
 }
 
 .pg-drawer__title {
-    font-size: 14px;
+    font-size: 13.5px;
     font-weight: 600;
     line-height: 1.2;
+    /* The brand is a single-line lockup: never let "Payment Gateway" break
+       between words when the drawer narrows (it previously needed 123.5px and
+       received 122.5px, so it wrapped by a hair). */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pg-drawer__meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
 }
 
 .pg-drawer__subtitle {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 10.5px;
     color: var(--pg-ink-muted);
 }

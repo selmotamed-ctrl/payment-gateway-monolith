@@ -1,6 +1,6 @@
 import { computed, ref, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import {VAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -245,9 +245,9 @@ export const NotificationTemplatesTab = defineComponent({
 
         return (): VNodeChild => (
             <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("Editing a template never changes it in place: saving creates a new version and retires the previous one. Only placeholders already used by the same template code are accepted.")}
-                </VAlert>
+                </PgAlert>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
                     <div style={{ flex: "1 1 220px" }}>
                         <FormField label={t("Search templates")}>
@@ -391,14 +391,14 @@ export const NotificationTemplatesTab = defineComponent({
                     errorMessage={saveError.value}
                 >
                     {unknownFromServer.value && (
-                        <VAlert type="error" variant="tonal" density="compact">
+                        <PgAlert tone="danger" density="compact">
                             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                                 <span>{t("Unknown placeholders")}:</span>
                                 <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>{unknownFromServer.value.unknown.map((name) => chip(placeholderText(name), "danger"))}</div>
                                 <span>{t("Allowed placeholders")}:</span>
                                 <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>{unknownFromServer.value.allowed.map((name) => chip(placeholderText(name)))}</div>
                             </div>
-                        </VAlert>
+                        </PgAlert>
                     )}
                     {editing.value && editing.value.channel === "EMAIL" && (
                         <FormField label={t("Subject")}>

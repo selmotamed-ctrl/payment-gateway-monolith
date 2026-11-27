@@ -14,7 +14,7 @@ const App = dc(() => {
     const config = createUiConfig(router);
     return () => (
         <PgProvider config={config}>
-            <PgApp style={{ height: "100%", width: "100%" }}>
+            <PgApp style={{ width: "100%" }}>
                 <PrintProvider ref={(instance) => { printProvider.value = instance as any; }} />
                 <PgConfirmDialog ref={(instance) => { confirmDialogInstance.value = instance as any; }} />
                 <PgDetailsDialog

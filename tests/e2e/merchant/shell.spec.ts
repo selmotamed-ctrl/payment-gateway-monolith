@@ -55,6 +55,30 @@ test.describe("merchant shell", () => {
     await expect(page.locator(".pg-drawer .pg-status-badge").first()).toHaveText("SANDBOX");
   });
 
+  test("the drawer brand title stays on a single line in live and sandbox", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const measureTitle = () =>
+      page.locator(".pg-drawer__title").evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          height: element.getBoundingClientRect().height,
+          lineHeight: Number.parseFloat(style.lineHeight),
+          scrollWidth: element.scrollWidth,
+          clientWidth: element.clientWidth,
+          text: element.textContent?.trim(),
+        };
+      });
+
+    for (const path of ["/portal/dashboard", "/portal/sandbox/overview"]) {
+      await page.goto(path);
+      await expect(page.locator(".pg-drawer__title")).toBeVisible();
+      const title = await measureTitle();
+      expect(title.text).toBe("Payment Gateway");
+      expect(title.height).toBeLessThanOrEqual(title.lineHeight * 1.5);
+      expect(title.scrollWidth).toBeLessThanOrEqual(title.clientWidth + 1);
+    }
+  });
+
   test("a sandbox mirror page calls only sandbox API paths", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const paths: string[] = [];

@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgFileUpload} from "@pg/ui";
+import {PgAlert, PgFileUpload} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import {DescriptionList, FormField, MonoRef, type DescriptionItem} from "@pg/ui";
@@ -50,9 +50,9 @@ export const PushOrTransferRenderer = dc(
                     </ThemedText>
 
                     {props.error && (
-                        <VAlert type="error" variant="tonal" density="compact">
+                        <PgAlert tone="danger" density="compact">
                             {props.error}
-                        </VAlert>
+                        </PgAlert>
                     )}
 
                     <DescriptionList ariaLabel={t("Instructions")} items={referenceItems} />

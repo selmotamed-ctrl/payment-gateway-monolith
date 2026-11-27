@@ -3,8 +3,8 @@ id: merchant-ui.portal
 title: Merchant Portal
 status: partial
 confidence: high
-last_verified: 2026-11-25
-verified_against: d695518+working-tree
+last_verified: 2026-11-27
+verified_against: working-tree
 code:
   - merchant-front/src/pages/sandbox/**
   - merchant-front/src/router/index.ts
@@ -136,6 +136,7 @@ Rules:
 
 - 56 px app bar with menu toggle, brand, breadcrumbs, guide search, help, theme mode menu (System/Light/Dark), AR/EN language controls and account menu.
 - 248 px drawer permanent on desktop and temporary on compact screens.
+- Drawer brand lockup: 28 px mark, one-line 13.5 px "Payment Gateway" wordmark with ellipsis, and a meta row with the "Merchant Portal" subtitle plus a small `LIVE`/`SANDBOX` environment badge. The badge shares the subtitle line, not the wordmark line, so the title never wraps; the same lockup and CSS are mirrored in the admin shell (see `admin-ui.system` §19.8).
 - Drawer sections: Overview, Money, Commerce, Developer.
 - Active navigation uses `meta.parentName` or the longest matching path.
 - Guide search pill and `Ctrl+K` open the merchant guide search modal.
@@ -364,7 +365,7 @@ The portal uses no admin checklist/help-panel flags. Its shell always exposes gu
 
 ## 8. Verification and tests
 
-- `tests/e2e/merchant/shell.spec.ts` checks the merchant shell, drawer, navigation rendering, locale re-translation, overflow, mobile behavior and removed scaling.
+- `tests/e2e/merchant/shell.spec.ts` checks the merchant shell, drawer, navigation rendering, locale re-translation, overflow, mobile behavior and removed scaling, including a regression that the drawer wordmark stays on one line (without overflow) in both LIVE and SANDBOX routes.
 - `tests/e2e/merchant/auth.spec.ts` covers authentication entry behavior.
 - `tests/e2e/merchant/a11y.spec.ts` covers accessibility basics.
 - `tests/e2e/exhaustive/exhaustive-merchant-surface.spec.ts` enumerates the portal routes and viewport/locale/theme matrix.
@@ -479,5 +480,5 @@ table toolbar. `src/uiConfig.tsx` supplies the API client, error extractor, XLSX
 and clipboard to the package. The old `components/vael/VuetifyShim`, `components/ui/*`, `TextField`, `Card`,
 `AlertView`, `SnackBar`, `ThemeMenu` copies and `styles/{fintech-minimal,vael-shim,vael-theme}.css` are deleted.
 Feature-only `InputFields`/`FiltersContainer`/`DataTable`/`EChart`/`Printables` moved to `src/forms`,
-`src/tables`, `src/charts` and `src/printables`; no primitive is duplicated. Tokens are imported once in
+`src/tables` and `src/printables`; no primitive is duplicated. Tokens are imported once in
 `main.ts` (`@pg/ui/tokens/index.css`). The UI gate (`bun run ui:audit`) passes with zero violations.

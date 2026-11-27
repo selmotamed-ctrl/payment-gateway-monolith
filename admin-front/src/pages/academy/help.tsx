@@ -44,11 +44,11 @@ export const AdminAcademyHelpPage = defineComponent({
             }
         };
         const header = () => (
-            <PageHeader title={t("Help")} subtitle={t("How the Academy works, how scoring works, and common questions.")}>(
+            <PageHeader title={t("Help")} subtitle={t("How the Academy works, how scoring works, and common questions.")}>
                     <PgButton variant="tonal" prependIcon="mdi-link-variant" onClick={() => void copyHelpLink()}>
                         {linkCopied.value ? t("Link copied") : t("Copy help link")}
                     </PgButton>
-                )</PageHeader>
+            </PageHeader>
         );
 
         const rail = () => (

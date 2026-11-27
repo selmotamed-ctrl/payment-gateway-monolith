@@ -3,11 +3,13 @@ id: admin-ui.help
 title: Contextual Help
 status: implemented
 confidence: high
-last_verified: 2026-11-04
+last_verified: 2026-11-27
 verified_against: working-tree
 code:
   - admin-front/src/components/guide/ContextHelpButton.tsx
   - admin-front/src/components/guide/ContextHelpDrawer.tsx
+  - admin-front/src/components/guide/ContextualHelpDrawer.tsx
+  - admin-front/src/components/guide/resolveGuideScreen.ts
   - admin-front/src/components/guide/useContextHelp.ts
   - admin-front/src/components/guide/SafeguardDialog.tsx
   - admin-front/src/components/guide/useSafeguard.ts
@@ -22,13 +24,14 @@ design_sources:
   - design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md
 tests:
   - tests/unit/guide-content.test.ts
+  - tests/unit/guide-screen-resolution.test.ts
   - tests/e2e/admin/guide-context.spec.ts
   - tests/e2e/admin/guide-safeguard.spec.ts
   - tests/e2e/admin/global-search.spec.ts
   - tests/e2e/exhaustive/exhaustive-admin-surface.spec.ts
 gaps:
   - Drawer summaries, card titles and situation titles are English-only; the route/screen map is generated from the English guide design.
-  - The context map used stale route-name guesses; missing names were added to the owning screen or `General` and logged in `design/07-guides-and-academy/guide_content_fixes.md`.
+  - The context map used stale route-name guesses; missing names were added to the owning screen or `General` and logged in `design/07-guides-and-academy/guide_content_fixes.md`. `/transactions` now has its own screen instead of sharing `OperatorCases`.
   - The merchant drawer and checkout help center remain separate products and are not fed by the admin context map.
 ---
 
@@ -36,39 +39,43 @@ gaps:
 
 ## 1. Purpose and scope
 
-This part owns the admin contextual-help button and drawer, the 30-screen context map, and the safeguard dialog that appears before risky actions. The merchant portal drawer and payer checkout help are separate products; this part only records their boundary.
+This part owns the admin contextual-help button and drawer, the 32-screen context map, and the safeguard dialog that appears before risky actions. The merchant portal drawer and payer checkout help are separate products; this part only records their boundary.
 
 ## 2. As-built architecture
 
 ### 2.1 Button
 
-`packages/ui/src/layout/PgPageHeader.tsx` renders `ContextHelpButton` automatically. The button uses the current route name, preferring `route.meta.parentName` over `route.name`, and opens a shared drawer through `useContextHelp()`. Pages never wire the button by hand. The app-bar "Help & SOP" button and the `?` shortcut open the same drawer with the same parent-first rule.
+`packages/ui/src/layout/PgPageHeader.tsx` renders `ContextHelpButton` automatically. The button uses the current route name, preferring `route.meta.parentName` over `route.name`, and opens a shared drawer through `useContextHelp()`. Pages never wire the button by hand. The app-bar "Help & SOP" button and the `?` shortcut open the same drawer. The drawer resolves the current path through `resolveGuideScreenForPath`, so path specificity decides the screen even when a stored route name is ambiguous.
 
 The accessible name is "How this page works".
 
 ### 2.2 Context map
 
-`context-map.json` is generated from `@@map id=context-map` in the guide design. It contains `fallbackScreenId` plus 30 `ContextScreen` entries with `screenId`, `routeNames`, `pageDir`, `summary`, `articles`, `cards` and `situations`.
+`context-map.json` is generated from `@@map id=context-map` in the guide design. It contains `fallbackScreenId` plus 32 `ContextScreen` entries with `screenId`, `routeNames`, `pageDir`, `summary`, `articles`, `cards` and `situations`.
 
-Resolution rules:
+Resolution rules (`resolveGuideScreenForPath`):
 
-1. Find the first screen whose `routeNames` contains the current route name.
-2. If none matches, use the screen whose `screenId` equals `fallbackScreenId` (`General`).
-3. `pageDir` is the `admin-front/src` folder used by the label-verification procedure.
+1. Normalize the path (`?query`/`#hash` and trailing slashes removed).
+2. Match an exact path from the router records or a screen's `pageDir`.
+3. Match an exact dynamic route (`/wallets/:id`, `/wallets/abc`).
+4. Match an exact route name (`route.meta.parentName ?? route.name`).
+5. Match the longest segment-aligned path prefix (`/finance/pricing` -> `/finance`). A broad `/operator-cases` entry can never capture `/transactions`.
+6. Use the screen whose `screenId` equals `fallbackScreenId` (`General`).
+7. `pageDir` is also the `admin-front/src` folder used by the label-verification procedure.
 
-The route-coverage unit test parses every named route in `router/index.ts` (except `Login` and `NotFound`) and fails if a name has no context-map entry. Missing names were added to the owning screen or `General` and logged in `design/07-guides-and-academy/guide_content_fixes.md`.
+The route-coverage unit test parses every named route in `router/index.ts` (except `Login` and `NotFound`) and fails if a name has no context-map entry. `tests/unit/guide-screen-resolution.test.ts` pins `/transactions`, `/merchants`, `/reports/catalog`, `/operator-cases` and `/wallets/:id`. Missing names were added to the owning screen or `General` and logged in `design/07-guides-and-academy/guide_content_fixes.md`.
 
 ### 2.3 Drawer
 
-`ContextHelpDrawer` is a non-modal navigation drawer, 420 px wide, placed on the inline-end side (right in LTR, left in RTL). It shows:
+`ContextHelpDrawer` is a non-modal navigation drawer, 420 px wide, placed on the inline-end side (right in LTR, left in RTL). The header is a flex row (title block `min-width: 0`, 32 px close button `flex-shrink: 0`) and never overlays the content. It shows:
 
 1. **What this screen is for** — the screen summary.
-2. **Before you act** — collapsible safeguard cards with risk badges and the full four-section body.
+2. **Before you act** — collapsible safeguard cards. The risk pill is `PgStatusBadge` (`HIGH` is sent as `HIGH_RISK`; `CRITICAL` is `CRITICAL`), so both use the shared danger tokens; an irreversible action uses a compact `PgAlert`.
 3. **Common problems** — situation links.
 4. **Learn more** — article links.
 5. **Open the whole guide** — route to `AdminGuide`.
 
-The drawer does not unmount or reset the page, and a test types into the merchant filter, opens the drawer, closes it and asserts the value remains.
+The drawer does not unmount or reset the page, and a test types into the merchant filter, opens the drawer, closes it and asserts the value remains. `ContextualHelpDrawer` is a compatibility shell and delegates to `ContextHelpDrawer` so the two drawers cannot drift.
 
 ### 2.4 Safeguard dialog
 
@@ -84,8 +91,8 @@ The integration points are the 22 action areas named in the guide design: approv
 ## 3. Contracts and invariants
 
 1. Help is always one button away in `PageHeader`; no page wires it manually.
-2. The route key is parent-first, matching navigation and breadcrumbs.
-3. Unknown route names always fall back to `General`.
+2. The current path resolves to the most specific screen (exact path, dynamic route, route name, longest segment-aligned prefix).
+3. Unknown paths and route names always fall back to `General`.
 4. Opening help never navigates or resets form state.
 5. The drawer never substitutes for an approval; safeguards are additional, not a replacement.
 6. The guide and drawer contain no live data, secrets or external links.
@@ -97,6 +104,8 @@ The integration points are the 22 action areas named in the guide design: approv
 | :--- | :--- |
 | Button | `admin-front/src/components/guide/ContextHelpButton.tsx` |
 | Drawer | `admin-front/src/components/guide/ContextHelpDrawer.tsx` |
+| Drawer compatibility shell | `admin-front/src/components/guide/ContextualHelpDrawer.tsx` |
+| Screen resolver | `admin-front/src/components/guide/resolveGuideScreen.ts` |
 | Shared state | `admin-front/src/components/guide/useContextHelp.ts` |
 | Safeguard dialog | `admin-front/src/components/guide/SafeguardDialog.tsx` |
 | Safeguard composable | `admin-front/src/components/guide/useSafeguard.ts` |
@@ -108,4 +117,4 @@ The integration points are the 22 action areas named in the guide design: approv
 
 ## 5. Verification
 
-`tests/unit/guide-content.test.ts` checks route coverage. `tests/e2e/admin/guide-context.spec.ts` checks five representative routes and form-state preservation. `tests/e2e/admin/guide-safeguard.spec.ts` checks the disabled Continue button, required checks and that Cancel sends no request.
+`tests/unit/guide-content.test.ts` checks route coverage; `tests/unit/guide-screen-resolution.test.ts` checks the path resolver. `tests/e2e/admin/guide-context.spec.ts` checks representative routes (including `/transactions` mapping to Transactions rather than OperatorCases) and form-state preservation. `tests/e2e/admin/guide-safeguard.spec.ts` checks the disabled Continue button, required checks and that Cancel sends no request.

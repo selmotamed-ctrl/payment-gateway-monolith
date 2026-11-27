@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import {VAlert, PgButton, PgSpinner, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgSpinner, PgAutocomplete, PgTextField, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -467,14 +467,16 @@ const AmlRulesPage = dc(() => {
     ]);
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("AML Rules")} subtitle={t("Manage AML rule versions and thresholds through maker-checker approval.")} badge="AML-CONFIDENTIAL" badgeTone="danger">tab.value !== "rules" ? null : (
+            <PgStack gap="lg">
+                <PageHeader title={t("AML Rules")} subtitle={t("Manage AML rule versions and thresholds through maker-checker approval.")} badge="AML-CONFIDENTIAL" badgeTone="danger">
+                    {tab.value !== "rules" ? null : (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</PgButton>
                             <PgButton color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("Draft rule")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                    )}
+                </PageHeader>
                 <SegmentedTabs
                     modelValue={tab.value}
                     onUpdate:modelValue={(value: string) => (tab.value = value === "reporting" ? "reporting" : "rules")}
@@ -488,9 +490,9 @@ const AmlRulesPage = dc(() => {
                     <ReportingRulesTab />
                 ) : (
                     <>
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("Every AML rule change is a maker-checker request. The rule stays inactive until a different MLRO or authorised checker approves it.")}
-                </VAlert>
+                </PgAlert>
                 {summary.value && (
                     <SummaryExportCard
                         title={t("Rule posture")}
@@ -571,7 +573,7 @@ const AmlRulesPage = dc(() => {
                 />
                     </>
                 )}
-            </ThemedView>
+            </PgStack>
             <SlideOverDrawer
                 modelValue={detailsOpen.value}
                 onUpdate:modelValue={(value: boolean) => {
@@ -644,9 +646,9 @@ const AmlRulesPage = dc(() => {
                 submitLabel={t("Export")}
                 onSubmit={() => void exportExcel()}
             >
-                <VAlert type="error" variant="tonal">
+                <PgAlert tone="danger">
                     {t("AML rule exports contain confidential thresholds and scope. Confirm handling and authority before exporting.")}
-                </VAlert>
+                </PgAlert>
                 <FormChecklist
                     checks={[...RULE_EXPORT_CHECKS]}
                     modelValue={listExportChecklist.value}
@@ -667,7 +669,7 @@ const AmlRulesPage = dc(() => {
                 submitLabel={t("Create draft")}
                 onSubmit={() => void submit()}
             >
-                <VAlert type="info" variant="tonal">{t("The rule is created inactive and an approval request is issued. A different authorised checker must approve it.")}</VAlert>
+                <PgAlert tone="info">{t("The rule is created inactive and an approval request is issued. A different authorised checker must approve it.")}</PgAlert>
                 <SectionFields title={t("Rule definition")}>
                     <FormField label={t("Code")} required sensitiveMakerChecker>
                         <PgTextField modelValue={form.value.code} onUpdate:modelValue={(value: string) => (form.value.code = value)} hideDetails />

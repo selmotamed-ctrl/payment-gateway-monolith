@@ -18,6 +18,17 @@ compiled by every portal with `vueJsx({ vapor: true })`. No portal has its own c
   `variant="flat"`, `color="primary"`, `prependIcon`, `to`, `density="compact"`, `hideDetails`, `rules`).
 - Every visual decision uses a `--pg-*` token. No page owns a colour or a container padding.
 - Components are RTL-aware and follow `data-theme="dark"` (or `.v-theme--dark`).
+- Action hierarchy: only `primary`/`danger` are filled. `tonal`, `outlined` and `secondary` are quiet outlined
+  actions for Refresh/Export/Copy and page utilities; never use a filled block for a utility action. Press feedback is
+  a 1 px settle (`translateY(1px)`), never a scale transform that visually shrinks the label.
+- Inputs: one 1 px control border and, on focus, one 2 px monochrome outline (`--pg-border-focus`: black in light,
+  white in dark, danger for errors). No blue glow, no second inner outline and no soft grey halo.
+- Menus/popovers that belong to an input (autocomplete, date picker) use a flat 1 px outline with square inner rows:
+  no inner padding and selected/hover rows fill the full width.
+- Tables: the surrounding card is flat (no nested border/radius); the sticky action column ends with a 2 px rule and
+  never casts a shadow over the rows. A table-only section uses zero body padding so the table is the surface.
+- Overlay stack: the newest dialog/drawer is the topmost interactive surface. Clicking inside it must never close the
+  drawer below it; dialogs assign a stack z-index and outside-click handlers use `isTopOverlay`.
 
 ## Tokens
 
@@ -54,7 +65,7 @@ layout classes that existed before the migration.
 
 | Export | Notes |
 | :--- | :--- |
-| `PgButton` / `VBtn` | `variant`: `primary`, `secondary`, `tonal`, `outlined`, `text`, `ghost`, `danger`, `outlined-danger`, `text-danger`; sizes `sm/md/lg`; `icon`, `prependIcon`, `appendIcon`, `loading`, `block`, `rounded`, `to`, `href`. |
+| `PgButton` / `VBtn` | `variant`: `primary`, `secondary`, `tonal`, `outlined`, `text`, `ghost`, `danger`, `outlined-danger`, `text-danger`; sizes `sm/md/lg`; `icon`, `prependIcon`, `appendIcon`, `loading`, `block`, `rounded`, `to`, `href`. `tonal` is a quiet outlined utility action (Refresh/Export/Copy), not a filled block; press is a 1 px settle with no label scaling. |
 | `PgIcon` / `VIcon` / `AppIcon` | Inline SVG from the generated `@mdi/js` registry; `name`/`icon`, `size`, `color` token, `label`, `directional`. |
 | `PgSegmentedTabs` | WAI-ARIA tablist pill track; arrow/Home/End keys. |
 | `PgSpinner`, `PgProgressBar` | Accessible ring and rounded progress bar. |
@@ -64,7 +75,7 @@ layout classes that existed before the migration.
 | Export | Notes |
 | :--- | :--- |
 | `PgFieldShell` | Label, required mark, hint, error, counter. |
-| `PgTextField` / `VTextField` | 40 px control (36 sm), neutral focus ring, label/hint/error, prefix/suffix, leading/trailing icon, clear, password reveal, max length, counter, `rules`. |
+| `PgTextField` / `VTextField` | 40 px control (36 sm), single monochrome focus outline (black/light, white/dark), label/hint/error, prefix/suffix, leading/trailing icon, clear, password reveal, max length, counter, `rules`. |
 | `PgTextarea` / `VTextarea` | Auto-grow textarea sharing the field shell. |
 | `PgSearchInput` | Toolbar search with magnifier, clear, debounced `search`, ⌘K hint. |
 | `PgAutocomplete` / `VSelect` / `VAutocomplete` / `VCombobox` | WAI-ARIA combobox: single/multi, chips, `creatable`, keyboard navigation, viewport-aware panel, no native `<select>`. |
@@ -91,7 +102,7 @@ layout classes that existed before the migration.
 
 | Export | Notes |
 | :--- | :--- |
-| `PgDialog` / `VDialog` | Strict header/body/footer zones; the × lives in the header flex end and can never overlap content. Focus trap, scroll lock, Escape/overlay close. |
+| `PgDialog` / `VDialog` | Strict header/body/footer zones; the × lives in the header flex end and can never overlap content. Focus trap, scroll lock, Escape/overlay close. `bare` removes the dialog surface and body padding so the slot content is the only card (command palettes). |
 | `PgDrawer` / `SlideOverDrawer` | Stacking slide-over with header/body/footer. |
 | `PgFormModal` / `FormModal` | Standard form modal with Cancel/Save and a real `<form>` submit. |
 | `PgConfirmDialog` | `show(options)` service used by `showConfirm`. |
@@ -103,7 +114,7 @@ layout classes that existed before the migration.
 
 | Export | Notes |
 | :--- | :--- |
-| `PgMetricStrip` / `MetricStrip` / `MiniStats` | Seamless zero-gap KPI bento; inset hairlines, no exposed gray cells. |
+| `PgMetricStrip` / `MetricStrip` / `MiniStats` | One rounded KPI surface with 1 px internal separators, square child cells and no exposed gray cells. |
 | `PgMoneyText` / `MoneyDisplay` | Tabular 3-decimal LYD / 2-decimal USD, sign colouring. |
 | `PgMonoRef` / `MonoRef` | Monospace reference with one-click copy. |
 | `PgDescriptionList`, `PgField`, `PgFieldsSection`, `PgSectionFields` | Key/value detail surfaces with copy and help tooltips. |
@@ -129,3 +140,10 @@ bun run ui:icons:check    # generated icon registry is current
 
 `packages/ui/src/testing/governanceAudit.ts` holds the pure rules used by the CLI gate and the tests. See the root
 `AGENTS.md` UI policy before adding a component.
+
+### Vapor authoring note
+
+`v-slots` must be an object literal with the children outside it. A conditional expression
+(`v-slots={flag ? { headerActions: () => ... } : undefined}`) drops the default slot and renders an empty card.
+Put the condition inside the slot value instead: `v-slots={{ headerActions: () => (flag ? <X /> : null) }}`.
+The UI-20 governance rule rejects the broken form.

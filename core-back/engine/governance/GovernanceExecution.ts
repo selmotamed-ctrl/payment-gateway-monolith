@@ -45,6 +45,10 @@ import { attemptRowToDynamicAttempt, type AttemptRow } from "../runtime/attemptR
 import type { InvalidationBus } from "../../lib/invalidationBus";
 import { enqueueOutboxEvent } from "../../lib/storageEngine/outbox";
 import { appendCaseEvent } from "../../lib/operatorCases/caseService";
+import {
+  SYSTEM_AUTOMATION_EMAIL,
+  SYSTEM_AUTOMATION_USER_ID,
+} from "../../lib/systemAutomationUser";
 
 /**
  * Executable governance.
@@ -68,9 +72,13 @@ import { appendCaseEvent } from "../../lib/operatorCases/caseService";
  * it is `DISABLED`, it carries no authority and it can never be a checker:
  * the maker-checker separation is enforced in this module as well as in the
  * HTTP layer.
+ *
+ * The constants live in `lib/systemAutomationUser` so the synthetic seeder can
+ * reuse the same identity without importing this module (and its env-bound
+ * dependencies) from a DB-free test.
  */
-export const SYSTEM_AUTOMATION_USER_ID = "SYSTEM_AUTOMATION";
-export const SYSTEM_AUTOMATION_EMAIL = "system-drafter@payment-gateway.internal";
+
+export { SYSTEM_AUTOMATION_EMAIL, SYSTEM_AUTOMATION_USER_ID };
 
 export type GovernanceExecutionStatus = "EXECUTED" | "HELD" | "SKIPPED";
 

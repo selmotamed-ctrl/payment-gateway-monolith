@@ -73,6 +73,7 @@ export const ExamRunner = dc((props: Props) => {
     const flagged = ref<string[]>((draft?.flagged ?? []).filter((qid) => validQids.has(qid)));
     const numText = ref<Record<string, string>>(draft?.numText ?? {});
     const index = ref(Math.min(Math.max(0, draft?.index ?? 0), Math.max(0, questions.length - 1)));
+    const currentQuestion = computed(() => questions[index.value]);
     const confirmOpen = ref(false);
     const root = ref<HTMLElement | null>(null);
     const heading = ref<HTMLElement | null>(null);
@@ -326,39 +327,36 @@ export const ExamRunner = dc((props: Props) => {
     );
 
     return () => {
-        const q = questions[index.value];
-        const flaggedCount = flagged.value.length;
-        const tone = clockTone.value;
         return (
             <div ref={root} class="ac-exam-runner">
                 <div aria-live="polite" role="status" class="ac-sr-only">{announcement.value}</div>
 
                 <div class="ac-split ac-split--reading">
                     <div class="ac-stack">
-                        {q && (
-                            <SurfaceCard key={q.qid} class="ac-card">
+                        {currentQuestion.value && (
+                            <SurfaceCard key={currentQuestion.value!.qid} class="ac-card">
                                 <div class="ac-stack">
                                     <div class="ac-between">
                                         <span class="ac-eyebrow ac-exam-qeyebrow">{`${t("Question")} ${index.value + 1}`}</span>
-                                        <span class={["ac-exam-clock-compact", `ac-exam-clock-compact--${tone}`]} aria-hidden="true" dir="ltr">
-                                            <PgIcon icon={CLOCK_ICON[tone]} size={14} />
+                                        <span class={["ac-exam-clock-compact", `ac-exam-clock-compact--${clockTone.value}`]} aria-hidden="true" dir="ltr">
+                                            <PgIcon icon={CLOCK_ICON[clockTone.value]} size={14} />
                                             {formatClock(remaining.value)}
                                         </span>
-                                        {flagged.value.includes(q.qid) && (
+                                        {flagged.value.includes(currentQuestion.value!.qid) && (
                                             <MetaPill color="warning" prependIcon="mdi-flag">
                                                 {t("Flagged for review")}
                                             </MetaPill>
                                         )}
                                     </div>
-                                    <h2 id={`stem-${q.qid}`} ref={heading} tabindex={-1} class="ac-exam-stem" dir="auto">
-                                        {q.stem}
+                                    <h2 id={`stem-${currentQuestion.value!.qid}`} ref={heading} tabindex={-1} class="ac-exam-stem" dir="auto">
+                                        {currentQuestion.value!.stem}
                                     </h2>
-                                    {renderQuestion(q)}
+                                    {renderQuestion(currentQuestion.value!)}
                                     <PgChoice
                                         type="checkbox"
                                         class="ac-exam-flag"
-                                        checked={flagged.value.includes(q.qid)}
-                                        onChange={() => toggleFlag(q.qid)}
+                                        checked={flagged.value.includes(currentQuestion.value!.qid)}
+                                        onChange={() => toggleFlag(currentQuestion.value!.qid)}
                                     >
                                         <PgIcon icon="mdi-flag-outline" size={16} />
                                         <span>{t("Flag this question for review")}</span>
@@ -396,9 +394,9 @@ export const ExamRunner = dc((props: Props) => {
                     </div>
 
                     <aside class="ac-aside ac-exam-aside">
-                        <SurfaceCard class="ac-card" color={tone === "warning" ? "warning" : tone === "danger" ? "error" : ""}>
-                            <div class={["ac-exam-timer", `ac-exam-timer--${tone}`]}>
-                                <PgIcon class="ac-exam-timer__icon" icon={CLOCK_ICON[tone]} size={26} />
+                        <SurfaceCard class="ac-card" color={clockTone.value === "warning" ? "warning" : clockTone.value === "danger" ? "error" : ""}>
+                            <div class={["ac-exam-timer", `ac-exam-timer--${clockTone.value}`]}>
+                                <PgIcon class="ac-exam-timer__icon" icon={CLOCK_ICON[clockTone.value]} size={26} />
                                 <div class="ac-exam-timer__body">
                                     <span class="ac-exam-timer__label">{t("Time remaining")}</span>
                                     <span role="timer" aria-live="off" aria-label={t("Time remaining")} class="ac-exam-clock ac-num" dir="ltr">
@@ -451,8 +449,8 @@ export const ExamRunner = dc((props: Props) => {
                                     <span class="ac-step__title ac-num">{`${unanswered.value} ${t("unanswered")}`}</span>
                                 </li>
                                 <li class="ac-step">
-                                    <StateIcon state={flaggedCount > 0 ? "partial" : "done"} />
-                                    <span class="ac-step__title ac-num">{`${flaggedCount} ${t("flagged for review")}`}</span>
+                                    <StateIcon state={flagged.value.length > 0 ? "partial" : "done"} />
+                                    <span class="ac-step__title ac-num">{`${flagged.value.length} ${t("flagged for review")}`}</span>
                                 </li>
                             </ul>
                             <p class="ac-text">{t("Once you submit, the exam is graded and you cannot change your answers.")}</p>

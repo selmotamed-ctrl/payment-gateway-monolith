@@ -2,12 +2,11 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import {VAlert, PgButton} from "@pg/ui";
+import {PgAlert, PgButton, PgStack} from "@pg/ui";
 import {FormChecklist} from "@pg/ui";
 import {FormModal} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import {PgPage as ScreenContainer} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
 import {ApiTable} from "@pg/ui";
 import {TableRowActions} from "@pg/ui";
 import type { TableHeader } from "@pg/ui";
@@ -240,8 +239,8 @@ const Page = dc(() => {
 
   return () => (
     <ScreenContainer>
-      <ThemedView style={{ gap: "18px" }}>
-        <PageHeader title={t("Headers & Footers Needing Migration")} subtitle={t("Platform headers and footers that must be migrated before dependent reports can run")} badge="NEEDS_MIGRATION" badgeLabel={t("Needs migration")} badgeTone="danger">(
+    <PgStack gap="lg">
+        <PageHeader title={t("Headers & Footers Needing Migration")} subtitle={t("Platform headers and footers that must be migrated before dependent reports can run")} badge="NEEDS_MIGRATION" badgeLabel={t("Needs migration")} badgeTone="danger">
             <div class="d-flex flex-wrap ga-2">
               <PgButton variant="tonal" prependIcon="mdi-file-chart-outline" onClick={() => void router.push({ name: "ReportsNeedsMigration" })}>
                 {t("Report migration")}
@@ -255,11 +254,11 @@ const Page = dc(() => {
                 {t("Refresh")}
               </PgButton>
             </div>
-          )</PageHeader>
+        </PageHeader>
         {defaultIssues.value.length > 0 && (
-          <VAlert type="warning" variant="tonal">
+          <PgAlert tone="warning">
             {defaultIssues.value.join(" · ")}
-          </VAlert>
+          </PgAlert>
         )}
         <ApiTable<ChromeMigrationRow>
           title={t("Headers & Footers Needing Migration")}
@@ -281,7 +280,7 @@ const Page = dc(() => {
             void refreshTable({ queryParams: { page: table.page, pageSize: pageSize.value, ...(search.value ? { search: search.value } : {}) } });
           }}
         />
-      </ThemedView>
+      </PgStack>
       <FormModal
         modelValue={reconcileOpen.value}
         onUpdate:modelValue={(value: boolean) => (reconcileOpen.value = value)}

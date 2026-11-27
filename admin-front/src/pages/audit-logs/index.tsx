@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import {VAlert, PgButton, PgDivider} from "@pg/ui";
+import {PgAlert, PgButton, PgDivider, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -364,17 +364,17 @@ const AuditLogsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Audit Log")} subtitle={t("Immutable operator and system activity across the platform.")}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Audit Log")} subtitle={t("Immutable operator and system activity across the platform.")}>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("Every privileged action is recorded here. Before and after payloads are read-only and cannot be edited or deleted from the portal.")}
-                </VAlert>
+                </PgAlert>
 
                 {summary.value && (
                     <SummaryExportCard
@@ -453,7 +453,7 @@ const AuditLogsPage = dc(() => {
                         />
                     )}
                 />
-            </ThemedView>
+            </PgStack>
 
             <FormModal
                 modelValue={exportOpen.value}
@@ -464,7 +464,7 @@ const AuditLogsPage = dc(() => {
                 submitLabel={t("Export")}
                 onSubmit={() => void exportExcel()}
             >
-                <VAlert type="warning" variant="tonal">{t("The export contains actor identities and before/after payloads. Handle the file as confidential evidence.")}</VAlert>
+                <PgAlert tone="warning">{t("The export contains actor identities and before/after payloads. Handle the file as confidential evidence.")}</PgAlert>
                 <FormChecklist
                     checks={[...EXPORT_CHECKS]}
                     modelValue={exportChecklist.value}

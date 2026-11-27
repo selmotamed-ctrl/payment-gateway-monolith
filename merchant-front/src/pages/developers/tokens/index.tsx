@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {PgButton, PgTextField} from "@pg/ui";
+import {PgButton, PgTextField, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -219,8 +219,8 @@ const DeveloperTokensPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Developer Tokens")} subtitle={t("API credentials and IP allow-lists for integrations.")}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Developer Tokens")} subtitle={t("API credentials and IP allow-lists for integrations.")}>
                         <PgButton
                             variant="tonal"
                             onClick={() => {
@@ -231,7 +231,7 @@ const DeveloperTokensPage = dc(() => {
                         >
                             {t("Create Token")}
                         </PgButton>
-                    )</PageHeader>
+                </PageHeader>
 
                 {createdSecret.value && (
                     <SurfaceCard title={t("Secret")}>
@@ -262,7 +262,7 @@ const DeveloperTokensPage = dc(() => {
                         setSearchValue={(value) => (search.value = value)}
                     />
                 )}
-            </ThemedView>
+            </PgStack>
 
             <FormModal
                 modelValue={createOpen.value}

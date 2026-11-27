@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton} from "@pg/ui";
+import {PgAlert, PgButton} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import type { RedirectClientAction } from "./types";
@@ -72,9 +72,9 @@ export const RedirectRenderer = dc(
                 </ThemedText>
 
                 {(props.error || localError.value) && (
-                    <VAlert type="error" variant="tonal" density="compact">
+                    <PgAlert tone="danger" density="compact">
                         {props.error || localError.value}
-                    </VAlert>
+                    </PgAlert>
                 )}
 
                 <PgButton color="primary" size="large" block loading={redirecting.value} onClick={perform}>

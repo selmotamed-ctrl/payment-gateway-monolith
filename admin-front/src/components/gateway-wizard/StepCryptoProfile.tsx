@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton, PgAutocomplete, PgTextField, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgTextField, PgTextarea} from "@pg/ui";
 import {SurfaceCard, SurfaceCardText} from "@pg/ui";
 import {FormField} from "@pg/ui";
 import {SegmentedTabs} from "@pg/ui";
@@ -336,9 +336,9 @@ export const StepCryptoProfile = dc(
                             )}
                         </div>
                         {verifyError.value && (
-                            <VAlert type="error" variant="tonal" density="compact">
+                            <PgAlert tone="danger" density="compact">
                                 {verifyError.value}
-                            </VAlert>
+                            </PgAlert>
                         )}
                     </WizardSection>
                 </SurfaceCardText>

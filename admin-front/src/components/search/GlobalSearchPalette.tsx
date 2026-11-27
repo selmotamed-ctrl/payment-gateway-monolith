@@ -549,6 +549,7 @@ export const GlobalSearchPalette = defineComponent({
                 onUpdate:modelValue={updateModelValue}
                 maxWidth={780}
                 contentClass="pg-command-dialog"
+                bare
                 scrollable
             >
                 <div

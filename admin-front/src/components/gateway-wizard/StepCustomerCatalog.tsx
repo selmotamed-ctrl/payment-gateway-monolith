@@ -121,9 +121,8 @@ export const StepCustomerCatalog = dc(
         };
 
         return () => {
-            const rails = props.model.rails;
-            const activeRail = rails[activeRailIndex.value];
-
+            const rails = () => props.model.rails;
+            const activeRail = () => rails()[activeRailIndex.value]!;
             return (
                 <SurfaceCard
                     title={t("Customer Catalog")}
@@ -136,10 +135,10 @@ export const StepCustomerCatalog = dc(
                     }}
                 >
                     <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
-                        {rails.length > 0 && (
+                        {rails().length > 0 && (
                             <SegmentedTabs
                                 modelValue={String(activeRailIndex.value)}
-                                tabs={rails.map((rail, index) => ({
+                                tabs={rails().map((rail, index) => ({
                                     value: String(index),
                                     label: rail.code || `Rail ${index + 1}`,
                                 }))}
@@ -148,14 +147,14 @@ export const StepCustomerCatalog = dc(
                             />
                         )}
 
-                        {activeRail && (
+                        {activeRail() && (
                             <WizardSection
-                                title={activeRail.code || `Rail ${activeRailIndex.value + 1}`}
+                                title={activeRail().code || `Rail ${activeRailIndex.value + 1}`}
                                 v-slots={{
                                     actions: () => (
                                         <>
                                             <StatusBadge
-                                                status={activeRail.collectionMode}
+                                                status={activeRail().collectionMode}
                                                 toneOverride="info"
                                                 showDot={false}
                                             />
@@ -174,32 +173,32 @@ export const StepCustomerCatalog = dc(
                                 <div style={gridStyle}>
                                     <FormField label={t("Rail Code")}>
                                         <PgTextField
-                                            modelValue={activeRail.code}
+                                            modelValue={activeRail().code}
                                             onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { code: v })}
                                         />
                                     </FormField>
                                     <FormField label={t("Label (English)")}>
                                         <PgTextField
-                                            modelValue={activeRail.nameEn}
+                                            modelValue={activeRail().nameEn}
                                             onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { nameEn: v })}
                                         />
                                     </FormField>
                                     <FormField label={t("Label (Arabic)")}>
                                         <PgTextField
-                                            modelValue={activeRail.nameAr}
+                                            modelValue={activeRail().nameAr}
                                             onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { nameAr: v })}
                                         />
                                     </FormField>
                                     <FormField label={t("Type")}>
                                         <PgAutocomplete
                                             items={["OTP_PULL", "REDIRECT", "EMBEDDED", "PUSH_APPROVAL", "QR_DISPLAY", "PAY_CODE", "DEEP_LINK", "MANUAL", "HYBRID"]}
-                                            modelValue={activeRail.collectionMode}
+                                            modelValue={activeRail().collectionMode}
                                             onUpdate:modelValue={(v: any) => updateRail(activeRailIndex.value, { collectionMode: v })}
                                         />
                                     </FormField>
                                     <FormField label={t("Currency")}>
                                         <PgTextField
-                                            modelValue={activeRail.currency}
+                                            modelValue={activeRail().currency}
                                             onUpdate:modelValue={(v: string) =>
                                                 updateRail(activeRailIndex.value, { currency: v.toUpperCase() })
                                             }
@@ -207,13 +206,13 @@ export const StepCustomerCatalog = dc(
                                     </FormField>
                                     <FormField label="min_amount">
                                         <PgTextField
-                                            modelValue={activeRail.minAmount}
+                                            modelValue={activeRail().minAmount}
                                             onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { minAmount: v })}
                                         />
                                     </FormField>
                                     <FormField label="max_amount">
                                         <PgTextField
-                                            modelValue={activeRail.maxAmount}
+                                            modelValue={activeRail().maxAmount}
                                             onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { maxAmount: v })}
                                         />
                                     </FormField>
@@ -230,7 +229,7 @@ export const StepCustomerCatalog = dc(
                                         ),
                                     }}
                                 >
-                                    {activeRail.fields.map((field, fieldIndex) => (
+                                    {activeRail().fields.map((field, fieldIndex) => (
                                         <div
                                             key={fieldIndex}
                                             draggable={true}

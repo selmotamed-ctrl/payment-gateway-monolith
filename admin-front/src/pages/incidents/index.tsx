@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
 import { useRouter } from "vue-router";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
@@ -608,13 +608,13 @@ const IncidentsPage = dc(() => {
     };
     return () => (
         <ScreenContainer>
-            <PageHeader title={t("Incidents")} subtitle={t("Operational resilience, response timeline and regulatory incident reporting")} badge="AML-CONFIDENTIAL" badgeTone="danger">(
+            <PageHeader title={t("Incidents")} subtitle={t("Operational resilience, response timeline and regulatory incident reporting")} badge="AML-CONFIDENTIAL" badgeTone="danger">
                     <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                         <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
                         <PgButton variant="tonal" prependIcon="mdi-download" loading={listExportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</PgButton>
                         <PgButton color="primary" prependIcon="mdi-plus" onClick={() => (createOpen.value = true)}>{t("Open incident")}</PgButton>
                     </ThemedView>
-                )</PageHeader>
+            </PageHeader>
             <SummaryExportCard
                 title={t("Incident health")}
                 metrics={metrics.value}
@@ -687,9 +687,9 @@ const IncidentsPage = dc(() => {
                 submitLabel={t("Export")}
                 onSubmit={() => void exportIncidents()}
             >
-                <VAlert type="error" variant="tonal">
+                <PgAlert tone="danger">
                     {t("Incident exports contain confidential operational and regulatory data. Confirm scope, handling and authority before exporting.")}
-                </VAlert>
+                </PgAlert>
                 <FormChecklist
                     checks={[...INCIDENT_EXPORT_CHECKS]}
                     modelValue={listExportChecklist.value}
@@ -701,7 +701,7 @@ const IncidentsPage = dc(() => {
                 />
             </FormModal>
             <FormModal modelValue={createOpen.value} onUpdate:modelValue={(value: boolean) => (createOpen.value = value)} title={t("Open incident")} size="lg" loading={creating.value} submitLabel={t("Open incident")} onSubmit={() => void createIncident()}>
-                {createError.value && <VAlert type="error" variant="tonal" class="mb-4">{createError.value}</VAlert>}
+                {createError.value && <PgAlert tone="danger" class="mb-4">{createError.value}</PgAlert>}
                 <FormField label={t("Title")} required><PgTextField modelValue={form.value.title} onUpdate:modelValue={(value: string) => (form.value.title = value)} hideDetails /></FormField>
                 <FormField label={t("Summary")}><PgTextarea modelValue={form.value.summary} onUpdate:modelValue={(value: string) => (form.value.summary = value)} rows={4} hideDetails /></FormField>
                 <FormField label={t("Severity")} required><PgAutocomplete items={SEVERITIES.map((value) => ({ title: value, value }))} modelValue={form.value.severity} onUpdate:modelValue={(value: string) => (form.value.severity = value)} hideDetails /></FormField>
@@ -851,7 +851,7 @@ const IncidentsPage = dc(() => {
                         )}
                         {activeTab.value === "postmortem" && (
                             <SurfaceCard><SurfaceCardText>
-                                {selected.value.postmortemRequired && <VAlert type={selected.value.postmortemSummary ? "success" : "warning"} variant="tonal" class="mb-4">{selected.value.postmortemSummary ? t("Postmortem recorded") : t("A postmortem is required before close")}</VAlert>}
+                                {selected.value.postmortemRequired && <PgAlert tone={selected.value.postmortemSummary ? "success" : "warning"} class="mb-4">{selected.value.postmortemSummary ? t("Postmortem recorded") : t("A postmortem is required before close")}</PgAlert>}
                                 <FormField label={t("Root cause")}><PgTextarea modelValue={selected.value.rootCause ?? ""} onUpdate:modelValue={(value: string) => (selected.value!.rootCause = value)} rows={4} hideDetails /></FormField>
                                 <FormField label={t("Postmortem summary")}><PgTextarea modelValue={selected.value.postmortemSummary ?? ""} onUpdate:modelValue={(value: string) => (selected.value!.postmortemSummary = value)} rows={8} hideDetails /></FormField>
                                 <PgButton size="small" color="primary" loading={working.value} onClick={() => void savePostmortem()}>{t("Save postmortem")}</PgButton>

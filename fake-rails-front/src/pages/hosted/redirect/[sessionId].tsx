@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
-import {VAlert, PgDivider} from "@pg/ui";
+import {PgAlert, PgDivider} from "@pg/ui";
 import HostedLayout from "@/layouts/hosted";
 import {TableRowActions} from "@pg/ui";
 import {StatusBadge} from "@pg/ui";
@@ -67,7 +67,7 @@ const HostedRedirectPage = dc(() => {
 
   return () => (
     <HostedLayout title={session.value?.rail?.name ?? "Secure checkout"}>
-      {error.value ? <VAlert type="error" variant="tonal">{error.value}</VAlert> : null}
+      {error.value ? <PgAlert tone="danger">{error.value}</PgAlert> : null}
       {session.value ? (
         <div>
           <div class="d-flex justify-space-between align-center mb-1">

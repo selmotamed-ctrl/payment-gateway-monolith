@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import {VAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgTextField, PgStack} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
@@ -445,19 +445,19 @@ const PricingControlsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Pricing & Limits")} subtitle={t("Commission profiles and velocity controls under four-eyes governance.")}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Pricing & Limits")} subtitle={t("Commission profiles and velocity controls under four-eyes governance.")}>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <PgButton variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</PgButton>
                             <PgButton color="primary" variant="flat" prependIcon="mdi-plus" onClick={() => (tab.value === "COMMISSION" ? openCommission() : openVelocity())}>
                                 {tab.value === "COMMISSION" ? t("New commission profile") : t("New velocity rule")}
                             </PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
-                <VAlert type="warning" variant="tonal">
+                <PgAlert tone="warning">
                     {t("These records apply immediately. There is no update or delete endpoint: create a new record with the corrected values instead.")}
-                </VAlert>
+                </PgAlert>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
@@ -550,7 +550,7 @@ const PricingControlsPage = dc(() => {
                         )}
                     </>
                 )}
-            </ThemedView>
+            </PgStack>
 
             <FormModal
                 modelValue={historyOpen.value}
@@ -599,9 +599,9 @@ const PricingControlsPage = dc(() => {
                 loading={commissionSaving.value}
                 errorMessage={commissionError.value ?? ""}
             >
-                <VAlert type="warning" variant="tonal" density="compact">
+                <PgAlert tone="warning" density="compact">
                     {t("Commission changes take effect immediately and are audited.")}
-                </VAlert>
+                </PgAlert>
                 <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
                     <FormField label={t("Code")} required sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
                         <PgTextField modelValue={commissionForm.value.code} onUpdate:modelValue={(value: string) => (commissionForm.value.code = value)} />
@@ -699,9 +699,9 @@ const PricingControlsPage = dc(() => {
                     ),
                 }}
             >
-                <VAlert type="info" variant="tonal" density="compact">
+                <PgAlert tone="info" density="compact">
                     {t("This creates a maker-checker request. The change applies only after a different checker approves it.")}
-                </VAlert>
+                </PgAlert>
                 {lifecycleKind.value === "COMMISSION" && (
                     <FormField label={t("Effective to")} sensitiveMakerChecker>
                         <PgTextField
@@ -735,9 +735,9 @@ const PricingControlsPage = dc(() => {
                 loading={velocitySaving.value}
                 errorMessage={velocityError.value ?? ""}
             >
-                <VAlert type="warning" variant="tonal" density="compact">
+                <PgAlert tone="warning" density="compact">
                     {t("Velocity rules take effect immediately and are audited.")}
-                </VAlert>
+                </PgAlert>
                 <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
                     <FormField label={t("Code")} required sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
                         <PgTextField modelValue={velocityForm.value.code} onUpdate:modelValue={(value: string) => (velocityForm.value.code = value)} />

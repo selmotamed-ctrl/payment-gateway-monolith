@@ -106,6 +106,6 @@ const CertificatePage = dc(() => {
             </AcademyShell>
         );
     };
-});
+}, { rerender: true });
 
 export default CertificatePage;

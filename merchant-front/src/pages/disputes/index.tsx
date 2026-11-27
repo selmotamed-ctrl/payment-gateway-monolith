@@ -1,4 +1,4 @@
-import {PgText as ThemedText} from "@pg/ui";
+import {PgText as ThemedText, PgStack} from "@pg/ui";
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
@@ -225,7 +225,7 @@ const DisputesPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
+            <PgStack gap="lg">
                 <PageHeader
                     title={t("Disputes")}
                     subtitle={t("Chargeback cases, evidence, and resolution status.")}
@@ -246,7 +246,7 @@ const DisputesPage = dc(() => {
                         setSearchValue={(value) => (search.value = value)}
                     />
                 )}
-            </ThemedView>
+            </PgStack>
 
             <FormModal
                 modelValue={dialogOpen.value}

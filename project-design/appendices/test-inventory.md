@@ -264,7 +264,7 @@
 | `core-back/test/storage-engine/velocity-failure-policy.test.ts` | 139 | 8 |
 | `core-back/test/storage-engine/write-path.integration.test.ts` | 135 | 3 |
 | `core-back/test/synthetic-seeder-realism.test.ts` | 504 | 45 |
-| `core-back/test/synthetic-seeder.test.ts` | 178 | 10 |
+| `core-back/test/synthetic-seeder.test.ts` | 203 | 12 |
 | `core-back/test/ui-authorities.test.ts` | 35 | 3 |
 | `core-back/test/worker-runtime-health.test.ts` | 153 | 8 |
 | `admin-back/test/academy-progress.test.ts` | 240 | 13 |
@@ -391,22 +391,25 @@
 | `tests/e2e/admin/chrome-preview.spec.ts` | 94 | 1 |
 | `tests/e2e/admin/commerce-governance.spec.ts` | 148 | 4 |
 | `tests/e2e/admin/create.spec.ts` | 155 | 5 |
+| `tests/e2e/admin/detail-pages.spec.ts` | 50 | 2 |
 | `tests/e2e/admin/finance.spec.ts` | 47 | 1 |
 | `tests/e2e/admin/global-search.spec.ts` | 139 | 6 |
-| `tests/e2e/admin/guide-context.spec.ts` | 128 | 2 |
-| `tests/e2e/admin/guide-palette.spec.ts` | 42 | 2 |
-| `tests/e2e/admin/guide-reader.spec.ts` | 116 | 5 |
+| `tests/e2e/admin/guide-context.spec.ts` | 145 | 3 |
+| `tests/e2e/admin/guide-palette.spec.ts` | 93 | 5 |
+| `tests/e2e/admin/guide-reader.spec.ts` | 119 | 5 |
 | `tests/e2e/admin/guide-safeguard.spec.ts` | 98 | 1 |
 | `tests/e2e/admin/jobs-outbox.spec.ts` | 57 | 2 |
 | `tests/e2e/admin/merchants.spec.ts` | 90 | 2 |
 | `tests/e2e/admin/object-storage-style.spec.ts` | 81 | 1 |
-| `tests/e2e/admin/operator-cases.spec.ts` | 319 | 3 |
+| `tests/e2e/admin/operator-cases.spec.ts` | 320 | 3 |
 | `tests/e2e/admin/platform-settings.spec.ts` | 211 | 7 |
 | `tests/e2e/admin/report-a4-layout.spec.ts` | 282 | 1 |
-| `tests/e2e/admin/shell.spec.ts` | 254 | 17 |
+| `tests/e2e/admin/report-studio-render.spec.ts` | 135 | 3 |
+| `tests/e2e/admin/shell.spec.ts` | 272 | 18 |
 | `tests/e2e/admin/table-and-padding-geometry.spec.ts` | 235 | 3 |
 | `tests/e2e/admin/table-row-context-menu.spec.ts` | 217 | 8 |
-| `tests/e2e/admin/wallet-details.spec.ts` | 301 | 12 |
+| `tests/e2e/admin/ui-polish.spec.ts` | 620 | 16 |
+| `tests/e2e/admin/wallet-details.spec.ts` | 302 | 12 |
 | `tests/e2e/checkout/a11y.spec.ts` | 13 | 1 |
 | `tests/e2e/checkout/certificate-verify.spec.ts` | 52 | 3 |
 | `tests/e2e/checkout/pay.spec.ts` | 46 | 3 |
@@ -418,8 +421,8 @@
 | `tests/e2e/fixtures.ts` | 145 | 0 |
 | `tests/e2e/merchant/a11y.spec.ts` | 28 | 1 |
 | `tests/e2e/merchant/auth.spec.ts` | 86 | 4 |
-| `tests/e2e/merchant/landing.spec.ts` | 105 | 5 |
-| `tests/e2e/merchant/shell.spec.ts` | 145 | 11 |
+| `tests/e2e/merchant/landing.spec.ts` | 124 | 6 |
+| `tests/e2e/merchant/shell.spec.ts` | 169 | 12 |
 | `tests/e2e/merchant/table-row-context-menu.spec.ts` | 124 | 3 |
 | `tests/e2e-live/live.spec.ts` | 153 | 6 |
 | `tests/unit/academy-content.test.ts` | 306 | 17 |
@@ -428,7 +431,7 @@
 | `tests/unit/academy-next-step.test.ts` | 128 | 11 |
 | `tests/unit/academy-progress-merge.test.ts` | 148 | 9 |
 | `tests/unit/academy-progress-user-scope.test.ts` | 86 | 3 |
-| `tests/unit/admin-bundle-lazy.test.ts` | 56 | 7 |
+| `tests/unit/admin-bundle-lazy.test.ts` | 60 | 7 |
 | `tests/unit/audit-summary.test.ts` | 109 | 13 |
 | `tests/unit/authorities.test.ts` | 27 | 4 |
 | `tests/unit/builders-aml-templates.test.ts` | 165 | 15 |
@@ -450,6 +453,7 @@
 | `tests/unit/global-search.test.ts` | 208 | 10 |
 | `tests/unit/guide-content.test.ts` | 185 | 10 |
 | `tests/unit/guide-markdown-refs.test.ts` | 70 | 6 |
+| `tests/unit/guide-screen-resolution.test.ts` | 159 | 6 |
 | `tests/unit/guide-search.test.ts` | 80 | 9 |
 | `tests/unit/guide-widgets.test.ts` | 221 | 25 |
 | `tests/unit/helpers/i18nScan.ts` | 47 | 2 |
@@ -462,8 +466,10 @@
 | `tests/unit/report-engine-sdk-mirror.test.ts` | 32 | 1 |
 | `tests/unit/report-preview-print-reset.test.ts` | 25 | 2 |
 | `tests/unit/report-ui-styles.test.ts` | 41 | 2 |
+| `tests/unit/ui-2026-polish.test.ts` | 55 | 5 |
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
+| `tests/unit/ui-locale-default.test.ts` | 25 | 2 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **460**
-- Total literal test declarations: **4523**
+- Total files: **466**
+- Total literal test declarations: **4566**

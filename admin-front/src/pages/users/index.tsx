@@ -4,7 +4,7 @@ import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import {VAlert, PgButton, PgCheckbox, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgCheckbox, PgAutocomplete, PgTextField, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -680,18 +680,18 @@ const UsersPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Admin Users")} subtitle={t("Platform operators, makers, checkers, and access posture.")}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Admin Users")} subtitle={t("Platform operators, makers, checkers, and access posture.")}>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { userExportChecklist.value = {}; userExportOpen.value = true; }}>{t("Export Excel")}</PgButton>
                             <PgButton color="primary" variant="flat" prependIcon="mdi-account-plus-outline" onClick={openCreate}>{t("Invite user")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("Role and authority changes require a different checker. Status-only changes apply immediately. MFA is enforced for every internal user.")}
-                </VAlert>
+                </PgAlert>
 
                 {summary.value && (
                     <SummaryExportCard
@@ -792,7 +792,7 @@ const UsersPage = dc(() => {
                         />
                     )}
                 />
-            </ThemedView>
+            </PgStack>
 
             <FormModal
                 modelValue={userExportOpen.value}
@@ -803,9 +803,9 @@ const UsersPage = dc(() => {
                 submitLabel={t("Export")}
                 loading={exportLoading.value}
             >
-                <VAlert type="warning" variant="tonal">
+                <PgAlert tone="warning">
                     {t("The export includes user identities, phone numbers, roles and authority keys. Respect the approved scope.")}
-                </VAlert>
+                </PgAlert>
                 <FormChecklist
                     checks={[...USER_EXPORT_CHECKS]}
                     modelValue={userExportChecklist.value}
@@ -844,9 +844,9 @@ const UsersPage = dc(() => {
                     ),
                 }}
             >
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("This changes account status only. Role and authority changes still require checker approval.")}
-                </VAlert>
+                </PgAlert>
                 <SectionFields title={t("Status change")}>
                     <FormField label={t("Status")} sensitiveMakerChecker>
                         <PgAutocomplete
@@ -929,7 +929,7 @@ const UsersPage = dc(() => {
                         />
 
                         {detail.value.status === "INVITED" && (
-                            <VAlert type="warning" variant="tonal" density="compact">
+                            <PgAlert tone="warning" density="compact">
                                 {t("Invitation pending: the invitee has not set a password yet")}
                                 <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "8px" }}>
                                     <FormChecklist
@@ -945,7 +945,7 @@ const UsersPage = dc(() => {
                                         {t("Resend invitation")}
                                     </PgButton>
                                 </div>
-                            </VAlert>
+                            </PgAlert>
                         )}
 
                         <SectionFields title={t("Role and access")}>
@@ -985,9 +985,9 @@ const UsersPage = dc(() => {
                             complete={detailChecklistComplete.value}
                             incompleteMessage={t("Complete all edit checklist items before saving")}
                         />
-                        <VAlert type="warning" variant="tonal" density="compact">
+                        <PgAlert tone="warning" density="compact">
                             {t("You cannot approve your own change. A different checker must review role and authority updates.")}
-                        </VAlert>
+                        </PgAlert>
                     </>
                 ) : null}
             </FormModal>
@@ -1020,9 +1020,9 @@ const UsersPage = dc(() => {
                     ),
                 }}
             >
-                <VAlert type="info" variant="tonal" density="compact">
+                <PgAlert tone="info" density="compact">
                     {t("The user starts in INVITED state.")} {t("The invitee receives an email with a single-use invitation code and chooses their own password. A phone number is optional and adds SMS as a second sign-in channel.")}
-                </VAlert>
+                </PgAlert>
                 <SectionFields title={t("User details")}>
                     <FormField label={t("Email")} required>
                         <PgTextField type="email" modelValue={createForm.value.email} onUpdate:modelValue={(value: string) => (createForm.value.email = value)} />

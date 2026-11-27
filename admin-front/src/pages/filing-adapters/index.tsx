@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import {VAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
@@ -10,7 +10,6 @@ import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import {SurfaceCard, SurfaceCardText} from "@pg/ui";
 import {StatusBadge} from "@pg/ui";
-import {EmptyState} from "@pg/ui";
 import {FormModal} from "@pg/ui";
 import {FormField} from "@pg/ui";
 import {FormChecklist} from "@pg/ui";
@@ -188,12 +187,12 @@ const FilingAdaptersPage = dc(() => {
     };
     return () => (
         <ScreenContainer>
-            <PageHeader title={t("Filing Adapters")} subtitle={t("Configure the manual or HTTPS channel used to file an approved regulatory report")} badge="AML-CONFIDENTIAL" badgeTone="danger">(
+            <PageHeader title={t("Filing Adapters")} subtitle={t("Configure the manual or HTTPS channel used to file an approved regulatory report")} badge="AML-CONFIDENTIAL" badgeTone="danger">
                     <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                         <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => refreshHook.value?.refreshAsIs()}>{t("Refresh")}</PgButton>
                         <PgButton color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("New adapter")}</PgButton>
                     </ThemedView>
-                )</PageHeader>
+            </PageHeader>
             <ApiTable<Adapter>
                 title={t("Filing adapter registry")}
                 url={urlsMap.filingAdapters}
@@ -207,11 +206,10 @@ const FilingAdaptersPage = dc(() => {
                 setRefreshHook={(hook) => (refreshHook.value = hook)}
                 clearRefreshHook={() => (refreshHook.value = null)}
                 onRefresh={(_table, refresh) => void refresh({ queryParams: {} })}
-                TopSlot={({ loading }) => <ThemedView>{!loading && rows.value.length === 0 ? <EmptyState title={t("No filing adapters")} description={t("Manual filing remains the default. Add an HTTPS adapter only when a filing API exists.")} /> : null}</ThemedView>}
             />
             <FormModal modelValue={formOpen.value} onUpdate:modelValue={(value: boolean) => (formOpen.value = value)} title={editingId.value ? t("Edit filing adapter") : t("New filing adapter")} size="lg" loading={saving.value} submitLabel={t("Submit for approval")} onSubmit={() => void save()}>
-                <VAlert type="info" variant="tonal" class="mb-4">{t("Endpoint and secret changes use maker-checker. The adapter becomes active only after a second person approves the change.")}</VAlert>
-                {formError.value && <VAlert type="error" variant="tonal" class="mb-4">{formError.value}</VAlert>}
+                <PgAlert tone="info" class="mb-4">{t("Endpoint and secret changes use maker-checker. The adapter becomes active only after a second person approves the change.")}</PgAlert>
+                {formError.value && <PgAlert tone="danger" class="mb-4">{formError.value}</PgAlert>}
                 <FormField label={t("Name")} required><PgTextField modelValue={form.value.name} onUpdate:modelValue={(value: string) => (form.value.name = value)} hideDetails /></FormField>
                 <FormField label={t("Authority")} required><PgTextField modelValue={form.value.authority} onUpdate:modelValue={(value: string) => (form.value.authority = value)} hideDetails /></FormField>
                 <FormField label={t("Kind")} required><PgAutocomplete items={["MANUAL", "HTTP"].map((value) => ({ title: value, value }))} modelValue={form.value.kind} onUpdate:modelValue={(value: string) => (form.value.kind = value)} hideDetails /></FormField>
@@ -231,9 +229,9 @@ const FilingAdaptersPage = dc(() => {
                 />
             </FormModal>
             <FormModal modelValue={statusTarget.value !== null} onUpdate:modelValue={(value: boolean) => { if (!value) statusTarget.value = null; }} title={statusNext.value === "DISABLED" ? t("Disable filing adapter") : t("Re-enable filing adapter")} subtitle={statusTarget.value?.name ?? ""} size="md" loading={saving.value} submitLabel={t("Submit for approval")} onSubmit={() => void setStatus()}>
-                <VAlert type={statusNext.value === "DISABLED" ? "warning" : "info"} variant="tonal">
+                <PgAlert tone={statusNext.value === "DISABLED" ? "warning" : "info"}>
                     {statusNext.value === "DISABLED" ? t("Disabling the adapter stops new filings through it. A second person must approve the change.") : t("Re-enabling restores this filing channel after approval. A second person must approve the change.")}
-                </VAlert>
+                </PgAlert>
                 <FormChecklist
                     checks={[...STATUS_CHECKS]}
                     modelValue={statusChecklist.value}

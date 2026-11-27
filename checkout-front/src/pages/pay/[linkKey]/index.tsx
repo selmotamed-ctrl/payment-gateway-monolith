@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import {VAlert, PgButton, PgIcon, PgSpinner} from "@pg/ui";
+import {PgAlert, PgButton, PgIcon, PgSpinner} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import {StateView} from "@pg/ui";
 import CheckoutLayout from "@/layouts/checkout";
@@ -740,9 +740,9 @@ const PayPage = dc(() => {
                                     )}
 
                                     {actionError.value && (
-                                        <VAlert type="error" variant="tonal" density="compact">
+                                        <PgAlert tone="danger" density="compact">
                                             {actionError.value}
-                                        </VAlert>
+                                        </PgAlert>
                                     )}
 
                                     <PgButton

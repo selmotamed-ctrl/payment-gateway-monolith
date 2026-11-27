@@ -4968,7 +4968,7 @@ The scratch clusters use `--auth=trust` and listen only on loopback. The drill d
 
 ## Synthetic Seeder
 
-> Status: `partial` · Last verified: 2026-11-07
+> Status: `partial` · Last verified: 2026-11-27
 
 ## 1. Purpose and scope
 
@@ -5066,7 +5066,7 @@ Local hours are `Africa/Tripoli` wall-clock hours (UTC+2, no DST) and are stored
 
 | Generator | Main outputs |
 | :--- | :--- |
-| `01_adminAndStaffGenerator` | 13 platform staff seats and the disabled system drafter; flat authority lists and maker/checker flags from `scripts/createAdminPlan.ts`; velocity rules with operational thresholds; AML rules whose `params` keys are the ones `AmlRuleEngine` reads. Notification templates, CBL reporting rules and the environment setting belong to the baseline seed and are no longer duplicated. |
+| `01_adminAndStaffGenerator` | 13 platform staff seats and the disabled system drafter; flat authority lists and maker/checker flags from `scripts/createAdminPlan.ts`; the system drafter REUSES the id of the runtime-created row (`ensureSystemAutomationUser`, canonical e-mail) instead of generating a second id for the same unique e-mail; velocity rules with operational thresholds; AML rules whose `params` keys are the ones `AmlRuleEngine` reads. Notification templates, CBL reporting rules and the environment setting belong to the baseline seed and are no longer duplicated. |
 | `02_merchantCohortGenerator` | Merchants with a consistent lifecycle (request -> submission -> review -> proposal -> decision -> activation -> suspension/closure), category-driven profiles, unique phones, IBAN-shaped payout accounts; earlier REJECTED/EXPIRED/WITHDRAWN join requests linked by `resubmission_of_id`; KYB document chains (superseded copies, expiry, 30-day notice, duplicate-hash showcase); beneficial owners summing to 100 %; wallets + GL accounts; applications; users and identities; tokens; POS terminals only for counter categories; merchant-owned credentials; negotiated commission profiles (fractional rates) and the historical platform default. National ids are queued for Vault encryption. |
 | `03_gatewayLifecycleGenerator` | Later versions next to the baseline LIVE version (ROLLED_BACK -> baseline, SANDBOX_VERIFIED/DRAFT, PENDING_APPROVAL for two gateways) with environments, auth, settings and evidence; webhook channels only for baseline versions without one; statement sources; route health DERIVED from the generated attempts (last 30 days). |
 | `04_linksAndAttemptsGenerator` | Heavy-tailed merchant volumes, category ticket bands, rail popularity, per-rail decline/abandon pressure; links with fee bearer, reuse and expiry; attempts built from engine-valid status paths with monotonic timestamps; pricing mirrored from the checkout (`money.ts`); step logs, inbound webhooks, attempt groups; live tail of in-flight/UNKNOWN/held attempts near `T_NOW`; late successes and SUSPENSE settlements. |
@@ -5101,6 +5101,8 @@ Local hours are `Africa/Tripoli` wall-clock hours (UTC+2, no DST) and are stored
 Each model is written in 2,500-row `createMany` chunks with `skipDuplicates: true`. The writer skips any empty collection. The six in-memory collections not written are `rails`, `railFields`, `railRoutes`, `widgets`, `redirects` and `pollPolicies`; these are expected to exist from the baseline blueprint seed and are only used as read-only references.
 
 The `WRITE_ORDER` is exported and tested (parents before children; approvals right after users; disputes before adjustments; items before cases; no strip-and-relink). The writer is not a transaction. A failure partway through leaves the previous chunks committed; re-running with the same seed key is not automatic because the completed-run marker is written only at the end. A failed run can be retried, but duplicate ids are skipped and a partial dataset may remain.
+
+**The system drafting principal.** The running core creates the non-human maker `system-drafter@payment-gateway.internal` (`ensureSystemAutomationUser`) as soon as a worker drafts a chargeback, report or ledger alert, and PostgreSQL assigns its UUID. The seeder MUST reuse that id: `runSyntheticSeeder` calls `ensureSystemAutomationUser` before `createContext` (so `loadReferences` sees the row) and `01_adminAndStaffGenerator` takes the id from `refs.adminUsers` instead of calling `nextId`. Generating a second id for the same unique e-mail made the `users` chunk skip the row and left 189 seeded approvals violating `approval_requests_maker_user_id_fkey` (found 2026-11-27 on a `--fresh --force-fresh` deploy whose workers booted before step 12). The constants live in `lib/systemAutomationUser.ts` so the DB-free generator tests do not import the env-bound governance module.
 
 ### 3.8 Fake Rails synchronization
 
@@ -5161,7 +5163,7 @@ After the write, `postSeedAudit` asserts that the database row counts of attempt
 2. `ensureSchemaVersion()`;
 3. skip when the seed key is already complete;
 4. run the safety gate and print Fake Rails health;
-5. load references and reject empty gateways/rails;
+5. resolve the runtime system automation principal (`ensureSystemAutomationUser`), then load references and reject empty gateways/rails (the principal is therefore in `refs.adminUsers` and the generator reuses its database id);
 6. run the generators in order (route health, then ledger, reconciliation, refunds/disputes/cash-outs, governance, operator cases, and the checkpoints last);
 7. run the in-memory audit (ledger + the full invariant suite) and fail on any violation;
 8. encrypt every pending sensitive column with the Vault, then bulk-write 50 models;
@@ -5365,6 +5367,7 @@ The unit tests do not require a live database or Fake Rails. The actual `seed-sy
 
 - 2026-11-03 — Initial canonical extraction. Records the safety gate, profiles, 9 generators, 55 collections, 49-model bulk writer, timeline, Fake Rails sync, KYB enrichment, run registry, post-seed audit, and the unused volumes, template coverage, base64 ciphertexts, authority shape and deploy env mismatch. See `project-design/TRACKER.md`.
 - 2026-11-04 — Realism rework: engine-template ledger, lifecycle-valid attempts, profile volumes drive generation, Tripoli time, Vault-encrypted columns, approvals bound to real subjects, namespaced ids, derived route health, read models, full invariant suite and DB/dataset equality in the audit, 35 new DB-free tests. See section 3.13 and `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md` (2026-11-04 corrections).
+- 2026-11-27 — Fixed the `approval_requests_maker_user_id_fkey` failure on a fresh deploy. The core workers create the canonical system drafter with a database-assigned UUID before step 12; the seeder generated a different id for the same e-mail, `skipDuplicates` dropped the user row, and 189 approvals failed their FK. The seeder now ensures the runtime row before loading references and generator 01 reuses its id. DB-free regression tests cover both the reuse and the generated fallback. See section 3.7 and `project-design/TRACKER.md`.
 
 ## Tests and Benchmarks
 

@@ -16,6 +16,7 @@ export default ({ mode }: { mode: string }) => {
             dedupe: ["vue", "@vue/runtime-vapor", "@vue/runtime-dom", "vue-router", "vue-i18n"],
             alias: {
                 "@": fileURLToPath(new URL("./src", import.meta.url)),
+                "vue-i18n": fileURLToPath(new URL("./node_modules/vue-i18n/dist/vue-i18n.mjs", import.meta.url)),
                 "@pg/ui": fileURLToPath(new URL("../packages/ui/src", import.meta.url)),
             },
         },

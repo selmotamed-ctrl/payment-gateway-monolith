@@ -2,9 +2,8 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import {VAlert, PgButton, PgCol, PgFileUpload, PgRow, PgSwitch, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgCol, PgFileUpload, PgRow, PgSwitch, PgTextarea, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
 import {ApiTable} from "@pg/ui";
 import {TableRowActions} from "@pg/ui";
 import type { TableHeader } from "@pg/ui";
@@ -311,8 +310,8 @@ const Page = dc(() => {
 
   return () => (
     <ScreenContainer>
-      <ThemedView style={{ gap: "18px" }}>
-        <PageHeader title={t("Report Branding")} subtitle={t("Upload a logo and add your company name to your reports")}>(
+    <PgStack gap="lg">
+        <PageHeader title={t("Report Branding")} subtitle={t("Upload a logo and add your company name to your reports")}>
             <div class="d-flex flex-wrap ga-2">
               <PgButton variant="tonal" prependIcon="mdi-alert-decagram-outline" onClick={() => void router.push({ name: "MerchantReportsChromeNeedsMigration" })}>
                 {t("Needs Migration")}
@@ -321,12 +320,12 @@ const Page = dc(() => {
                 {t("Download branding transcript")}
               </PgButton>
             </div>
-          )</PageHeader>
+        </PageHeader>
 
         {migrationOpen.value && editingRow.value && (
-          <VAlert type="warning" variant="tonal">
+          <PgAlert tone="warning">
             {t("Your default header/footer needs migration")}: {editingRow.value.code} v{editingRow.value.version}
-          </VAlert>
+          </PgAlert>
         )}
 
         <SurfaceCard title={t("My Headers & Footers")} subtitle={t("Manage your company header and footer for your own reports")}>
@@ -339,7 +338,7 @@ const Page = dc(() => {
                 <PgFileUpload label={t("Logo bundle (.zip, optional)")} {...{ accept: "application/zip,.zip" }} modelValue={zipFile.value} onUpdate:modelValue={(files: File | File[] | null) => (zipFile.value = pickFile(files))} />
               </PgCol>
             </PgRow>
-            {editingNeedsZip.value && <VAlert type="info" variant="tonal">{t("This header/footer uses assets. Re-attach its logo bundle (.zip).")}</VAlert>}
+            {editingNeedsZip.value && <PgAlert tone="info">{t("This header/footer uses assets. Re-attach its logo bundle (.zip).")}</PgAlert>}
             <PgTextarea
               label={t("Header/footer spec (.json)")}
               modelValue={specJson.value}
@@ -403,7 +402,7 @@ const Page = dc(() => {
             void refreshTable({ queryParams: { page: table.page, pageSize: pageSize.value, ...(search.value ? { search: search.value } : {}) } });
           }}
         />
-      </ThemedView>
+      </PgStack>
     </ScreenContainer>
   );
 });

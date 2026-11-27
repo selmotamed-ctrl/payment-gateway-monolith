@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import {VAlert, PgButton, PgFileUpload, PgSpinner, PgAutocomplete, PgSwitch, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgFileUpload, PgSpinner, PgAutocomplete, PgSwitch, PgTextField, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -774,20 +774,20 @@ const ReconciliationPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Reconciliation")} subtitle={t("Upload statements, monitor reconciliation runs, and resolve mismatches between gateway and ledger records.")} badge={t("Daily control")} badgeTone="info">(
+            <PgStack gap="lg">
+                <PageHeader title={t("Reconciliation")} subtitle={t("Upload statements, monitor reconciliation runs, and resolve mismatches between gateway and ledger records.")} badge={t("Daily control")} badgeTone="info">
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => { void load(); runRefreshHook.value?.refreshAsIs(); }}>{t("Refresh")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
                     <>
-                        <VAlert type="info" variant="tonal">
+                        <PgAlert tone="info">
                             {t("Statement uploads are queued and matched in the background. A repeated file is idempotent and never creates a second run.")}
-                        </VAlert>
+                        </PgAlert>
 
                         {summary.value && (
                             <SummaryExportCard
@@ -975,7 +975,7 @@ const ReconciliationPage = dc(() => {
                         </ThemedView>
                     </>
                 )}
-            </ThemedView>
+            </PgStack>
 
             <FormModal
                 modelValue={exportOpen.value}
@@ -986,7 +986,7 @@ const ReconciliationPage = dc(() => {
                 submitLabel={t("Export")}
                 onSubmit={() => void exportRunItems()}
             >
-                <VAlert type="warning" variant="tonal">{t("The export contains statement references, amounts and reconciliation outcomes. Handle the file as confidential evidence.")}</VAlert>
+                <PgAlert tone="warning">{t("The export contains statement references, amounts and reconciliation outcomes. Handle the file as confidential evidence.")}</PgAlert>
                 <FormChecklist
                     checks={[...RUN_EXPORT_CHECKS]}
                     modelValue={exportChecklist.value}
@@ -1121,9 +1121,9 @@ const ReconciliationPage = dc(() => {
                         </ThemedView>
 
                         {selectedRun.value.itemsTruncated && (
-                            <VAlert type="info" variant="tonal" density="compact">
+                            <PgAlert tone="info" density="compact">
                                 {t("Showing the first 200 filtered items. Export includes all matching rows.")}
-                            </VAlert>
+                            </PgAlert>
                         )}
 
                         <DataTable

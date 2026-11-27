@@ -12,6 +12,8 @@ import {
   SYNTHETIC_SEED_SCOPE,
 } from "../prisma/syntheticSeeder/seedRunRegistry";
 import type { SeederContext } from "../prisma/syntheticSeeder/context";
+import { generateAdminAndStaff } from "../prisma/syntheticSeeder/generators/01_adminAndStaffGenerator";
+import { SYSTEM_AUTOMATION_EMAIL } from "../lib/systemAutomationUser";
 
 const fakeContext = (): SeederContext => {
   let counter = 0;
@@ -44,6 +46,29 @@ const fakeContext = (): SeederContext => {
 };
 
 describe("deterministic synthetic seeder primitives", () => {
+  test("the system drafting principal reuses a runtime-created database id", () => {
+    const ctx = fakeContext();
+    const runtimeId = "11111111-1111-7111-8111-111111111111";
+    ctx.refs.adminUsers.push({ id: runtimeId, email: SYSTEM_AUTOMATION_EMAIL, role: "OPERATOR" });
+
+    generateAdminAndStaff(ctx);
+
+    const system = ctx.dataset.users.find((user) => user.email === SYSTEM_AUTOMATION_EMAIL);
+    expect(system?.id).toBe(runtimeId);
+    expect(ctx.meta?.systemUserId).toBe(runtimeId);
+  });
+
+  test("the system drafting principal is generated when the runtime has not created it yet", () => {
+    const ctx = fakeContext();
+
+    generateAdminAndStaff(ctx);
+
+    const system = ctx.dataset.users.find((user) => user.email === SYSTEM_AUTOMATION_EMAIL);
+    expect(system?.id).toBeString();
+    expect(system?.id).not.toBe(SYSTEM_AUTOMATION_EMAIL);
+    expect(ctx.meta?.systemUserId).toBe(system?.id);
+  });
+
   test("xoshiro128** is reproducible", () => {
     const a = new Prng("libya-pg");
     const b = new Prng("libya-pg");

@@ -37,13 +37,17 @@ describe("heavy libraries are loaded on first use, not with the page", () => {
     expect(facade.text).toContain('import("./templateDownload")');
   });
 
-  test("no page or component imports the chart component statically (use the lazy wrapper)", () => {
-    const offenders = files
-      .filter((file) => file.rel !== "charts/EChart/lazy.tsx" && file.rel !== "charts/EChart/index.tsx")
-      .filter((file) => staticImports(file.text).some((spec) => /^@\/charts\/EChart(\/index)?$/.test(spec)));
-    expect(offenders.map((file) => file.rel)).toEqual([]);
-    const lazy = files.find((file) => file.rel === "charts/EChart/lazy.tsx")!;
-    expect(lazy.text).toContain('import("./index")');
+  test("charts live in @pg/ui and pages never import a second copy or echarts directly", () => {
+    const oldCopy = files.filter((file) => staticImports(file.text).some((spec) => /^@\/charts(\/|$)/.test(spec)));
+    expect(oldCopy.map((file) => file.rel)).toEqual([]);
+    const directEchartsPages = files
+      .filter((file) => file.rel.startsWith("pages/"))
+      .filter((file) => staticImports(file.text).includes("echarts"));
+    expect(directEchartsPages.map((file) => file.rel)).toEqual([]);
+    expect(() => statSync(join(SRC, "charts"))).toThrow();
+    const dashboard = files.find((file) => file.rel === "pages/dashboard/index.tsx")!;
+    expect(dashboard.text).toContain("PgChart");
+    expect(dashboard.text).toContain('from "@pg/ui"');
   });
 
   test("the facade keeps the whole pipeline API, all async", () => {

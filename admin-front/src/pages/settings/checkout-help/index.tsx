@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import {VAlert, PgButton, PgDivider, PgIcon, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgDivider, PgIcon, PgSwitch, PgTextField, PgTextarea, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -437,8 +437,8 @@ const AdminCheckoutHelpPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Checkout Help")} subtitle={t("Payer-facing guidance and per-rail instructions.")}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Checkout Help")} subtitle={t("Payer-facing guidance and per-rail instructions.")}>
                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                             <StatusBadge
                                 status={isDirty.value ? "PENDING" : "SAVED"}
@@ -455,9 +455,9 @@ const AdminCheckoutHelpPage = dc(() => {
                                 </PgButton>
                             )}
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
-                <VAlert type="warning" variant="tonal" density="comfortable">
+                <PgAlert tone="warning" density="comfortable">
                     <ThemedView style={{ gap: "4px" }}>
                         <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>
                             {tr("تنبيه مهم", "Important warning")}
@@ -469,7 +469,7 @@ const AdminCheckoutHelpPage = dc(() => {
                             )}
                         </ThemedText>
                     </ThemedView>
-                </VAlert>
+                </PgAlert>
 
                 {summary.value && (
                     <SummaryExportCard
@@ -523,9 +523,9 @@ const AdminCheckoutHelpPage = dc(() => {
                             </ThemedText>
 
                             {error.value && (
-                                <VAlert type="error" variant="tonal" density="compact">
+                                <PgAlert tone="danger" density="compact">
                                     {error.value}
-                                </VAlert>
+                                </PgAlert>
                             )}
 
                             <PgDivider />
@@ -770,12 +770,12 @@ const AdminCheckoutHelpPage = dc(() => {
                                 </ThemedText>
 
                                 {!form.value.enabled ? (
-                                    <VAlert type="info" variant="tonal" density="compact">
+                                    <PgAlert tone="info" density="compact">
                                         {tr(
                                             "قسم التواصل مخفي حالياً من جميع صفحات الدفع.",
                                             "The Contact Support block is currently hidden from all checkout pages.",
                                         )}
-                                    </VAlert>
+                                    </PgAlert>
                                 ) : (
                                     <>
                                         {!!previewWorkingHours.value && (
@@ -997,7 +997,7 @@ const AdminCheckoutHelpPage = dc(() => {
                         )}
                     </SurfaceCardText>
                 </SurfaceCard>
-            </ThemedView>
+            </PgStack>
         </ScreenContainer>
     );
 });

@@ -30,16 +30,30 @@ export type TableFilter =
 
 export type FilterValues = Record<string, unknown>;
 
+const isBlank = (value: unknown): boolean => value === undefined || value === null || (typeof value === "string" && value.trim() === "");
+
+const cleanStringList = (value: unknown[]): string[] =>
+    value
+        .filter((entry) => !isBlank(entry))
+        .map((entry) => String(entry).trim())
+        .filter(Boolean);
+
+/**
+ * A filter is active only when the operator actually narrowed the result set.
+ * Empty arrays, blank strings (`"   "`), `null`, and an empty date/number range
+ * all count as inactive so the badge and the URL stay clean.
+ */
 export const isFilterActive = (filter: TableFilter, value: unknown): boolean => {
-    if (value === undefined || value === null || value === "") {
-        return false;
+    if (filter.type === "boolean") {
+        // `false` is a deliberate filter value; only a missing value is inactive.
+        return value !== undefined && value !== null && value !== "";
     }
-    if (Array.isArray(value)) {
-        return value.length > 0;
-    }
+    if (isBlank(value)) return false;
+    if (Array.isArray(value)) return cleanStringList(value).length > 0;
     if (typeof value === "object") {
-        return Object.values(value as Record<string, unknown>).some((entry) => entry !== undefined && entry !== null && entry !== "");
+        return Object.values(value as Record<string, unknown>).some((entry) => !isBlank(entry) && !(Array.isArray(entry) && entry.length === 0));
     }
+    if (typeof value === "string") return value.trim() !== "";
     return true;
 };
 
@@ -50,33 +64,47 @@ export const filterToQuery = (filter: TableFilter, value: unknown): Record<strin
     }
     if (filter.type === "text" || filter.type === "api-autocomplete" || filter.type === "data-autocomplete") {
         const query = filter.query ?? filter.key;
-        return { [query]: Array.isArray(value) ? value.join(",") : String(value) };
+        if (Array.isArray(value)) {
+            // Never emit `status=` for a cleared multi-select.
+            const joined = cleanStringList(value).join(",");
+            return joined ? { [query]: joined } : {};
+        }
+        const text = String(value).trim();
+        return text ? { [query]: text } : {};
     }
     if (filter.type === "boolean") {
-        return { [filter.query ?? filter.key]: String(value) };
+        const text = String(value).trim();
+        return text ? { [filter.query ?? filter.key]: text } : {};
     }
     if (filter.type === "number-range") {
-        const range = value as { min?: string; max?: string };
+        const range = value as { min?: unknown; max?: unknown };
         const result: Record<string, string> = {};
-        if (range.min) result[filter.queryMin ?? `${filter.key}Min`] = range.min;
-        if (range.max) result[filter.queryMax ?? `${filter.key}Max`] = range.max;
+        const min = isBlank(range?.min) ? "" : String(range.min).trim();
+        const max = isBlank(range?.max) ? "" : String(range.max).trim();
+        if (min) result[filter.queryMin ?? `${filter.key}Min`] = min;
+        if (max) result[filter.queryMax ?? `${filter.key}Max`] = max;
         return result;
     }
     if (filter.type === "date") {
-        const range = value as { from?: string; to?: string };
+        const range = value as { from?: unknown; to?: unknown };
         const result: Record<string, string> = {};
-        if (range.from) result[filter.queryFrom ?? "from"] = range.from;
-        if (range.to) result[filter.queryTo ?? "to"] = range.to;
+        const from = isBlank(range?.from) ? "" : String(range.from).trim();
+        const to = isBlank(range?.to) ? "" : String(range.to).trim();
+        if (from) result[filter.queryFrom ?? "from"] = from;
+        if (to) result[filter.queryTo ?? "to"] = to;
         return result;
     }
     return {};
 };
 
 export const buildFilterQuery = (filters: TableFilter[], values: FilterValues): Record<string, string> =>
-    filters.reduce<Record<string, string>>((query, filter) => ({ ...query, ...filterToQuery(filter, values[filter.key]) }), {});
+    (filters ?? []).reduce<Record<string, string>>(
+        (query, filter) => ({ ...query, ...filterToQuery(filter, values?.[filter.key]) }),
+        {},
+    );
 
 export const activeFilterCount = (filters: TableFilter[], values: FilterValues): number =>
-    filters.filter((filter) => isFilterActive(filter, values[filter.key])).length;
+    (filters ?? []).filter((filter) => isFilterActive(filter, values?.[filter.key])).length;
 
 export interface TableServerConfig {
     url: string;

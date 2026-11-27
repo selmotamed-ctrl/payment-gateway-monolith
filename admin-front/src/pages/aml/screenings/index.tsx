@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import {VAlert, PgButton, PgSpinner, PgAutocomplete, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgSpinner, PgAutocomplete, PgTextarea, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -457,16 +457,16 @@ const AmlScreeningsPage = dc(() => {
     ]);
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("AML Screenings")} subtitle={t("Review sanctions and PEP screening results and disposition unresolved matches.")} badge="AML-CONFIDENTIAL" badgeTone="danger">(
+            <PgStack gap="lg">
+                <PageHeader title={t("AML Screenings")} subtitle={t("Review sanctions and PEP screening results and disposition unresolved matches.")} badge="AML-CONFIDENTIAL" badgeTone="danger">
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
-                <VAlert type="error" variant="tonal">
+                </PageHeader>
+                <PgAlert tone="danger">
                     {t("AML-CONFIDENTIAL · Screening results and matches are restricted to Compliance, MLRO and authorised AML reviewers.")}
-                </VAlert>
+                </PgAlert>
                 {summary.value && (
                     <SummaryExportCard
                         title={t("Screening health")}
@@ -545,7 +545,7 @@ const AmlScreeningsPage = dc(() => {
                         />
                     )}
                 />
-            </ThemedView>
+            </PgStack>
             <SlideOverDrawer
                 modelValue={detailsOpen.value}
                 onUpdate:modelValue={(value: boolean) => {
@@ -650,9 +650,9 @@ const AmlScreeningsPage = dc(() => {
                 submitLabel={t("Export")}
                 onSubmit={() => void exportExcel()}
             >
-                <VAlert type="error" variant="tonal">
+                <PgAlert tone="danger">
                     {t("AML screening exports contain confidential match data. Confirm scope, handling and authority before exporting.")}
-                </VAlert>
+                </PgAlert>
                 <FormChecklist
                     checks={[...SCREENING_EXPORT_CHECKS]}
                     modelValue={listExportChecklist.value}

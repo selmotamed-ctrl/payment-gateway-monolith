@@ -53,6 +53,17 @@ export const SandboxResourceTable = defineComponent(
             hook.value?.reset();
         };
 
+        const topSlot = () =>
+            (props.filters?.length ?? 0) > 0 ? (
+                <TableFilters
+                    filters={props.filters ?? []}
+                    values={filters.value}
+                    total={total.value}
+                    onChange={onFiltersChanged}
+                    onClear={onFiltersCleared}
+                />
+            ) : null;
+
         return () => (
             <ApiTable<T>
                 title={t(props.title)}
@@ -100,17 +111,7 @@ export const SandboxResourceTable = defineComponent(
                         },
                     });
                 }}
-                TopSlot={(props.filters?.length ?? 0) > 0
-                    ? () => (
-                        <TableFilters
-                            filters={props.filters ?? []}
-                            values={filters.value}
-                            total={total.value}
-                            onChange={onFiltersChanged}
-                            onClear={onFiltersCleared}
-                        />
-                    )
-                    : undefined}
+                TopSlot={topSlot}
             />
         );
     },

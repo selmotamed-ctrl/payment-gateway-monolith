@@ -2,10 +2,9 @@ import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import {PgAutocomplete, PgButton, PgTextField} from "@pg/ui";
+import {PgAutocomplete, PgButton, PgTextField, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
 import {StateView} from "@pg/ui";
 import { DataTable } from "@/tables/DataTable";
 import {TableRowActions} from "@pg/ui";
@@ -163,8 +162,8 @@ const WalletsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Wallets")} subtitle={t("Available, pending, and reserved balances by wallet.")}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Wallets")} subtitle={t("Available, pending, and reserved balances by wallet.")}>
                         <PgButton
                             variant="tonal"
                             onClick={() => {
@@ -176,7 +175,7 @@ const WalletsPage = dc(() => {
                         >
                             {t("Create")}
                         </PgButton>
-                    )</PageHeader>
+                </PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
@@ -193,7 +192,7 @@ const WalletsPage = dc(() => {
                         setSearchValue={(value) => (search.value = value)}
                     />
                 )}
-            </ThemedView>
+            </PgStack>
 
             <FormModal
                 modelValue={dialogOpen.value}

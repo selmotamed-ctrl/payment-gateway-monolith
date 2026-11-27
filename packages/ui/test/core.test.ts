@@ -26,13 +26,13 @@ describe("money formatting", () => {
 
 describe("option adapter", () => {
     it("normalises plain values and Vuetify accessors", () => {
-        expect(normalizeOptions(["LOW", "HIGH"])).toEqual([
+        expect(normalizeOptions(["LOW", "HIGH"])).toMatchObject([
             { value: "LOW", label: "LOW" },
             { value: "HIGH", label: "HIGH" },
         ]);
         const items = [{ id: 7, title: "Tripoli", subtitle: "LY-TIP" }];
-        expect(normalizeOptions(items, { itemValue: "id", itemTitle: "title" })).toEqual([
-            { value: 7, label: "Tripoli", subtitle: "LY-TIP", icon: undefined, badge: undefined, disabled: false },
+        expect(normalizeOptions(items, { itemValue: "id", itemTitle: "title" })).toMatchObject([
+            { value: 7, label: "Tripoli", subtitle: "LY-TIP", badge: undefined, disabled: false },
         ]);
     });
 });

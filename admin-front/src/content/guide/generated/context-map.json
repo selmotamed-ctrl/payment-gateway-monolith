@@ -230,12 +230,24 @@
       "situations": []
     },
     {
+      "screenId": "Transactions",
+      "routeNames": [
+        "Transactions"
+      ],
+      "pageDir": "pages/transactions",
+      "summary": "Look up any payment attempt and every partner message. It is mostly for reading; the only action that touches a payment is Schedule inquiry, for attempts stuck in UNKNOWN or VERIFYING.",
+      "articles": [
+        "b03-11"
+      ],
+      "cards": [],
+      "situations": []
+    },
+    {
       "screenId": "OperatorCases",
       "routeNames": [
         "OperatorCases",
         "OperatorCaseDetail",
-        "GatewayInquirySchedules",
-        "Transactions"
+        "GatewayInquirySchedules"
       ],
       "pageDir": "pages/operator-cases",
       "summary": "Tasks for payments and statement lines that need a human: unknown, conflict, mismatch, late success. Inquire first; resolve by hand only with evidence and a second person.",

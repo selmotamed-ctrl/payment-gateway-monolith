@@ -13,6 +13,7 @@ import {
 
 const RECENT_KEY = "pg.guide.recent";
 const MAX_RECENT = 8;
+const HANDLED_KEYS = new Set(["ArrowDown", "ArrowUp", "Tab", "Enter", "Escape"]);
 
 const readRecent = (): string[] => {
     try {
@@ -56,6 +57,7 @@ export const GuideSearchPalette = defineComponent({
         const emptyDocuments = ref<GuideSearchDocument[]>([]);
         const activeIndex = ref(0);
         let timer: ReturnType<typeof setTimeout> | null = null;
+        let searchToken = 0;
 
         const isArabic = computed(() => props.locale === "ar");
         const labels = computed(() =>
@@ -110,23 +112,39 @@ export const GuideSearchPalette = defineComponent({
 
         const runSearch = async () => {
             const value = query.value.trim();
+            const token = ++searchToken;
             if (!value) {
                 groups.value = [];
+                loading.value = false;
                 await loadEmptyState();
+                if (token !== searchToken) return;
                 resetActive();
                 return;
             }
             loading.value = true;
             try {
-                groups.value = await searchGuideGroups(value);
+                const results = await searchGuideGroups(value);
+                // A slower earlier query must never replace the current one.
+                if (token !== searchToken) return;
+                groups.value = results;
                 resetActive();
             } finally {
-                loading.value = false;
+                if (token === searchToken) loading.value = false;
             }
         };
 
         watch(query, () => {
             if (timer) clearTimeout(timer);
+            const value = query.value.trim();
+            // Clear the previous result set immediately: a printable key must
+            // never leave a stale highlighted item that Enter could open.
+            groups.value = [];
+            activeIndex.value = 0;
+            if (!value) {
+                void runSearch();
+                return;
+            }
+            loading.value = true;
             timer = setTimeout(() => void runSearch(), 80);
         });
 
@@ -136,10 +154,10 @@ export const GuideSearchPalette = defineComponent({
                 if (open) {
                     query.value = "";
                     groups.value = [];
+                    // Focus before the async empty-state build; focusing again
+                    // after it can land in the middle of the first typed word.
+                    void nextTick(() => input.value?.focus());
                     await loadEmptyState();
-                    await nextTick();
-                    input.value?.focus();
-                    input.value?.select();
                     return;
                 }
                 if (timer) {
@@ -154,7 +172,8 @@ export const GuideSearchPalette = defineComponent({
             if (timer) clearTimeout(timer);
         });
 
-        const choose = (document: GuideSearchDocument) => {
+        const choose = (document: GuideSearchDocument | undefined) => {
+            if (!document) return;
             const recent = [document.id, ...readRecent().filter((id) => id !== document.id)];
             writeRecent(recent);
             updateOpen(false);
@@ -189,6 +208,20 @@ export const GuideSearchPalette = defineComponent({
         };
 
         const onKeydown = (event: KeyboardEvent) => {
+            if (event.defaultPrevented) return;
+            // Never steal a printable character or an IME composition commit
+            // (Arabic input commits with Enter).
+            if (event.isComposing || event.keyCode === 229) return;
+            if (
+                event.key.length === 1 &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !event.altKey
+            ) {
+                return;
+            }
+            if (!HANDLED_KEYS.has(event.key)) return;
+
             if (event.key === "ArrowDown") {
                 event.preventDefault();
                 move(1);
@@ -199,8 +232,12 @@ export const GuideSearchPalette = defineComponent({
                 event.preventDefault();
                 tabGroup(event.shiftKey ? -1 : 1);
             } else if (event.key === "Enter") {
+                // Enter on a focused result button belongs to that button; the
+                // native click runs the same `choose` and must not double-open.
+                const target = event.target as HTMLElement | null;
+                if (target?.closest('[role="option"]')) return;
                 event.preventDefault();
-                if (activeHit.value) choose(activeHit.value);
+                if (!loading.value) choose(activeHit.value);
             } else if (event.key === "Escape") {
                 event.preventDefault();
                 updateOpen(false);
@@ -234,6 +271,7 @@ export const GuideSearchPalette = defineComponent({
                     onUpdate:modelValue={updateOpen}
                     maxWidth={760}
                     contentClass="guide-search-dialog"
+                    bare
                     scrollable
                     onAfterLeave={() => props.triggerElement?.focus?.()}
                 >
@@ -256,9 +294,14 @@ export const GuideSearchPalette = defineComponent({
                                 modelValue={query.value}
                                 onUpdate:modelValue={(value: string) => (query.value = value)}
                             />
-                            <kbd class="pg-command-kbd">ESC</kbd>
+                            <kbd class="pg-kbd-badge">ESC</kbd>
                         </div>
-                        <div id="pg-guide-search-listbox" role="listbox" class="guide-search-results">
+                        <div
+                            id="pg-guide-search-listbox"
+                            role="listbox"
+                            class="guide-search-results"
+                            aria-busy={loading.value ? "true" : "false"}
+                        >
                             {loading.value ? (
                                 <p class="guide-search-note">{labels.value.loading}</p>
                             ) : query.value.trim() === "" ? (

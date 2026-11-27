@@ -91,7 +91,7 @@ test("right-click opens the payment link actions including the primary action", 
         );
     });
 
-    const menu = page.locator('.v-menu.v-overlay--active [role="menu"][aria-label="Row actions"]').last();
+    const menu = page.locator('.pg-row-actions__panel[role="menu"][aria-label="Row actions"]').last();
     await expect(menu).toBeVisible();
     await expect(menu.getByRole("menuitem", { name: "Copy" })).toBeVisible();
     await expect(menu.getByRole("menuitem", { name: "Generate QR" })).toBeVisible();
@@ -105,7 +105,7 @@ test("right-click opens the payment link actions including the primary action", 
     expect(Math.abs((flippedUp ? rect.y + rect.height : rect.y) - 280), `menu y (${rect.y}) is next to the pointer y (280)`).toBeLessThan(24);
 
     await page.keyboard.press("Escape");
-    await expect(page.locator('.v-menu.v-overlay--active [role="menu"][aria-label="Row actions"]')).toHaveCount(0);
+    await expect(page.locator('.pg-row-actions__panel[role="menu"][aria-label="Row actions"]')).toHaveCount(0);
 });
 
 test("Shift+F10 opens the payment link actions and Escape closes them", async ({ page }) => {
@@ -114,10 +114,10 @@ test("Shift+F10 opens the payment link actions and Escape closes them", async ({
     await trigger.focus();
     await page.keyboard.press("Shift+F10");
 
-    const menu = page.locator('.v-menu.v-overlay--active [role="menu"][aria-label="Row actions"]').last();
+    const menu = page.locator('.pg-row-actions__panel[role="menu"][aria-label="Row actions"]').last();
     await expect(menu).toBeVisible();
     await expect(menu.getByRole("menuitem", { name: "Copy" })).toBeVisible();
 
     await page.keyboard.press("Escape");
-    await expect(page.locator('.v-menu.v-overlay--active [role="menu"][aria-label="Row actions"]')).toHaveCount(0);
+    await expect(page.locator('.pg-row-actions__panel[role="menu"][aria-label="Row actions"]')).toHaveCount(0);
 });

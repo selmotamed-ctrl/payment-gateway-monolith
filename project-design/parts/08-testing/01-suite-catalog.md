@@ -556,6 +556,12 @@ These are development/CI tests only; no production-time test job or test endpoin
 - `core-back/test/automation/platform-monitor.test.ts` covers source-cleared monitor cases and recurrence.
 - `tests/e2e/admin/operator-cases.spec.ts` covers the type-aware list/detail and a backup case that exposes no payment outcome or provider/settled fields.
 
+## Vapor detail-page reactivity regression (2026-11-27)
+
+- `admin-front/src/pages/__tests__/vapor-render-reactivity.test.ts` parses every `src/pages/**/*.tsx` with the TypeScript AST and fails when a `dc`/`defineComponent` setup ref is snapshotted in a one-shot render without `rerender: true` (both the `dc(setup, { rerender: true })` and object-form `defineComponent({ setup, rerender: true })` shapes are recognised). It fails on the pre-fix join-request page with `join-requests/[id].tsx:138 snapshots entry = detail.value! without { rerender: true }`.
+- `tests/e2e/admin/detail-pages.spec.ts` opens `/join-requests/:id` and `/kyb/:id` against a mocked successful API (`fixtures/join-request-detail.json`, `fixtures/kyb-document-detail.json`) and asserts "Request at a glance"/"Approval blockers" and "Document identity"/"Status and integrity" are visible while "Join request not found"/"KYB document not found" are absent.
+
+
 ## Disputes attempt-link regression (2026-11-16)
 
 - `admin-front/src/pages/disputes/__tests__/queryFilters.test.ts` — route query normalization (including repeated keys), attempt/merchant deep-link seeding, merchant-only seeding, and Open/Resolved/All scope preservation.
@@ -655,7 +661,12 @@ validation.
 
 | Suite | Command | Scope |
 | :--- | :--- | :--- |
-| Package unit | `cd packages/ui && bun run test` | `core.test.ts` (date, money, options, rules, status), `toastStore.test.ts` (auto-dismiss, pause/resume, stack cap, tone), `governanceAudit.test.ts` (rules, container padding, duplicated dirs, component source contracts). 25 tests. |
+| Package unit | `cd packages/ui && bun run test` | `core.test.ts` (date, money, options, rules, status), `dc.test.tsx` (declared props/defaults/fallthrough and provider inheritance for a `rerender` branch after it flips), `toastStore.test.ts` (auto-dismiss, pause/resume, stack cap, tone), `governanceAudit.test.ts` (rules, container padding, duplicated dirs, component source contracts), `inputs-advanced.test.tsx` (autocomplete multi-select, menu/panel contract, empty filter surface), `table-page-swap.test.tsx` (paged rows replace correctly with stable row keys), `expansion-legacy.test.tsx` (legacy expansion keyboard/body contract), `overlay-stack.test.ts` (only the newest modal is interactive; menus do not inflate the modal z-rank). 431 tests. |
+| 2026 polish E2E | `bunx playwright test --project=admin e2e/admin/ui-polish.spec.ts` | Merchant detail section commands/layout/card surfaces, outlined Suspend/wrapped page actions, flat table/filter chrome, sticky action rule, monochrome light/dark input focus, autocomplete flat panel + node identity + 800 ms filter-refresh survival + chip geometry, mobile filter opening, full-height help drawer, merchant help on canvas, outlined utility buttons and outlined `Review attention`, seamless KPI strip (1 px seam, square cells, zero negative margins, dark parent contrast, wrap), dashboard route-health legend/approval-queue rows with bottom-pinned actions, exact 4 px/2 px checklist rhythm, no-padding card header inset, selected-checkbox hover retention, segmented-tab overflow, single-surface Ctrl+K and guide palettes, navigation active/focus movement, root-level row menu hit-testing, and shell-only scrolling. |
+| Report authoring render E2E | `bunx playwright test --project=admin e2e/admin/report-studio-render.spec.ts` | Studio Step 1 stacks its actions below the Domains autocomplete; Step 2 keeps both uploads, the JSON editor and Verify; Chrome keeps both uploads, the JSON editor and Verify & Save. Guards the Vapor conditional-`v-slots` default-slot regression. |
+| Drawer brand lockup E2E | `bunx playwright test --project=admin e2e/admin/shell.spec.ts` and `--project=merchant e2e/merchant/shell.spec.ts` | The drawer wordmark renders on one line (`height <= 1.5 × line-height`) and does not overflow its box (`scrollWidth <= clientWidth + 1`) in admin and in merchant LIVE and SANDBOX routes. Guards the 2026-11-27 brand-lockup fix. |
+| Audit remediation units | `cd packages/ui && bun run test` | Option-node identity across hover/selection, API multi stays open, `TableFilters` empty/mobile rendering, `PgButton` danger/warning/success mapping and canonical outlined variants, `PgExpansionPanel` single body, overlay z-rank. |
+| 2026 polish CSS guard | `cd tests && bunx vitest run unit/ui-2026-polish.test.ts` | Pins the shared tonal/outlined action hierarchy, press transform, monochrome focus tokens, autocomplete panel, flat table/action/filter chrome, drawer body height and merchant-section padding. |
 | Package typecheck | `cd packages/ui && bun run typecheck` | Vapor TSX component contracts. |
 | UI full-sweep gate | `bun run ui:audit` | UI-01..UI-11 across the four portals; 0 violations. |
 | Icon registry | `bun run ui:icons:check` | Generated `@mdi/js` registry is current. |

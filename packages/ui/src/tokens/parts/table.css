@@ -1,0 +1,559 @@
+/*
+ * Data table area — the 2026 operational table.
+ *
+ * Loaded after `components.css`. `components.css` owns the shared card/toolbar
+ * foundation; this file tightens the table geometry (48px rows, 11.5px header),
+ * the sticky action column edge shadow, the row-action popover and the footer
+ * pagination controls. Only `--pg-*` tokens; logical properties throughout.
+ */
+
+/* ---------------------------------------------------------------- shell */
+
+.pg-table-shell {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-md);
+  background: var(--pg-bg-surface);
+}
+
+/* Inside a PgCard the card already owns the frame. */
+.pg-table-card .pg-table-shell,
+.pg-card__body > .pg-table-shell:only-child {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+/*
+ * The ONLY horizontal scroll container. A wide 14-column table scrolls here and
+ * never widens the document; the sticky action column stays reachable.
+ */
+.pg-table-shell > .table-wrapper.pg-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--pg-border-strong) transparent;
+}
+
+.pg-table-shell > .table-wrapper.pg-table-scroll::-webkit-scrollbar {
+  height: 10px;
+}
+
+.pg-table-shell > .table-wrapper.pg-table-scroll::-webkit-scrollbar-thumb {
+  background: var(--pg-border-default);
+  border-radius: 999px;
+}
+
+.pg-table-shell > .table-wrapper.pg-table-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pg-table-shell .pg-unified-table {
+  width: 100%;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------- header */
+
+.pg-table-shell .pg-unified-table > thead > tr > th {
+  height: 42px !important;
+  padding-block: 11px !important;
+  padding-inline: 16px !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  line-height: 1.3 !important;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pg-ink-muted) !important;
+  background: var(--pg-bg-surface-subtle) !important;
+  border-bottom: 1px solid var(--pg-border-subtle) !important;
+  white-space: nowrap !important;
+}
+
+html[dir="rtl"] .pg-table-shell .pg-unified-table > thead > tr > th {
+  font-size: 12px !important;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.pg-table__header-inner {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.pg-table__header-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A real button owns the sort cycle: asc -> desc -> none. */
+.pg-table__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  margin: -6px -5px;
+  padding: 6px 5px;
+  border: 0;
+  border-radius: var(--pg-radius-xs);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.pg-table__sort:hover {
+  background: var(--pg-bg-surface-hover);
+  color: var(--pg-ink-primary);
+}
+
+.pg-table__sort:focus-visible {
+  outline: 2px solid var(--pg-border-focus);
+  outline-offset: 2px;
+}
+
+.pg-table__sort-label {
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- rows */
+
+.pg-table-shell .pg-unified-table > tbody > tr {
+  height: 48px !important;
+  transition: background-color 120ms ease;
+}
+
+.pg-table-shell .pg-unified-table > tbody > tr > td {
+  height: 48px !important;
+  max-height: none !important;
+  padding-block: 12px !important;
+  padding-inline: 16px !important;
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+  color: var(--pg-ink-primary);
+  border-bottom: 1px solid var(--pg-border-subtle) !important;
+  vertical-align: middle !important;
+}
+
+.pg-table-shell .pg-unified-table > tbody > tr:hover > td {
+  background: var(--pg-bg-surface-hover);
+}
+
+.pg-table-shell .pg-unified-table > tbody > tr:last-child > td {
+  border-bottom: none !important;
+}
+
+.pg-table-row--clickable {
+  cursor: pointer;
+}
+
+/* A clickable row is a mouse affordance; its controls carry the real focus
+ * ring. Outlining the whole <tr> on :focus-within painted a white frame around
+ * the table whenever a row menu or checkbox was clicked. */
+
+/* Dense variant used by embedded drawers. */
+.pg-table-shell--compact .pg-unified-table > tbody > tr,
+.pg-table-shell--compact .pg-unified-table > tbody > tr > td {
+  height: 40px !important;
+}
+
+.pg-table-shell--compact .pg-unified-table > tbody > tr > td {
+  padding-block: 8px !important;
+}
+
+/* -------------------------------------------------------- sticky actions */
+
+.pg-table-shell .pg-col-actions {
+  position: sticky;
+  inset-inline-end: 0;
+  /* No z-index: a stacking context here trapped the fixed row menu below the
+     page header. The sticky cell still paints above non-positioned cells. */
+  z-index: auto;
+  background: var(--pg-bg-surface) !important;
+  box-shadow: -8px 0 12px -8px color-mix(in srgb, var(--pg-ink-primary) 18%, transparent);
+}
+
+.pg-table-shell .pg-unified-table > thead > tr > th.pg-col-actions {
+  z-index: 12;
+  background: var(--pg-bg-surface-subtle) !important;
+}
+
+.pg-table-shell .pg-unified-table > tbody > tr:hover > td.pg-col-actions {
+  background: var(--pg-bg-surface-hover) !important;
+}
+
+html[dir="rtl"] .pg-table-shell .pg-col-actions {
+  box-shadow: 8px 0 12px -8px color-mix(in srgb, var(--pg-ink-primary) 18%, transparent);
+}
+
+/* ------------------------------------------------ row risk / selection */
+
+.pg-table-shell .pg-row-indicator > td:first-child {
+  box-shadow: inset 3px 0 0 var(--pg-status-neutral-dot);
+}
+
+.pg-table-shell .pg-row-indicator--danger > td:first-child {
+  box-shadow: inset 3px 0 0 var(--pg-status-danger-dot);
+}
+
+.pg-table-shell .pg-row-indicator--warning > td:first-child {
+  box-shadow: inset 3px 0 0 var(--pg-status-warning-dot);
+}
+
+.pg-table-shell .pg-row-indicator--info > td:first-child {
+  box-shadow: inset 3px 0 0 var(--pg-status-info-dot);
+}
+
+.pg-table-shell .pg-row-indicator--success > td:first-child {
+  box-shadow: inset 3px 0 0 var(--pg-status-success-dot);
+}
+
+html[dir="rtl"] .pg-table-shell .pg-row-indicator > td:first-child {
+  box-shadow: inset -3px 0 0 var(--pg-status-neutral-dot);
+}
+
+html[dir="rtl"] .pg-table-shell .pg-row-indicator--danger > td:first-child {
+  box-shadow: inset -3px 0 0 var(--pg-status-danger-dot);
+}
+
+html[dir="rtl"] .pg-table-shell .pg-row-indicator--warning > td:first-child {
+  box-shadow: inset -3px 0 0 var(--pg-status-warning-dot);
+}
+
+html[dir="rtl"] .pg-table-shell .pg-row-indicator--info > td:first-child {
+  box-shadow: inset -3px 0 0 var(--pg-status-info-dot);
+}
+
+html[dir="rtl"] .pg-table-shell .pg-row-indicator--success > td:first-child {
+  box-shadow: inset -3px 0 0 var(--pg-status-success-dot);
+}
+
+.pg-col-select {
+  width: 44px !important;
+  min-width: 44px !important;
+  padding-inline: 12px !important;
+  text-align: center !important;
+}
+
+.pg-table-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------- loading / empty */
+
+.pg-table-skeleton-row > td {
+  pointer-events: none;
+}
+
+.pg-table-skeleton-row .pg-skeleton {
+  width: 100%;
+}
+
+.pg-table-shell .pg-unified-table > tbody > tr.pg-table-empty-row > td.pg-table__empty-cell {
+  height: auto !important;
+  max-height: none !important;
+  padding: 32px 20px !important;
+  white-space: normal !important;
+  border-bottom: 0 !important;
+  background: transparent !important;
+}
+
+.pg-table__footer-cell {
+  padding: 0 !important;
+  border-bottom: 0 !important;
+  white-space: normal !important;
+}
+
+.pg-table-empty-row .pg-empty {
+  width: 100%;
+  margin: 0 auto;
+}
+
+.pg-table-refetch {
+  position: relative;
+  z-index: 3;
+  margin: 0;
+  border-radius: 0;
+  overflow: hidden;
+}
+
+.pg-table-body--hidden {
+  display: none;
+}
+
+/* --------------------------------------------------------------- toolbar */
+
+.pg-table-toolbar--inline {
+  min-height: 52px;
+  padding: 10px 16px !important;
+}
+
+.pg-table-toolbar__right {
+  margin-inline-start: auto;
+}
+
+.pg-table-toolbar__icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--pg-ink-muted);
+}
+
+.pg-table-toolbar__right > .pg-btn,
+.pg-table-toolbar__right > .pg-menu-anchor {
+  flex: 0 0 auto;
+}
+
+.pg-filter-trigger--active {
+  border-color: var(--pg-border-strong) !important;
+  color: var(--pg-ink-primary) !important;
+}
+
+.pg-column-picker {
+  max-height: 320px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.pg-column-picker__item {
+  text-align: start;
+}
+
+.pg-column-picker__item .pg-icon {
+  color: var(--pg-ink-muted);
+}
+
+/* ---------------------------------------------------------------- footer */
+
+.pg-table-footer {
+  min-height: 52px;
+  padding: 10px 16px !important;
+  border-top: 1px solid var(--pg-border-subtle);
+  background: var(--pg-bg-surface);
+}
+
+.pg-table-footer__range {
+  font-size: 13px;
+  color: var(--pg-ink-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pg-table-footer__controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-inline-start: auto;
+  flex-wrap: wrap;
+}
+
+.pg-table-footer .pg-pagination-button,
+.pg-table-footer .pg-page-number {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 7px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pg-table-footer .pg-pagination-button:disabled,
+.pg-table-footer .pg-page-number:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.pg-table-footer .pg-page-number--active {
+  background: var(--pg-accent-primary);
+  border-color: var(--pg-accent-primary);
+  color: var(--pg-ink-on-accent);
+  font-weight: 600;
+}
+
+.pg-page-ellipsis {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 32px;
+  color: var(--pg-ink-faint);
+  font-size: 13px;
+}
+
+.pg-table-footer .pg-page-size {
+  width: 92px;
+  flex: 0 0 auto;
+}
+
+.pg-table-footer--mobile .pg-table-footer__controls {
+  width: 100%;
+  justify-content: space-between;
+}
+
+/* ----------------------------------------------------------- row actions */
+
+.pg-row-actions__label {
+  line-height: 1;
+}
+
+.pg-row-actions__spinner {
+  width: 12px;
+  height: 12px;
+}
+
+.pg-row-actions__item {
+  display: block;
+}
+
+.pg-row-actions__item-label {
+  flex: 1 1 auto;
+  text-align: start;
+}
+
+.pg-row-actions__panel {
+  max-height: min(420px, calc(100dvh - 16px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.pg-row-actions__panel .pg-menu-item {
+  min-height: 34px;
+  gap: 10px;
+  text-align: start;
+}
+
+.pg-row-actions__primary:active {
+  background: var(--pg-bg-surface-active);
+}
+
+.pg-row-actions__more:active {
+  background: var(--pg-bg-surface-active);
+}
+
+/* ------------------------------------------------------------ responsive */
+
+@media (max-width: 640px) {
+  .pg-table-toolbar,
+  .pg-table-toolbar--inline {
+    padding: 10px 12px !important;
+  }
+
+  .pg-table-shell .pg-unified-table > thead > tr > th,
+  .pg-table-shell .pg-unified-table > tbody > tr > td {
+    padding-inline: 12px !important;
+  }
+
+  .pg-table-footer {
+    padding: 10px 12px !important;
+  }
+
+  .pg-table-footer__controls {
+    gap: 8px;
+  }
+
+  .pg-table-search {
+    width: 100%;
+    flex-basis: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pg-table__sort,
+  .pg-table-shell .pg-unified-table > tbody > tr,
+  .pg-row-actions__primary,
+  .pg-row-actions__more {
+    transition: none;
+  }
+
+  .pg-row-actions__panel {
+    animation: none;
+  }
+}
+
+/* 2026 single-line row contract: fixed comfortable 48px / compact 40px rows.
+ * The row actions (30px) and any status chips fit without stretching the row,
+ * and long cell text is truncated instead of wrapping into a 200px-tall row. */
+.pg-table-shell .pg-unified-table > tbody > tr > td {
+  box-sizing: border-box !important;
+  max-height: 48px !important;
+  padding-block: 9px !important;
+  overflow: hidden !important;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pg-table-shell--compact .pg-unified-table > tbody > tr > td {
+  max-height: 40px !important;
+  padding-block: 5px !important;
+}
+
+/* Action cell must fit one outlined primary + the overflow trigger without
+ * wrapping into a second line (which would exceed the 48px row contract). */
+.pg-table-shell .pg-col-actions {
+  min-width: 116px;
+  white-space: nowrap;
+}
+.pg-row-actions__primary { flex: 0 0 auto; white-space: nowrap; }
+.pg-row-actions__label { white-space: nowrap; }
+
+/* Fixed action column: a crisp end-of-table rule, never a floating shadow. */
+.pg-table-shell .pg-col-actions {
+    box-shadow: none !important;
+    border-inline-start: 2px solid var(--pg-border-strong) !important;
+}
+html[dir="rtl"] .pg-table-shell .pg-col-actions {
+    box-shadow: none !important;
+    border-inline-start: 0 !important;
+    border-inline-end: 2px solid var(--pg-border-strong) !important;
+}
+/* Filter surface lives inside the table card: no second rounded frame. */
+.pg-table-filters,
+.pg-table-filter-surface {
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+}
+
+/*
+ * A table is a surface, not a boxed panel inside the page. The card supplies
+ * the background; the frame, radius and drop shadow were reading as a second
+ * rounded outline around the rows (and around the empty state). Keep the
+ * header/toolbar hairlines and the sticky-action rule, drop the outer frame.
+ */
+.pg-card.pg-table-card,
+.pg-card.pg-table-card.pg-unified-table {
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+}
+.pg-table-empty-row .pg-empty__medallion,
+.pg-table__empty-cell .pg-empty__icon {
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+}
+
+/* A table nested in a disclosure/section has no elevation of its own. */
+.pg-card.pg-table-card--flat {
+    background: transparent !important;
+    box-shadow: none !important;
+}

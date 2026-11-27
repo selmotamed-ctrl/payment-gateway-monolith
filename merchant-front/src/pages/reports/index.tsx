@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import {VAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgTextField, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
 import {ApiTable} from "@pg/ui";
@@ -314,7 +314,7 @@ const MerchantReportsPage = dc(() => {
 
   return () => (
     <ScreenContainer>
-      <ThemedView style={{ gap: "18px" }}>
+    <PgStack gap="lg">
         <PageHeader
           title={t("Reports")}
           subtitle={t("Generate the reports available to your merchant account")}
@@ -323,7 +323,7 @@ const MerchantReportsPage = dc(() => {
         {((health.value?.reportsBlockedByChrome ?? 0) > 0 ||
           (health.value?.brokenReportSpecs ?? 0) > 0 ||
           (health.value?.brokenTemplateSpecs ?? 0) > 0) && (
-          <VAlert type="warning" variant="tonal">
+          <PgAlert tone="warning">
             <div class="d-flex flex-wrap align-center ga-3">
               <span>{t("Some reports are temporarily unavailable while platform templates are updated")}</span>
               {canStudio.value && (health.value?.brokenReportSpecs ?? 0) > 0 && (
@@ -337,7 +337,7 @@ const MerchantReportsPage = dc(() => {
                 </PgButton>
               )}
             </div>
-          </VAlert>
+          </PgAlert>
         )}
 
         {bundle.value && selected.value && (
@@ -510,7 +510,7 @@ const MerchantReportsPage = dc(() => {
             }}
           />
         )}
-      </ThemedView>
+      </PgStack>
     </ScreenContainer>
   );
 });

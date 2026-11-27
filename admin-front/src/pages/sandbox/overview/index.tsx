@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import {VAlert, PgButton, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgTextField} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {SurfaceCard} from "@pg/ui";
@@ -165,7 +165,7 @@ const AdminSandboxOverviewPage = dc(() => {
         <ScreenContainer>
             <PageHeader title={t("Sandbox & Fake Rails Health")} subtitle={t("Inspect the isolated sandbox plane, its reference catalog and recent merchant activity.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</PgButton><PgButton variant="tonal" prependIcon="mdi-content-copy" disabled={!overview.value} onClick={() => void copySandboxSummary()}>{t("Copy summary")}</PgButton><PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</PgButton><PgButton variant="tonal" prependIcon="mdi-storefront-outline" onClick={() => void router.push("/sandbox/merchants")}>{t("Merchants")}</PgButton><PgButton variant="tonal" color="error" prependIcon="mdi-restore" onClick={() => { resetConfirm.value = ""; resetChecklist.value = {}; resetOpen.value = true; }}>{t("Reset all sandbox data")}</PgButton></div></PageHeader>
             <SandboxBanner />
-            {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
+            {error.value ? <PgAlert tone="danger" class="mb-4">{error.value}</PgAlert> : null}
             <StateView loading={loading.value} minHeight="180px">
                 <div class="d-flex flex-column ga-4">
                     <SummaryExportCard title={t("Sandbox plane health")} metrics={metrics.value} checks={[...EXPORT_CHECKS]} checklist={exportChecklist.value} onUpdate:checklist={(value: Record<string, boolean>) => (exportChecklist.value = value)} showChecklists={showChecklists} checklistComplete={exportChecklistComplete.value} exportLoading={exportLoading.value} exportDisabled={!exportChecklistComplete.value} exportLabel={t("Export summary")} onExport={() => void exportSummary()} />

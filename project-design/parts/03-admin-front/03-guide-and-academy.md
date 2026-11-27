@@ -3,7 +3,7 @@ id: admin-ui.guide
 title: Admin Guide and Academy
 status: partial
 confidence: high
-last_verified: 2026-11-25
+last_verified: 2026-11-27
 verified_against: working-tree
 code:
   - admin-front/scripts/extract-guide-content.ts
@@ -31,6 +31,7 @@ design_sources:
 tests:
   - tests/unit/guide-content.test.ts
   - tests/unit/guide-search.test.ts
+  - tests/unit/guide-screen-resolution.test.ts
   - tests/unit/guide-widgets.test.ts
   - tests/unit/guide-markdown-refs.test.ts
   - tests/unit/academy-content.test.ts
@@ -87,7 +88,7 @@ The canonical content is `design/07-guides-and-academy/guide_system_design_and_c
 | `paths.json` | 8 reading paths (`ALL` plus seven staff roles) |
 | `faq.en.json` | 60 quick answers |
 | `data.json` | `ledger-events`, `visible-rails`, `attempt-transitions` |
-| `context-map.json` | 30 screens (including `Wallets`, `SystemBackups`, `SystemObjectStorage`, `AmlReportingStudio`, `Incidents`, `FilingAdapters` and `Reports`), the last being the `General` fallback |
+| `context-map.json` | 32 screens (including `Transactions`, `Wallets`, `SystemBackups`, `SystemObjectStorage`, `AmlReportingStudio`, `Incidents`, `FilingAdapters` and `Reports`), the last being the `General` fallback |
 | `error-codes.en.json` | 19 codes parsed from `b13-01` |
 | `edge-cases.en.json` | 140 rows parsed from the v4.1 design |
 | `meta.json` | `contentVersion`, deterministic `generatedAt`, counts and source SHA-256 |
@@ -126,7 +127,7 @@ The clarity renderer adds:
 
 `GuideSearchPalette` is mounted in the default layout. Ctrl/Cmd+Shift+K opens the guide palette on every admin route; Ctrl/Cmd+K always opens the global record palette (which also searches guide entries). The app-bar trigger and drawer "Search guide…" button also open the guide palette. Recent documents are stored under `pg.guide.recent`.
 
-`PageHeader` automatically renders `ContextHelpButton`; a shared `ContextHelpDrawer` resolves the current route (parent-first) through `context-map.json`, shows the screen summary, safeguard cards, situations and articles, and never unmounts the page. `SafeguardDialog` is mounted globally and `useSafeguard(cardId).confirm()` blocks 22 risky actions until every required box is ticked; Cancel resolves `false` without sending a request.
+`PageHeader` automatically renders `ContextHelpButton`; a shared `ContextHelpDrawer` resolves the current route through `resolveGuideScreenForPath` (exact path, dynamic route, exact route name, longest segment-aligned page-directory prefix, then `fallbackScreenId`) and shows the screen summary, safeguard cards, situations and articles. The resolver never uses a broad prefix, so `/operator-cases` cannot capture `/transactions`. The drawer never unmounts the page. `SafeguardDialog` is mounted globally and `useSafeguard(cardId).confirm()` blocks 22 risky actions until every required box is ticked; Cancel resolves `false` without sending a request.
 
 ## 5. Simulators
 

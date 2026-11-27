@@ -1,4 +1,5 @@
 import type { PgUiConfig } from "@pg/ui";
+import { i18n } from "@/plugins/i18n";
 import { ContextHelpButton } from "@/components/guide/ContextHelpButton";
 import { api } from "@/state/api";
 import { copyToClipboard } from "@/utils/common";
@@ -8,6 +9,7 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 
 /** Host services the shared design system needs from the admin portal. */
 export const createUiConfig = (router: any): PgUiConfig => ({
+    i18n: { t: i18n.global.t as any, locale: i18n.global.locale as any },
     api: api as any,
     extractApiError: (error) => extractApiError(error),
     confirm: (options) => showConfirm(options as any),

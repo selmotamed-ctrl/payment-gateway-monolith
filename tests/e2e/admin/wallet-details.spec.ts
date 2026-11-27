@@ -234,7 +234,7 @@ test.describe("wallet details page", () => {
   test("a journal entry opens in a drawer above everything else", async ({ page }) => {
     await page.goto(`/wallets/${WALLET}?tab=statement`);
     await page.getByRole("button", { name: /open journal entry/i }).first().click();
-    const drawer = page.locator("aside.v-navigation-drawer--active", { hasText: "Double-entry lines" });
+    const drawer = page.locator("aside.pg-slideover", { hasText: "Double-entry lines" });
     await expect(drawer).toBeVisible();
     await expect(drawer.getByText("Double-entry lines")).toBeVisible();
   });
@@ -250,7 +250,7 @@ test.describe("wallet details page", () => {
     expect(calls.some((entry) => entry.includes(`/finance/gl-accounts/${GL_ACCOUNT}/lines`))).toBe(true);
 
     await glDrawer.getByRole("button", { name: /open journal entry/i }).first().click();
-    const entryDrawer = page.locator("aside.v-navigation-drawer--active", { hasText: "Double-entry lines" });
+    const entryDrawer = page.locator("aside.pg-slideover", { hasText: "Double-entry lines" });
     await expect(entryDrawer).toBeVisible();
     // the element at the centre of the entry drawer is inside it, i.e. nothing covers it
     const onTop = await entryDrawer.evaluate((element) => {
@@ -265,7 +265,8 @@ test.describe("wallet details page", () => {
     await page.goto(`/wallets/${WALLET}?tab=statement`);
     await expect(page.getByText("Payment 1", { exact: true })).toBeVisible();
     if (!(await page.locator(".pg-table-filters__grid").first().isVisible())) await page.locator(".pg-filter-trigger:visible").first().click();
-    await page.getByRole("combobox", { name: "Side", exact: true }).first().selectOption({ label: "Debit" });
+    await page.getByRole("combobox", { name: "Side", exact: true }).first().click();
+    await page.getByRole("option", { name: "Debit", exact: true }).click();
     await expect.poll(() => calls.some((entry) => entry.includes("/statement") && entry.includes("direction=DEBIT"))).toBe(true);
   });
 
@@ -285,8 +286,8 @@ test.describe("wallet details page", () => {
     const glDrawer = page.getByRole("complementary", { name: "GL account" });
     await expect(glDrawer.getByText(/checkpoint proof failed/i)).toBeVisible();
     await glDrawer.getByRole("button", { name: /^repair$/i }).click();
-    const dialog = page.getByRole("dialog");
-    await expect(dialog.getByText("Repair shard")).toBeVisible();
+    const dialog = page.locator(".pg-dialog", { hasText: "Repair shard" });
+    await expect(dialog).toBeVisible();
     await expect(dialog.getByText(/recomputed from the journal/i)).toBeVisible();
     await expect(dialog.getByText("Correction")).toBeVisible();
     await dialog.getByLabel(/reason/i).fill("too short");

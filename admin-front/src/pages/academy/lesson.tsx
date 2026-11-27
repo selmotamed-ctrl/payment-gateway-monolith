@@ -25,6 +25,7 @@ import { loadArticles } from "@/content/guide";
 
 export const AdminAcademyLessonPage = defineComponent({
     name: "AdminAcademyLessonPage",
+    rerender: true,
     setup() {
         const { t } = useLocale();
         const route = useRoute();
@@ -145,11 +146,11 @@ export const AdminAcademyLessonPage = defineComponent({
                             ? { label: m.title, to: router.resolve({ name: "AdminAcademyModule", params: { moduleId: m.id } }).fullPath }
                             : { label: t("My learning"), to: router.resolve({ name: "AdminAcademy" }).fullPath },
                         { label: l?.title ?? t("Lesson") },
-                    ]} badge={l && finished ? "COMPLETED" : ""} badgeLabel={t("Completed")} badgeTone="success">(
+                    ]} badge={l && finished ? "COMPLETED" : ""} badgeLabel={t("Completed")} badgeTone="success">
                         <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyLessonSummary()}>
                             {t("Copy lesson summary")}
                         </PgButton>
-                    )</PageHeader>
+                </PageHeader>
             );
 
             const tile = (id: string, direction: "prev" | "next") => (

@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import {VAlert, PgButton, PgSpinner, PgAutocomplete, PgTextField, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgSpinner, PgAutocomplete, PgTextField, PgTextarea, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -795,17 +795,17 @@ const AmlReportsPage = dc(() => {
     ]);
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("AML Reports")} subtitle={t("Draft, approve, submit, and acknowledge regulatory reports under restricted access.")} badge="AML-CONFIDENTIAL" badgeTone="danger">(
+            <PgStack gap="lg">
+                <PageHeader title={t("AML Reports")} subtitle={t("Draft, approve, submit, and acknowledge regulatory reports under restricted access.")} badge="AML-CONFIDENTIAL" badgeTone="danger">
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</PgButton>
                             <PgButton color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("Draft report")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
-                <VAlert type="error" variant="tonal">
+                </PageHeader>
+                <PgAlert tone="danger">
                     {t("AML-CONFIDENTIAL · Regulatory reports are restricted to Compliance, MLRO and authorised reporting roles. Never disclose an STR or its existence to the subject.")}
-                </VAlert>
+                </PgAlert>
                 {summary.value && (
                     <SummaryExportCard
                         title={t("Reporting health")}
@@ -893,7 +893,7 @@ const AmlReportsPage = dc(() => {
                         />
                     )}
                 />
-            </ThemedView>
+            </PgStack>
             <SlideOverDrawer
                 modelValue={detailsOpen.value}
                 onUpdate:modelValue={(value: boolean) => {
@@ -995,7 +995,7 @@ const AmlReportsPage = dc(() => {
                             <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Generated outputs")}</ThemedText>
                             {payloadLoading.value && <PgSpinner indeterminate size={22} color="primary" />}
                             {(selected.value.outputs ?? reportPayload.value?.outputs ?? []).length === 0 && (
-                                <VAlert type="warning" variant="tonal">{t("No output has been generated yet.")}</VAlert>
+                                <PgAlert tone="warning">{t("No output has been generated yet.")}</PgAlert>
                             )}
                             {(selected.value.outputs ?? reportPayload.value?.outputs ?? []).map((output) => (
                                 <ThemedView key={`${output.format}-${output.revision}`} style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap", border: "1px solid var(--pg-border-subtle)", borderRadius: "8px", padding: "10px" }}>
@@ -1011,9 +1011,9 @@ const AmlReportsPage = dc(() => {
                                         <PgButton size="small" variant="text" onClick={() => void router.push({ name: "AmlReportingStudio", query: { open: output.schemaId } })}>{t("Open in Studio")}</PgButton>
                                     )}
                                     {output.validationErrors != null && (
-                                        <VAlert type="warning" variant="tonal" density="compact" style={{ width: "100%" }}>
+                                        <PgAlert tone="warning" density="compact" style={{ width: "100%" }}>
                                             {String(JSON.stringify(output.validationErrors).slice(0, 600))}
-                                        </VAlert>
+                                        </PgAlert>
                                     )}
                                     {output.validationStatus === "VALIDATED" && (
                                         <PgButton size="small" variant="tonal" onClick={() => void downloadOutput(output.format)}>{t("Download")}</PgButton>
@@ -1054,9 +1054,9 @@ const AmlReportsPage = dc(() => {
                                 <PgButton size="small" variant="tonal" loading={actionLoading.value} onClick={() => void saveNarrative()}>{t("Save narrative")}</PgButton>
                             </ThemedView>
                         )}
-                        <VAlert type="info" variant="tonal">
+                        <PgAlert tone="info">
                             {t("The report payload is frozen and encrypted. Its SHA-256 digest proves the submitted content was not changed.")}
-                        </VAlert>
+                        </PgAlert>
                     </>
                 )}
             </SlideOverDrawer>
@@ -1069,9 +1069,9 @@ const AmlReportsPage = dc(() => {
                 submitLabel={t("Export")}
                 onSubmit={() => void exportExcel()}
             >
-                <VAlert type="error" variant="tonal">
+                <PgAlert tone="danger">
                     {t("Regulatory report exports contain confidential filing data. Confirm handling and authority before exporting.")}
-                </VAlert>
+                </PgAlert>
                 <FormChecklist
                     checks={[...REPORT_EXPORT_CHECKS]}
                     modelValue={listExportChecklist.value}
@@ -1092,7 +1092,7 @@ const AmlReportsPage = dc(() => {
                 submitLabel={t("Create draft")}
                 onSubmit={() => void submit()}
             >
-                <VAlert type="info" variant="tonal">{t("The report is drafted as PENDING_CHECKER. A different MLRO must approve it before it is frozen and submitted.")}</VAlert>
+                <PgAlert tone="info">{t("The report is drafted as PENDING_CHECKER. A different MLRO must approve it before it is frozen and submitted.")}</PgAlert>
                 <SectionFields title={t("Report definition")}>
                     <FormField label={t("Reporting rule")} required sensitiveMakerChecker>
                         <PgAutocomplete
@@ -1150,9 +1150,9 @@ const AmlReportsPage = dc(() => {
                 cancelLabel={t("Close")}
                 onSubmit={() => void submitReport()}
             >
-                <VAlert type="warning" variant="tonal">
+                <PgAlert tone="warning">
                     {t("Submission freezes the report and records the authority reference. Verify the deadline and payload digest first.")}
-                </VAlert>
+                </PgAlert>
                 <FormField label={t("Submission reference")} required sensitiveMakerChecker>
                     <PgTextField
                         modelValue={submissionRef.value}
@@ -1182,9 +1182,9 @@ const AmlReportsPage = dc(() => {
                 cancelLabel={t("Close")}
                 onSubmit={() => void acknowledgeReport()}
             >
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("Record the authority response exactly. A rejection requires a documented reason.")}
-                </VAlert>
+                </PgAlert>
                 <SectionFields title={t("Authority decision")}>
                     <FormField label={t("Authority decision")} required sensitiveMakerChecker>
                         <PgAutocomplete

@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
-import {VAlert, PgCol, PgDivider, PgRow} from "@pg/ui";
+import {PgAlert, PgCol, PgDivider, PgRow} from "@pg/ui";
 import PortalLayout from "@/layouts/portal";
 import LiveTransactionFeed from "@/components/LiveTransactionFeed";
 import {SurfaceCard} from "@pg/ui";
@@ -60,7 +60,7 @@ const DashboardPage = dc(() => {
 
   return () => (
     <PortalLayout>
-      {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
+      {error.value ? <PgAlert tone="danger" class="mb-4">{error.value}</PgAlert> : null}
       <PgRow>
         {metrics().map((metric) => (
           <PgCol key={metric.label} cols={12} md={3}>
@@ -106,9 +106,9 @@ const DashboardPage = dc(() => {
                     <strong class="pg-money pg-tabular">{action.normalized_amount_lyd} LYD</strong>
                   </div>
                   {action.expected_otp ? (
-                    <VAlert type="info" variant="tonal" density="compact" class="my-2">
+                    <PgAlert tone="info" density="compact" class="my-2">
                       OTP: <MonoRef value={action.expected_otp} />
-                    </VAlert>
+                    </PgAlert>
                   ) : null}
                   <div class="d-flex justify-end mt-2">
                     <TableRowActions

@@ -2,10 +2,9 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import {PgButton} from "@pg/ui";
+import {PgButton, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import {StatusBadge, formatHumanStatus} from "@pg/ui";
 import {type MetricItem} from "@pg/ui";
@@ -251,10 +250,10 @@ const JournalEntriesPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Journal Entries")} subtitle={t("Append-only double-entry postings of the ledger, with their balance check.")} badge={t("Ledger control")} badgeTone="info">(
+            <PgStack gap="lg">
+                <PageHeader title={t("Journal Entries")} subtitle={t("Append-only double-entry postings of the ledger, with their balance check.")} badge={t("Ledger control")} badgeTone="info">
                         <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
-                    )</PageHeader>
+                </PageHeader>
 
                 {summary.value && (
                     <SummaryExportCard
@@ -321,7 +320,7 @@ const JournalEntriesPage = dc(() => {
                         />
                     )}
                 />
-            </ThemedView>
+            </PgStack>
             <JournalEntryDrawer entryId={entryId.value} onClose={closeEntry} />
         </ScreenContainer>
     );

@@ -136,7 +136,7 @@ const PosScreenPage = dc(() => {
             }}
         >
             <div style={{ width: "100%", maxWidth: "720px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "16px" }}>
-                <PageHeader title={t("POS Screen")} subtitle={state.value?.merchantName ?? ""}>(
+                <PageHeader title={t("POS Screen")} subtitle={state.value?.merchantName ?? ""}>
                         <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             <StatusBadge
                                 status={connected.value ? "LIVE" : "PENDING"}
@@ -152,7 +152,7 @@ const PosScreenPage = dc(() => {
                                 {t("Refresh")}
                             </PgButton>
                         </div>
-                    )</PageHeader>
+                </PageHeader>
 
                 {error.value ? (
                     <SurfaceCard>

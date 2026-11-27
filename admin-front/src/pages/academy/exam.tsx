@@ -174,6 +174,6 @@ const ExamPage = dc(() => {
             </AcademyShell>
         );
     };
-});
+}, { rerender: true });
 
 export default ExamPage;

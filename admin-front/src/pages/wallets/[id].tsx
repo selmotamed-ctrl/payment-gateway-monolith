@@ -1,8 +1,8 @@
 import { dc } from "@/utils/dc";
-import { computed, ref, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton} from "@pg/ui";
+import {PgAlert, PgButton, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -68,6 +68,23 @@ const WalletDetailPage = dc(() => {
 
     const walletId = computed(() => String(route.params.id ?? ""));
     const wallet = ref<WalletDetail | null>(null);
+    /**
+     * Stable reactive view of the loaded wallet. JSX/prop expressions read
+     * these fields directly, so the page updates fine-grained without a
+     * DynamicFragment remount (which would lose the provider context).
+     */
+    const current = reactive<Partial<WalletDetail>>({}) as WalletDetail;
+    watch(
+        wallet,
+        (value) => {
+            if (value) {
+                Object.assign(current, value);
+            } else {
+                for (const key of Object.keys(current)) delete (current as any)[key];
+            }
+        },
+        { immediate: true, deep: true },
+    );
     const loading = ref(true);
     const error = ref<string | null>(null);
     const notice = ref<{ approvalRequestId: string | null } | null>(null);
@@ -276,7 +293,7 @@ const WalletDetailPage = dc(() => {
     };
 
     const renderOverview = (current: WalletDetail) => (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "18px", alignItems: "start" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))", gap: "18px", alignItems: "start" }}>
             <SurfaceCard title={t("Wallet")} noPadding>
                 <div style={{ padding: "4px 20px 16px" }}>
                     <DescriptionList
@@ -339,7 +356,8 @@ const WalletDetailPage = dc(() => {
         );
 
     const renderLinks = (current: WalletDetail) => (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "18px", alignItems: "start" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))", gap: "18px", alignItems: "start" }}>
+            <SurfaceCard bodyPadding="16px">
             <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 <h3 style={SECTION_TITLE}>{t("Assigned applications")}</h3>
                 <MiniTable
@@ -361,6 +379,8 @@ const WalletDetailPage = dc(() => {
                     ]}
                 />
             </section>
+            </SurfaceCard>
+            <SurfaceCard bodyPadding="16px">
             <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
                     <h3 style={SECTION_TITLE}>{t("Recent cash-outs")}</h3>
@@ -383,6 +403,7 @@ const WalletDetailPage = dc(() => {
                     />
                 )}
             </section>
+            </SurfaceCard>
         </div>
     );
 
@@ -493,20 +514,17 @@ const WalletDetailPage = dc(() => {
         if (current.status !== "FROZEN") return null;
         const waiting = current.pendingApprovals.length > 0;
         return (
-            <VAlert type="warning" variant="tonal" density="comfortable" icon="mdi-snowflake">
+            <PgAlert tone="warning" density="comfortable" icon="mdi-snowflake">
                 {t("This wallet is frozen. Cash-outs cannot debit it until it is restored.")}{" "}
                 {waiting ? t("A request to restore it is waiting for approval.") : t("Restoring it needs an independent checker.")}
-            </VAlert>
+            </PgAlert>
         );
     };
 
-    return () => {
-        const current = wallet.value;
-        const title = current ? merchantName(current) : t("Wallet");
-        return (
+    return () => (
             <ScreenContainer>
-                <ThemedView style={{ gap: "18px" }}>
-                    <PageHeader title={title} subtitle={current ? `${t("Wallet")} · ${current.currency}` : ""} badge={current ? current.status.replaceAll("_", " ") : ""} badgeTone={current ? toBadgeTone(current.status) : "neutral"}>(
+                <PgStack gap="lg">
+                    <PageHeader title={wallet.value ? merchantName(wallet.value) : t("Wallet")} subtitle={wallet.value ? `${t("Wallet")} · ${wallet.value.currency}` : ""} badge={wallet.value ? wallet.value.status.replaceAll("_", " ") : ""} badgeTone={wallet.value ? toBadgeTone(wallet.value.status) : "neutral"}>
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                 {actions.value.map((action) => (
                                     <PgButton
@@ -527,15 +545,15 @@ const WalletDetailPage = dc(() => {
                                 ))}
                                 <PgButton variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "Wallets" })}>{t("Back to wallets")}</PgButton>
                                 <PgButton variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={refreshAll}>{t("Refresh")}</PgButton>
-                                <PgButton variant="tonal" prependIcon="mdi-content-copy" disabled={!current} onClick={() => void copyWalletSummary()}>{t("Copy summary")}</PgButton>
+                                <PgButton variant="tonal" prependIcon="mdi-content-copy" disabled={!wallet.value} onClick={() => void copyWalletSummary()}>{t("Copy summary")}</PgButton>
                             </ThemedView>
-                        )</PageHeader>
+                    </PageHeader>
 
                     {error.value ? (
                         <StateView error={error.value} onRetry={() => void load(walletId.value)} />
-                    ) : loading.value && !current ? (
+                    ) : loading.value && !wallet.value ? (
                         <StateView loading />
-                    ) : current ? (
+                    ) : wallet.value ? (
                         <>
                             {notice.value && <ApprovalSubmittedNotice approvalRequestId={notice.value.approvalRequestId} onDismiss={() => (notice.value = null)} />}
                             {frozenBanner(current)}
@@ -566,7 +584,7 @@ const WalletDetailPage = dc(() => {
                             {tab.value === "activity" && renderActivity(current)}
                         </>
                     ) : null}
-                </ThemedView>
+                </PgStack>
 
                 <ReasonModal
                     modelValue={pendingAction.value !== null}
@@ -602,7 +620,7 @@ const WalletDetailPage = dc(() => {
                 <ApplicationDetailDrawer applicationId={applicationId.value} onClose={() => (applicationId.value = null)} />
             </ScreenContainer>
         );
-    };
-});
+    },
+);
 
 export default WalletDetailPage;

@@ -110,11 +110,11 @@ export const AdminGuidePage = defineComponent({
                 <PageHeader title={L("Interactive Guide", "الدليل التفاعلي")} subtitle={L(
                         "Learn the platform from zero, look up a rule, or find what to do when something goes wrong.",
                         "تعلّم المنصة من الصفر، أو ابحث عن قاعدة، أو اعرف ما يجب فعله عند حدوث مشكلة.",
-                    )}>(
+                    )}>
                         <button type="button" class="guide-primary-button" onClick={openGuideSearch}>
                             {L("Search the guide", "ابحث في الدليل")}
                         </button>
-                    )</PageHeader>
+                </PageHeader>
                 {loading.value ? (
                     <p class="guide-page-loading">{L("Loading the guide…", "جارٍ تحميل الدليل…")}</p>
                 ) : (

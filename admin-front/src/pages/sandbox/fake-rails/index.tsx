@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {SurfaceCard} from "@pg/ui";
@@ -398,7 +398,7 @@ const AdminFakeRailsPage = dc(() => {
             <PageHeader title={t("Fake Rails Accounts & Clearing")} subtitle={t("Global test customers, balances, states, chaos and synthetic settlements.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => load()}>{t("Refresh")}</PgButton><PgButton variant="tonal" prependIcon="mdi-content-copy" disabled={!accountsSummary.value} onClick={() => void copyFakeRailsSummary()}>{t("Copy summary")}</PgButton><PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportAccounts()}>{t("Export summary")}</PgButton></div></PageHeader>
             <SandboxBanner />
             <div class="mb-4"><SegmentedTabs modelValue={tab.value} tabs={[{ label: t("Accounts"), value: "ACCOUNTS" }, { label: t("Clearing"), value: "CLEARING" }, { label: t("Chaos"), value: "CHAOS" }, { label: t("Transactions"), value: "TRANSACTIONS" }, { label: t("Webhooks"), value: "WEBHOOKS" }]} onUpdate:modelValue={(value: string) => (tab.value = value as Tab)} /></div>
-            {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
+            {error.value ? <PgAlert tone="danger" class="mb-4">{error.value}</PgAlert> : null}
             <StateView loading={loading.value && !accountsSummary.value} minHeight="180px">
                 {tab.value === "ACCOUNTS" ? <div class="d-flex flex-column ga-4">
                     <SummaryExportCard title={t("Test account health")} metrics={accountMetrics.value} checks={[...EXPORT_CHECKS]} checklist={exportChecklist.value} onUpdate:checklist={(value: Record<string, boolean>) => (exportChecklist.value = value)} showChecklists={showChecklists} checklistComplete={exportChecklistComplete.value} exportLoading={exportLoading.value} exportDisabled={!exportChecklistComplete.value} exportLabel={t("Export summary")} onExport={() => void exportAccounts()}>

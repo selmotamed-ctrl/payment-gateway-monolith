@@ -15,6 +15,10 @@ export interface ToastItem {
     startedAt: number;
 }
 
+const MAX_TOASTS = 4;
+const SUCCESS_DURATION_MS = 4500;
+const ATTENTION_DURATION_MS = 6500;
+
 const toasts = ref<ToastItem[]>([]);
 const timers = new Map<number, ReturnType<typeof setTimeout>>();
 let sequence = 0;
@@ -25,29 +29,34 @@ const normalizeTone = (tone?: string): ToastTone => {
     return "info";
 };
 
+function clearTimer(id: number) {
+    const handle = timers.get(id);
+    if (handle !== undefined) {
+        clearTimeout(handle);
+        timers.delete(id);
+    }
+}
+
 function startTimer(item: ToastItem) {
     if (item.durationMs <= 0) return;
+    clearTimer(item.id);
     item.startedAt = Date.now();
-    const handle = setTimeout(() => dismissToast(item.id), item.remainingMs);
+    const handle = setTimeout(() => dismissToast(item.id), Math.max(0, item.remainingMs));
     timers.set(item.id, handle);
 }
 
 export function dismissToast(id: number) {
-    const handle = timers.get(id);
-    if (handle) {
-        clearTimeout(handle);
-        timers.delete(id);
-    }
+    clearTimer(id);
     toasts.value = toasts.value.filter((toast) => toast.id !== id);
 }
 
 export function pauseToast(id: number) {
     const item = toasts.value.find((toast) => toast.id === id);
+    if (!item || item.paused || item.durationMs <= 0) return;
     const handle = timers.get(id);
-    if (!item || !handle || item.paused) return;
-    clearTimeout(handle);
-    timers.delete(id);
-    item.remainingMs = Math.max(400, item.remainingMs - (Date.now() - item.startedAt));
+    if (handle === undefined) return;
+    clearTimer(id);
+    item.remainingMs = Math.max(0, item.remainingMs - (Date.now() - item.startedAt));
     item.paused = true;
 }
 
@@ -60,7 +69,8 @@ export function resumeToast(id: number) {
 
 /**
  * Guaranteed auto-dismissing toast. Success/info live 4.5 s, warning/danger
- * 6.5 s. The stack caps at four; older toasts make room for new ones.
+ * 6.5 s. `durationMs: 0` disables auto-dismiss. The stack caps at four; the
+ * oldest toast makes room for a new one.
  */
 export function showToast(options: {
     tone?: ToastTone | "error" | "primary";
@@ -71,7 +81,8 @@ export function showToast(options: {
     onAction?: () => void;
 }) {
     const tone = normalizeTone(options.tone);
-    const durationMs = options.durationMs ?? (tone === "danger" || tone === "warning" ? 6500 : 4500);
+    const durationMs =
+        options.durationMs ?? (tone === "danger" || tone === "warning" ? ATTENTION_DURATION_MS : SUCCESS_DURATION_MS);
     const item: ToastItem = {
         id: ++sequence,
         tone,
@@ -84,7 +95,9 @@ export function showToast(options: {
         actionLabel: options.actionLabel,
         onAction: options.onAction,
     };
-    if (toasts.value.length >= 4) dismissToast(toasts.value[0]!.id);
+    while (toasts.value.length >= 4) {
+        dismissToast(toasts.value[0]!.id);
+    }
     toasts.value = [...toasts.value, item];
     startTimer(item);
     return item.id;
@@ -96,5 +109,8 @@ export function useToasts() {
 
 /** Clear every toast (used on logout and in tests). */
 export function clearToasts() {
-    for (const toast of toasts.value) dismissToast(toast.id);
+    for (const id of Array.from(timers.keys())) clearTimer(id);
+    toasts.value = [];
 }
+
+export const TOAST_MAX_VISIBLE = MAX_TOASTS;

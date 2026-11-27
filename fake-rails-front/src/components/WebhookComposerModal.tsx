@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
-import {VAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField} from "@pg/ui";
 import {FormModal} from "@pg/ui";
 import {SectionFields} from "@pg/ui";
 import { api } from "@/utils/api";
@@ -68,7 +68,7 @@ export const WebhookComposerModal = dc(
           ),
         }}
       >
-        {message.value ? <VAlert type="success" variant="tonal" density="compact">{message.value}</VAlert> : null}
+        {message.value ? <PgAlert tone="success" density="compact">{message.value}</PgAlert> : null}
         <SectionFields title="Payload" columns={2}>
           <div class="pg-field-wrapper">
             <label>Event</label>

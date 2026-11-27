@@ -1,0 +1,637 @@
+/* ============================================================================
+ * @pg/ui — Text inputs, textarea, search, OTP and code editor (2026 revision)
+ *
+ * Loaded after `components.css`: these rules complete/override the shared
+ * control anatomy without duplicating it. Every colour is a `--pg-*` token,
+ * every offset is logical (inline-start / inline-end), and the inner native
+ * controls never paint their own border, outline or shadow.
+ * ========================================================================== */
+
+/* === Control box: one border + one neutral ring for the whole field ======= */
+.pg-control-box {
+  position: relative;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    background-color 140ms ease;
+}
+
+.pg-control-box--sm { height: var(--pg-control-h-sm); padding-inline: 10px; }
+.pg-control-box--md { height: var(--pg-control-h-md); padding-inline: 12px; }
+.pg-control-box--lg { height: var(--pg-control-h-lg); padding-inline: 14px; }
+
+.pg-control-box:hover:not(.pg-control-box--disabled):not(.pg-control-box--focused) {
+  border-color: var(--pg-border-strong);
+}
+
+.pg-control-box:focus-within,
+.pg-control-box--focused {
+  border-color: var(--pg-border-focus);
+  box-shadow: var(--pg-focus-ring);
+}
+
+.pg-control-box--error,
+.pg-control-box--error:focus-within,
+.pg-control-box--error.pg-control-box--focused {
+  border-color: var(--pg-status-danger-dot);
+  box-shadow: var(--pg-focus-ring-danger);
+}
+
+.pg-control-box--disabled {
+  background: var(--pg-bg-surface-subtle);
+  border-color: var(--pg-border-subtle);
+  color: var(--pg-ink-muted);
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+/* === Inner native input/textarea: zero chrome ============================ */
+.pg-control-box .pg-control-native,
+.pg-control-box .pg-control-textarea,
+.pg-control-box .pg-control-native:focus,
+.pg-control-box .pg-control-native:focus-visible,
+.pg-control-box .pg-control-textarea:focus,
+.pg-control-box .pg-control-textarea:focus-visible {
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
+.pg-control-box .pg-control-native {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  color: var(--pg-ink-primary);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.pg-control-box--lg .pg-control-native { font-size: 14.5px; }
+.pg-control-box--sm .pg-control-native { font-size: 13px; }
+.pg-control-box--numeric .pg-control-native { font-family: var(--pg-font-mono); font-variant-numeric: tabular-nums; }
+
+.pg-control-box .pg-control-native::placeholder,
+.pg-control-box .pg-control-textarea::placeholder {
+  color: var(--pg-ink-faint);
+  opacity: 1;
+}
+
+.pg-control-box .pg-control-native[type="search"]::-webkit-search-cancel-button,
+.pg-control-box .pg-control-native[type="search"]::-webkit-search-decoration {
+  appearance: none;
+  display: none;
+}
+
+/* === Adornments, affixes and the 22px action buttons ===================== */
+.pg-control-adornment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--pg-ink-muted);
+}
+
+.pg-control-adornment--start {
+  padding-inline-start: 0;
+  margin-inline-start: 0;
+}
+
+.pg-control-adornment--end {
+  gap: 4px;
+  padding-inline-end: 0;
+  margin-inline-end: 0;
+}
+
+.pg-control-affix {
+  flex: 0 0 auto;
+  color: var(--pg-ink-muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.pg-control-clear-btn,
+.pg-control-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--pg-radius-xs);
+  background: transparent;
+  color: var(--pg-ink-muted);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.pg-control-clear-btn:hover,
+.pg-control-action-btn:hover {
+  background: var(--pg-bg-surface-hover);
+  color: var(--pg-ink-primary);
+}
+
+.pg-control-clear-btn:focus-visible,
+.pg-control-action-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--pg-focus-ring);
+}
+
+/* === Field shell anatomy ================================================= */
+.pg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.pg-field__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pg-field__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--pg-ink-secondary);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: start;
+}
+
+.pg-field__required {
+  color: var(--pg-status-danger-dot);
+  line-height: 1;
+}
+
+.pg-field__footer {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 0;
+}
+
+.pg-field__hint {
+  margin: 0;
+  min-width: 0;
+  color: var(--pg-ink-muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: start;
+}
+
+.pg-field__error {
+  margin: 0;
+  min-width: 0;
+  color: var(--pg-status-danger-text);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-align: start;
+}
+
+.pg-field__counter {
+  margin-inline-start: auto;
+  color: var(--pg-ink-faint);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.pg-field--disabled {
+  opacity: 0.65;
+}
+
+.pg-field--disabled .pg-field__label {
+  color: var(--pg-ink-muted);
+}
+
+.pg-field--disabled .pg-control-box {
+  background: var(--pg-bg-surface-subtle);
+}
+
+/* === High-level FormField row =========================================== */
+.pg-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pg-form-field__label-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pg-form-field__label-action {
+  margin-inline-start: auto;
+  color: var(--pg-ink-muted);
+  font-size: 12px;
+}
+
+.pg-form-field__tooltip {
+  display: inline-flex;
+  align-items: center;
+  color: var(--pg-ink-faint);
+  cursor: help;
+}
+
+.pg-form-field__control {
+  min-width: 0;
+}
+
+.pg-form-field__hint {
+  margin-top: 2px;
+}
+
+.pg-form-field__error {
+  margin-top: 2px;
+}
+
+.pg-form-field--filter .pg-field__label {
+  color: var(--pg-ink-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+html[dir="rtl"] .pg-form-field--filter .pg-field__label {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.pg-form-field--disabled .pg-field__label {
+  opacity: 0.6;
+}
+
+/* === Textarea ============================================================ */
+.pg-control-box--textarea {
+  height: auto;
+  min-height: calc(var(--pg-control-h-md) * 2.2);
+  align-items: stretch;
+  padding: 10px 12px;
+}
+
+.pg-control-box--sm.pg-control-box--textarea { padding: 8px 10px; }
+.pg-control-box--lg.pg-control-box--textarea { padding: 12px 14px; }
+
+.pg-control-textarea {
+  display: block;
+  flex: 1 1 auto;
+  width: 100%;
+  height: auto;
+  min-height: 92px;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  resize: vertical;
+  background: transparent;
+  color: var(--pg-ink-primary);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.55;
+  overflow-y: auto;
+}
+
+.pg-control-textarea--no-resize { resize: none; }
+.pg-control-box--textarea .pg-control-textarea { min-height: 92px; }
+.pg-control-box--sm .pg-control-textarea { min-height: 76px; }
+
+/* Table/filter bars must never paint their own inner focus outline. */
+.pg-table-filters .pg-control-native:focus-visible,
+.pg-table-filters .pg-control-textarea:focus-visible,
+.pg-unified-table .pg-control-native:focus-visible,
+.pg-unified-table .pg-control-textarea:focus-visible {
+  outline: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+/* === OTP / one-time code ================================================= */
+.pg-otp {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.pg-otp__box {
+  width: 46px;
+  height: 52px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1.5px solid var(--pg-border-default);
+  border-radius: 10px;
+  background: var(--pg-bg-surface);
+  color: var(--pg-ink-primary);
+  font-family: var(--pg-font-mono);
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: center;
+  direction: ltr;
+  caret-color: var(--pg-accent-brand);
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.pg-otp__box:hover:not(:disabled) { border-color: var(--pg-border-strong); }
+
+.pg-otp__box--filled { border-color: var(--pg-border-strong); }
+
+.pg-otp__box:focus,
+.pg-otp__box:focus-visible,
+.pg-otp__box--focused {
+  border-color: var(--pg-border-focus);
+  box-shadow: var(--pg-focus-ring);
+  outline: none;
+}
+
+.pg-otp__box--error,
+.pg-otp--error .pg-otp__box {
+  border-color: var(--pg-status-danger-dot);
+}
+
+.pg-otp__box--error:focus,
+.pg-otp--error .pg-otp__box:focus {
+  box-shadow: var(--pg-focus-ring-danger);
+}
+
+.pg-otp__box:disabled,
+.pg-otp--disabled .pg-otp__box {
+  background: var(--pg-bg-surface-subtle);
+  color: var(--pg-ink-muted);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.pg-otp__separator {
+  width: 10px;
+  flex: 0 0 auto;
+  color: var(--pg-ink-faint);
+  font-size: 16px;
+  line-height: 1;
+  text-align: center;
+}
+
+.pg-otp--complete .pg-otp__box { border-color: var(--pg-status-success-border); }
+
+.pg-otp--masked .pg-otp__box {
+  font-size: 18px;
+  letter-spacing: 0.08em;
+}
+
+@media (max-width: 480px) {
+  .pg-otp__box {
+    width: 40px;
+    height: 46px;
+    font-size: 18px;
+  }
+}
+
+/* === JSON / code editor ================================================== */
+.pg-json-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  direction: ltr;
+}
+
+.pg-json-editor__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 8px;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: 10px 10px 0 0;
+  background: var(--pg-bg-surface-subtle);
+}
+
+.pg-json-editor__badge {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-xs);
+  background: var(--pg-bg-surface);
+  color: var(--pg-ink-muted);
+  font-family: var(--pg-font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.pg-json-editor__toolbar-spacer { flex: 1 1 auto; }
+
+.pg-json-editor__status {
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.pg-json-editor__status--valid { color: var(--pg-status-success-text); }
+.pg-json-editor__status--invalid { color: var(--pg-status-danger-text); }
+
+.pg-json-editor__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--pg-border-default);
+  border-radius: var(--pg-radius-xs);
+  background: var(--pg-bg-surface);
+  color: var(--pg-ink-secondary);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.pg-json-editor__btn:hover:not(:disabled) {
+  border-color: var(--pg-border-strong);
+  background: var(--pg-bg-surface-hover);
+  color: var(--pg-ink-primary);
+}
+
+.pg-json-editor__btn:focus-visible {
+  outline: none;
+  box-shadow: var(--pg-focus-ring);
+}
+
+.pg-json-editor__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pg-json-editor__frame {
+  display: flex;
+  border: 1px solid var(--pg-border-default);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--pg-bg-surface);
+  direction: ltr;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.pg-json-editor__toolbar + .pg-json-editor__frame {
+  border-radius: 0 0 10px 10px;
+}
+
+.pg-json-editor__frame:focus-within {
+  border-color: var(--pg-border-focus);
+  box-shadow: var(--pg-focus-ring);
+}
+
+.pg-json-editor__frame--invalid,
+.pg-json-editor__frame--invalid:focus-within {
+  border-color: var(--pg-status-danger-dot);
+  box-shadow: 0 0 0 3px var(--pg-status-danger-bg);
+}
+
+.pg-json-editor__frame--disabled {
+  background: var(--pg-bg-surface-subtle);
+  opacity: 0.72;
+}
+
+.pg-json-editor__frame--readonly {
+  background: var(--pg-bg-surface-subtle);
+}
+
+.pg-json-editor__gutter {
+  width: 44px;
+  flex: 0 0 auto;
+  padding: 12px 8px;
+  background: var(--pg-bg-surface-subtle);
+  border-inline-end: 1px solid var(--pg-border-subtle);
+  color: var(--pg-ink-faint);
+  font-family: var(--pg-font-mono);
+  font-size: 13px;
+  line-height: 20px;
+  text-align: right;
+  user-select: none;
+  overflow: hidden;
+}
+
+.pg-json-editor__gutter-line {
+  height: 20px;
+  line-height: 20px;
+}
+
+.pg-json-editor__gutter-line--error {
+  border-radius: 3px;
+  background: var(--pg-status-danger-bg);
+  color: var(--pg-status-danger-text);
+  font-weight: 600;
+}
+
+.pg-json-editor__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 180px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 0;
+  outline: none;
+  resize: vertical;
+  background: transparent;
+  color: var(--pg-ink-primary);
+  font-family: var(--pg-font-mono);
+  font-size: 13px;
+  line-height: 20px;
+  tab-size: 2;
+}
+
+.pg-json-editor__input:focus,
+.pg-json-editor__input:focus-visible {
+  border: 0;
+  outline: none;
+  box-shadow: none;
+}
+
+.pg-json-editor__error {
+  color: var(--pg-status-danger-text);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: start;
+  direction: inherit;
+}
+
+/* === Keyboard hint ======================================================= */
+.pg-kbd-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 5px;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-xs);
+  background: var(--pg-bg-surface-subtle);
+  color: var(--pg-ink-muted);
+  font-family: var(--pg-font-mono);
+  font-size: 10.5px;
+  line-height: 1;
+}
+
+/* === RTL parity ========================================================== */
+html[dir="rtl"] .pg-otp,
+html[dir="rtl"] .pg-json-editor,
+html[dir="rtl"] .pg-json-editor__frame,
+html[dir="rtl"] .pg-otp__box,
+html[dir="rtl"] .pg-json-editor__input {
+  direction: ltr;
+}
+
+html[dir="rtl"] .pg-field__hint,
+html[dir="rtl"] .pg-field__error,
+html[dir="rtl"] .pg-json-editor__error {
+  text-align: start;
+}
+
+html[dir="rtl"] .pg-json-editor__error {
+  direction: rtl;
+}
+
+/* === Shared utilities used by these inputs =============================== */
+.pg-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.pg-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

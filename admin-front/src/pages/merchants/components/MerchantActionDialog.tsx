@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import {VAlert, PgCheckbox, PgAutocomplete, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
+import {PgAlert, PgCheckbox, PgAutocomplete, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import { api } from "@/state/api";
@@ -165,9 +165,9 @@ const MerchantActionDialog = dc(
                                 <PgSwitch v-model={emergency.value} label={t("Emergency suspension (immediate effect)")} color="error" hideDetails />
                                 {emergency.value && (
                                     <>
-                                        <VAlert type="warning" variant="tonal">
+                                        <PgAlert tone="warning">
                                             {t("The suspension takes effect now. A compliance or MLRO checker must ratify it within the selected window; it remains in force if ratification is rejected.")}
-                                        </VAlert>
+                                        </PgAlert>
                                         <FormField label={t("Ratify within hours")}>
                                             <PgTextField v-model={ratifyHours.value} type="number" />
                                         </FormField>
@@ -177,9 +177,9 @@ const MerchantActionDialog = dc(
                         )}
                         {isClose.value && (
                             <>
-                                <VAlert type="warning" variant="tonal">
+                                <PgAlert tone="warning">
                                     {t("Closing is irreversible and requires zero wallet balance, no open disputes and no pending cash-outs.")}
-                                </VAlert>
+                                </PgAlert>
                                 <FormField label={t("Reason code")} required>
                                     <PgAutocomplete v-model={reasonCode.value} items={CLOSE_REASONS} />
                                 </FormField>

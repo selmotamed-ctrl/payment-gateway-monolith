@@ -1,11 +1,7 @@
-import { ref, watch, type PropType, createSlot } from "vue";
+import { ref, useId, watch, createSlot, type PropType } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import { useDisplay, useTheme } from "@/utils/vuetify-compat";
-import {PgCard, PgCardText, PgIcon} from "@pg/ui";
-import {ThemedText} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
-import {StatusChip, type StatusTone} from "@pg/ui";
+import { PgIcon, StatusChip, type StatusTone } from "@pg/ui";
 
 export type SectionCommand = { id: number; open: boolean };
 
@@ -21,6 +17,12 @@ const readOpenState = (key: string | undefined, fallback: boolean): boolean => {
     return fallback;
 };
 
+/**
+ * Merchant-detail section. It sits directly on the page canvas (no nested card),
+ * owns one header row (label left, count then chevron right) and a controlled
+ * body padding. `flush` removes body padding for sections that only contain a
+ * table; `command` lets the page expand/collapse every section at once.
+ */
 const CollapsibleSection = defineComponent({
     name: "CollapsibleSection",
     props: {
@@ -32,11 +34,14 @@ const CollapsibleSection = defineComponent({
         tone: { type: String as () => StatusTone | null, default: null },
         command: { type: Object as PropType<SectionCommand | null>, default: null },
         alwaysOpen: { type: Boolean, default: false },
+        /** Table-only sections: no body padding, the table card is the surface. */
+        flush: { type: Boolean, default: false },
     },
     setup(props, { slots }) {
         const { t } = useLocale();
-        const theme = useTheme();
-        const display = useDisplay();
+        const uid = useId();
+        const headerId = `${uid}-header`;
+        const bodyId = `${uid}-body`;
         const open = ref(readOpenState(props.storageKey, props.defaultOpen));
 
         const persist = () => {
@@ -48,83 +53,58 @@ const CollapsibleSection = defineComponent({
             }
         };
 
-        watch(() => props.storageKey, () => {
-            open.value = readOpenState(props.storageKey, props.defaultOpen);
-        });
-
+        watch(
+            () => props.storageKey,
+            () => {
+                open.value = readOpenState(props.storageKey, props.defaultOpen);
+            },
+        );
         watch(open, persist);
-
         watch(
             () => props.command?.id,
             () => {
                 if (props.command) open.value = props.command.open;
             },
         );
-
-        watch(
-            () => props.alwaysOpen,
-            (value) => {
-                if (value) open.value = true;
-            },
-            { immediate: true },
-        );
+        const isOpen = () => props.alwaysOpen || open.value;
 
         return () => {
-            const colors = theme.current.value.colors;
             return (
-                <PgCard
-                    variant="flat"
-                    style={{
-                        border: `1px solid ${colors.outlineVariant}30`,
-                        borderRadius: "16px",
-                        overflow: "hidden",
-                    }}
-                >
-                    <PgCardText style={{ padding: "0" }}>
-                        <button
-                            type="button"
-                            aria-expanded={open.value ? "true" : "false"}
-                            onClick={() => {
-                                if (!props.alwaysOpen) open.value = !open.value;
-                            }}
-                            style={{
-                                width: "100%",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "space-between",
-                                gap: "12px",
-                                padding: display.mobile.value ? "16px" : "18px 22px",
-                                background: "transparent",
-                                border: "0",
-                                cursor: props.alwaysOpen ? "default" : "pointer",
-                                textAlign: "left",
-                                color: "inherit",
-                            }}
-                        >
-                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flex: "1", minWidth: "0" }}>
-                                {!props.alwaysOpen && (
-                                    <PgIcon icon={open.value ? "mdi-chevron-down" : "mdi-chevron-right"} size="20" style={{ opacity: 0.65, flex: "0 0 auto" }} />
-                                )}
-                                <ThemedView style={{ gap: "3px", minWidth: "0" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t(props.title)}</ThemedText>
-                                    {props.subtitle && (
-                                        <ThemedText style={{ fontSize: "12px", opacity: 0.62, lineHeight: 1.5 }}>{t(props.subtitle)}</ThemedText>
-                                    )}
-                                </ThemedView>
-                            </ThemedView>
-                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flex: "0 0 auto" }}>
-                                {props.count !== null && props.count !== "" && (
-                                    <StatusChip label={String(props.count)} tone={props.tone ?? "neutral"} size="small" />
-                                )}
-                            </ThemedView>
-                        </button>
-                        {open.value && (
-                            <div style={{ padding: display.mobile.value ? "0 12px 16px" : "0 16px 18px" }}>
-                                {createSlot("default")}
-                            </div>
-                        )}
-                    </PgCardText>
-                </PgCard>
+                <section class={["merchant-section", isOpen() ? "merchant-section--open" : ""]}>
+                    <button
+                        id={headerId}
+                        type="button"
+                        class="merchant-section__header"
+                        aria-expanded={isOpen() ? "true" : "false"}
+                        aria-controls={bodyId}
+                        disabled={props.alwaysOpen}
+                        onClick={() => {
+                            if (!props.alwaysOpen) open.value = !open.value;
+                        }}
+                    >
+                        <span class="merchant-section__heading">
+                            <span class="merchant-section__title">{t(props.title)}</span>
+                            {props.subtitle && <span class="merchant-section__subtitle">{t(props.subtitle)}</span>}
+                        </span>
+                        <span class="merchant-section__meta">
+                            {props.count !== null && props.count !== "" && (
+                                <StatusChip label={String(props.count)} tone={props.tone ?? "neutral"} size="small" />
+                            )}
+                            {!props.alwaysOpen && (
+                                <PgIcon
+                                    icon={isOpen() ? "mdi-chevron-down" : "mdi-chevron-right"}
+                                    size={18}
+                                    class="merchant-section__chevron"
+                                />
+                            )}
+                        </span>
+                    </button>
+                    {isOpen() && (
+                        <div id={bodyId} role="region" aria-labelledby={headerId} class={["merchant-section__body", props.flush ? "merchant-section__body--flush" : ""]}>
+                            {createSlot("default")}
+                        </div>
+                    )}
+                </section>
             );
         };
     },

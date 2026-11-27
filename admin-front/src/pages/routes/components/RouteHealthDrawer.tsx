@@ -1,6 +1,6 @@
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import {VAlert, PgButton, PgAutocomplete, PgTextarea, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgTextarea, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import {SlideOverDrawer} from "@pg/ui";
 import {DescriptionList} from "@pg/ui";
@@ -421,9 +421,9 @@ export const RouteHealthDrawer = defineComponent({
             return (
                 <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                     {header()}
-                    <VAlert type="info" variant="tonal">
+                    <PgAlert tone="info">
                         {t("Health is operational evidence. Forcing a state never hides the computed state, and probes keep running while an override is active.")}
-                    </VAlert>
+                    </PgAlert>
                     <SegmentedTabs
                         modelValue={tab.value}
                         onUpdate:modelValue={(value: string) => (tab.value = value)}

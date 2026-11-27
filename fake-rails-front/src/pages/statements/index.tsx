@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
-import {VAlert, PgButton, PgCol, PgRow, PgAutocomplete, PgSlider, PgSwitch, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgCol, PgRow, PgAutocomplete, PgSlider, PgSwitch, PgTextField} from "@pg/ui";
 import PortalLayout from "@/layouts/portal";
 import {SectionFields} from "@pg/ui";
 import { DataTable } from "@/tables/DataTable";
@@ -70,7 +70,7 @@ const StatementsPage = dc(() => {
               footer: () => <PgButton size="small" onClick={generate}>Generate &amp; download</PgButton>,
             }}
           >
-            {message.value ? <VAlert type="success" variant="tonal" density="compact">{message.value}</VAlert> : null}
+            {message.value ? <PgAlert tone="success" density="compact">{message.value}</PgAlert> : null}
             <div class="pg-field-wrapper">
               <label>Gateway</label>
               <PgAutocomplete

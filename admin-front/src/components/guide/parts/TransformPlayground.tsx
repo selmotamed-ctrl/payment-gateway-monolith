@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
-import {VAlert, PgButton, PgCard, PgCardText, PgAutocomplete, PgTextarea, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgCard, PgCardText, PgAutocomplete, PgTextarea, PgTextField} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import {StatusChip} from "@pg/ui";
@@ -101,9 +101,9 @@ export const TransformPlayground = dc(() => {
                                 </PgCardText>
                             </PgCard>
                         ))}
-                        <VAlert type="success" variant="tonal" density="compact">
+                        <PgAlert tone="success" density="compact">
                             <pre style={MONO_STYLE}>{result.value.final}</pre>
-                        </VAlert>
+                        </PgAlert>
                     </ThemedView>
                 ) : null}
             </PgCardText>

@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
 import { useRouter } from "vue-router";
-import {VAlert, PgButton, PgCheckbox, PgSpinner, PgAutocomplete, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgCheckbox, PgSpinner, PgAutocomplete, PgTextarea, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -783,17 +783,17 @@ const ApprovalsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Approvals")} subtitle={t("Review maker-checker requests, inspect the proposed diff and decide with an independent check.")} badge={summary.value ? `${summary.value.totalPending} ${t("Pending")}` : t("Four eyes")} badgeTone={summary.value && summary.value.totalPending > 0 ? "warning" : "success"}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Approvals")} subtitle={t("Review maker-checker requests, inspect the proposed diff and decide with an independent check.")} badge={summary.value ? `${summary.value.totalPending} ${t("Pending")}` : t("Four eyes")} badgeTone={summary.value && summary.value.totalPending > 0 ? "warning" : "success"}>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("Maker and checker must always be different people. Read the diff before deciding. All decisions are audited.")}
-                </VAlert>
+                </PgAlert>
 
                 {summary.value && (
                     <SummaryExportCard
@@ -914,8 +914,8 @@ const ApprovalsPage = dc(() => {
                     )}
                 />
 
-                {areHelpPanelsVisible() && <SurfaceCard><SurfaceCardText><ApprovalHelpPanel /></SurfaceCardText></SurfaceCard>}
-            </ThemedView>
+                {areHelpPanelsVisible() && <ApprovalHelpPanel />}
+            </PgStack>
 
             <FormModal
                 modelValue={bulkRejectOpen.value}
@@ -929,9 +929,9 @@ const ApprovalsPage = dc(() => {
                 danger
                 errorMessage={bulkRejectError.value ?? ""}
             >
-                <VAlert type="warning" variant="tonal">
+                <PgAlert tone="warning">
                     {t("Each request is validated independently. Requests you made yourself or cannot check will fail and remain selected.")}
-                </VAlert>
+                </PgAlert>
                 <SectionFields title={t("Bulk rejection details")}>
                     <FormField
                         label={t("Rejection reason")}
@@ -996,10 +996,10 @@ const ApprovalsPage = dc(() => {
                                 </ThemedView>
 
                                 {selected.value.expired && (
-                                    <VAlert type="error" variant="tonal">{t("This request has expired. It cannot be approved, but it can still be rejected with a reason.")}</VAlert>
+                                    <PgAlert tone="danger">{t("This request has expired. It cannot be approved, but it can still be rejected with a reason.")}</PgAlert>
                                 )}
                                 {blockMessage.value && (
-                                    <VAlert type="warning" variant="tonal">{t(blockMessage.value)}</VAlert>
+                                    <PgAlert tone="warning">{t(blockMessage.value)}</PgAlert>
                                 )}
 
                                 <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "14px" }}>
@@ -1058,9 +1058,9 @@ const ApprovalsPage = dc(() => {
                                 </ThemedView>
 
                                 {selected.value.riskAcceptanceNote && (
-                                    <VAlert type="warning" variant="tonal">
+                                    <PgAlert tone="warning">
                                         <ThemedText style={{ fontSize: "12px" }}>{t("Risk acceptance note")}: {selected.value.riskAcceptanceNote}</ThemedText>
-                                    </VAlert>
+                                    </PgAlert>
                                 )}
 
                                 <SurfaceCard variant="tonal">

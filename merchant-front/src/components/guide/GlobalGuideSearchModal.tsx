@@ -54,6 +54,8 @@ const ROLE_LABELS: Record<string, string> = {
     ALL: "All roles",
 };
 
+const HANDLED_KEYS = new Set(["ArrowDown", "ArrowUp", "Home", "End", "Enter", "Escape"]);
+
 const searchEntries = (query: string): MerchantGuideSearchEntry[] => {
     const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const matches = terms.length
@@ -101,25 +103,56 @@ export const GlobalGuideSearchModal = defineComponent({
         );
 
         watch(results, () => {
-            selected.value = 0;
+            if (selected.value >= results.value.length) {
+                selected.value = Math.max(0, results.value.length - 1);
+            }
         });
 
         const close = () => emit("update:modelValue", false);
-        const choose = (entry: MerchantGuideSearchEntry) => {
+        const choose = (entry: MerchantGuideSearchEntry | undefined) => {
+            if (!entry) return;
             props.onSelect?.(entry);
             close();
         };
 
+        const move = (delta: number) => {
+            if (results.value.length === 0) return;
+            selected.value = (selected.value + delta + results.value.length) % results.value.length;
+        };
+
         const onKeydown = (event: KeyboardEvent) => {
+            if (event.defaultPrevented) return;
+            // Typing only filters. Printable characters and an Arabic IME
+            // composition commit must never open a result.
+            if (event.isComposing || event.keyCode === 229) return;
+            if (
+                event.key.length === 1 &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !event.altKey
+            ) {
+                return;
+            }
+            if (!HANDLED_KEYS.has(event.key)) return;
+
             if (event.key === "ArrowDown") {
                 event.preventDefault();
-                selected.value = Math.min(results.value.length - 1, selected.value + 1);
+                move(1);
             } else if (event.key === "ArrowUp") {
                 event.preventDefault();
-                selected.value = Math.max(0, selected.value - 1);
+                move(-1);
+            } else if (event.key === "Home") {
+                event.preventDefault();
+                selected.value = 0;
+            } else if (event.key === "End") {
+                event.preventDefault();
+                selected.value = Math.max(0, results.value.length - 1);
             } else if (event.key === "Enter") {
-                const entry = results.value[selected.value];
-                if (entry) choose(entry);
+                event.preventDefault();
+                choose(results.value[selected.value]);
+            } else if (event.key === "Escape") {
+                event.preventDefault();
+                close();
             }
         };
 
@@ -143,9 +176,22 @@ export const GlobalGuideSearchModal = defineComponent({
                 <PgTextField
                     id={inputId}
                     modelValue={query.value}
-                    onUpdate:modelValue={(value: string | null) => (query.value = value ?? "")}
+                    onUpdate:modelValue={(value: string | null) => {
+                        query.value = value ?? "";
+                        selected.value = 0;
+                    }}
                     onKeydown={onKeydown}
                     placeholder={isArabic.value ? "ابحث بالعنوان أو الوسم أو النص" : "Search by title, tag, or body text"}
+                    aria-label={isArabic.value ? "ابحث بالعنوان أو الوسم أو النص" : "Search by title, tag, or body text"}
+                    role="combobox"
+                    aria-expanded={props.modelValue ? "true" : "false"}
+                    aria-controls="pg-merchant-guide-search-results"
+                    aria-autocomplete="list"
+                    aria-activedescendant={
+                        results.value[selected.value]
+                            ? `pg-merchant-guide-search-${selected.value}`
+                            : undefined
+                    }
                     prependInnerIcon="mdi-magnify"
                     clearable
                     hideDetails
@@ -160,33 +206,40 @@ export const GlobalGuideSearchModal = defineComponent({
                         <MetaPill size="x-small" variant="outlined">Enter</MetaPill>
                     </span>
                 </div>
-                <div style={{ maxHeight: "58vh", overflowY: "auto" }}>
+                <div
+                    id="pg-merchant-guide-search-results"
+                    role="listbox"
+                    aria-label={isArabic.value ? "نتائج البحث في الدليل" : "Guide search results"}
+                    style={{ maxHeight: "58vh", overflowY: "auto" }}
+                >
                     <PgList density="compact">
                         {results.value.map((entry, index) => (
-                            <PgListItem
-                                key={entry.id}
-                                active={index === selected.value}
-                                onClick={() => choose(entry)}
-                                onMouseEnter={() => (selected.value = index)}
-                            >
-                                <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: 0 }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                        <MetaPill size="x-small">{entry.id}</MetaPill>
-                                        <StatusBadge
-                                            status={entry.kind === "developer" ? "DEVELOPER" : entry.role}
-                                            label={ROLE_LABELS[entry.kind === "developer" ? "DEVELOPER" : entry.role]}
-                                            toneOverride={entry.kind === "developer" ? "info" : "neutral"}
-                                            showDot={false}
-                                        />
-                                        <span style={{ fontSize: "14px", fontWeight: 600, color: "var(--pg-ink-primary)" }}>
-                                            {entryTitle(entry)}
+                            <div key={entry.id} onMouseenter={() => (selected.value = index)}>
+                                <PgListItem
+                                    id={`pg-merchant-guide-search-${index}`}
+                                    role="option"
+                                    class={index === selected.value ? "pg-list-item--active" : ""}
+                                    onClick={() => choose(entry)}
+                                >
+                                    <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: 0 }}>
+                                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                            <MetaPill size="x-small">{entry.id}</MetaPill>
+                                            <StatusBadge
+                                                status={entry.kind === "developer" ? "DEVELOPER" : entry.role}
+                                                label={ROLE_LABELS[entry.kind === "developer" ? "DEVELOPER" : entry.role]}
+                                                toneOverride={entry.kind === "developer" ? "info" : "neutral"}
+                                                showDot={false}
+                                            />
+                                            <span style={{ fontSize: "14px", fontWeight: 600, color: "var(--pg-ink-primary)" }}>
+                                                {entryTitle(entry)}
+                                            </span>
+                                        </div>
+                                        <span style={{ fontSize: "12px", color: "var(--pg-ink-muted)", lineHeight: 1.5 }}>
+                                            {entryBody(entry)}
                                         </span>
                                     </div>
-                                    <span style={{ fontSize: "12px", color: "var(--pg-ink-muted)", lineHeight: 1.5 }}>
-                                        {entryBody(entry)}
-                                    </span>
-                                </div>
-                            </PgListItem>
+                                </PgListItem>
+                            </div>
                         ))}
                         {results.value.length === 0 && (
                             <PgListItem>

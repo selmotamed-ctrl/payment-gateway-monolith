@@ -1,6 +1,6 @@
 import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import {VAlert, PgAutocomplete, PgSwitch, PgTextField} from "@pg/ui";
+import {PgAlert, PgAutocomplete, PgSwitch, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import {FormField} from "@pg/ui";
 import {StatusBadge} from "@pg/ui";
@@ -140,13 +140,13 @@ export const ParserConfigBuilder = defineComponent({
                         )}
                     </div>
                     {warnings.length > 0 && (
-                        <VAlert type="warning" variant="tonal" density="compact">
+                        <PgAlert tone="warning" density="compact">
                             <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                                 {warnings.map((entry) => (
                                     <span key={`${entry.code}-${entry.field}`}>{t(PARSER_ERROR_MESSAGES[entry.code])}</span>
                                 ))}
                             </div>
-                        </VAlert>
+                        </PgAlert>
                     )}
                 </div>
             );

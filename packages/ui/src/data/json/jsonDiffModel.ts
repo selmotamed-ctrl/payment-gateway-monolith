@@ -23,6 +23,11 @@ export interface JsonPatchOperation {
     before?: unknown;
 }
 
+/** Semantic change status used by the 2026 audit diff rows. */
+export type JsonDiffStatus = "added" | "removed" | "modified" | "unchanged";
+/** Display classification of a row/value (`money`, enum status, ISO date, list, object). */
+export type JsonDiffKind = "value" | "money" | "status" | "date" | "list" | "object";
+
 export interface DiffEntry {
     /** JSON-pointer style path (`/payoutBankDetailsJson/iban`), "" for the whole record. */
     path: string;
@@ -34,6 +39,10 @@ export interface DiffEntry {
     after: unknown;
     hasBefore: boolean;
     hasAfter: boolean;
+    /** Semantic state of the row (added / removed / modified / unchanged). */
+    status: JsonDiffStatus;
+    /** Typed rendering hint (money, status, date, list, object, value). */
+    kind: JsonDiffKind;
     /** `from` path label for move/copy operations. */
     fromLabel?: string;
     /** Currency of the nearest enclosing object that carries a `currency` string. */
@@ -43,6 +52,27 @@ export interface DiffEntry {
 export interface DiffModel {
     mode: DiffMode;
     entries: DiffEntry[];
+}
+
+/** One classifier row, including the raw leaf key and typed kind. */
+export interface JsonDiffRow {
+    path: string;
+    key: string;
+    segments: string[];
+    label: string;
+    before: unknown;
+    after: unknown;
+    hasBefore: boolean;
+    hasAfter: boolean;
+    status: JsonDiffStatus;
+    kind: JsonDiffKind;
+    op: EntryOp;
+    currency?: string;
+}
+
+export interface JsonDiffOptions {
+    /** Keep equal leaves as `unchanged` rows (default `false` for `normalizeDiff`, `true` for `classifyDiff`). */
+    includeUnchanged?: boolean;
 }
 
 export type ValueView =
@@ -157,22 +187,42 @@ export const humanizePath = (path: string | null | undefined): string => humaniz
 /* value helpers                                                       */
 /* ------------------------------------------------------------------ */
 
-export const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-    value !== null && typeof value === "object" && !Array.isArray(value);
+export const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+    if (value === null || typeof value !== "object") return false;
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+};
 
-export const deepEqual = (a: unknown, b: unknown): boolean => {
+const markSeenPair = (seen: WeakMap<object, WeakSet<object>>, a: object, b: object): boolean => {
+    let pairs = seen.get(a);
+    if (!pairs) {
+        pairs = new WeakSet<object>();
+        seen.set(a, pairs);
+    }
+    if (pairs.has(b)) return true;
+    pairs.add(b);
+    return false;
+};
+
+/** Structural equality for JSON values: objects, arrays, Dates, BigInt and cycles. */
+export const deepEqual = (a: unknown, b: unknown, seen: WeakMap<object, WeakSet<object>> = new WeakMap()): boolean => {
     if (a === b) return true;
     if (a === null || b === null || a === undefined || b === undefined) return false;
     if (typeof a !== typeof b) return false;
+    if (typeof a === "number" && Number.isNaN(a) && Number.isNaN(b)) return true;
+    if (a instanceof Date || b instanceof Date) return a instanceof Date && b instanceof Date && a.getTime() === b.getTime();
+    if (typeof a !== "object" || typeof b !== "object") return false;
     if (Array.isArray(a) || Array.isArray(b)) {
         if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-        return a.every((item, index) => deepEqual(item, b[index]));
+        if (markSeenPair(seen, a, b)) return true;
+        return a.every((item, index) => deepEqual(item, b[index], seen));
     }
     if (isPlainObject(a) && isPlainObject(b)) {
         const keysA = Object.keys(a);
         const keysB = Object.keys(b);
         if (keysA.length !== keysB.length) return false;
-        return keysA.every((key) => Object.prototype.hasOwnProperty.call(b, key) && deepEqual(a[key], b[key]));
+        if (markSeenPair(seen, a, b)) return true;
+        return keysA.every((key) => Object.prototype.hasOwnProperty.call(b, key) && deepEqual(a[key], b[key], seen));
     }
     return false;
 };
@@ -190,7 +240,51 @@ export const coerceValue = (value: unknown): unknown => {
     }
 };
 
-const MONEY_KEY = /(amount|ceiling|fee|balance|volume|flat|upto)$/i;
+const safeStringify = (value: unknown, ancestors: readonly unknown[], depth: number): string => {
+    if (value === null) return "null";
+    const type = typeof value;
+    if (type === "bigint") return JSON.stringify(String(value));
+    if (type === "string") return JSON.stringify(value);
+    if (type === "number") return Number.isFinite(value as number) ? String(value) : JSON.stringify(String(value));
+    if (type === "boolean") return value ? "true" : "false";
+    if (type !== "object") return JSON.stringify(String(value));
+    if (value instanceof Date) return JSON.stringify(Number.isNaN(value.getTime()) ? "Invalid Date" : value.toISOString());
+    if (ancestors.includes(value)) return JSON.stringify("[Circular]");
+    if (depth >= 12) return JSON.stringify("[Nested]");
+    const next = [...ancestors, value];
+    if (Array.isArray(value)) return `[${value.map((item) => safeStringify(item, next, depth + 1)).join(",")}]`;
+    if (isPlainObject(value)) {
+        return `{${Object.entries(value)
+            .map(([key, child]) => `${JSON.stringify(key)}:${safeStringify(child, next, depth + 1)}`)
+            .join(",")}}`;
+    }
+    try {
+        return JSON.stringify(value);
+    } catch {
+        return JSON.stringify(String(value));
+    }
+};
+
+/**
+ * Formatting used by copy buttons and raw inspectors. Never throws: BigInt,
+ * Dates, cycles and exotic values degrade to a readable string instead of a
+ * `JSON.stringify` TypeError.
+ */
+export const formatJsonValue = (value: unknown): string => {
+    if (value === undefined) return "";
+    if (typeof value === "string") return value;
+    try {
+        return safeStringify(value, [], 0);
+    } catch {
+        try {
+            return String(value);
+        } catch {
+            return "";
+        }
+    }
+};
+
+const MONEY_KEY = /(amount|ceiling|fee|balance|volume|total|price|flat|upto)$/i;
 const DECIMAL = /^-?\d+(\.\d+)?$/;
 const STATUS_KEY = /(status|state|result|severity|outcome|decision|tier|mode|kind|role|action|model|type)$/i;
 const ENUM_VALUE = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$|^[A-Z]{4,}$/;
@@ -207,6 +301,26 @@ export const isStatusValue = (key: string, value: unknown): boolean => {
     return ENUM_VALUE.test(value) && value.length >= 4 && value.length <= 40;
 };
 
+export const isIsoDateString = (value: unknown): boolean => typeof value === "string" && ISO_DATE.test(value);
+
+/** Typed rendering hint for a JSON value. */
+export const diffKindOf = (key: string, value: unknown, present = true): JsonDiffKind => {
+    if (!present || value === null || value === undefined) return "value";
+    if (Array.isArray(value)) return "list";
+    if (value instanceof Date) return "date";
+    if (isPlainObject(value)) return "object";
+    if (typeof value === "string") {
+        if (isIsoDateString(value)) return "date";
+        if (isMoneyKey(key) && DECIMAL.test(value.trim())) return "money";
+        if (isStatusValue(key, value)) return "status";
+        return "value";
+    }
+    if (typeof value === "number" || typeof value === "bigint") {
+        return isMoneyKey(key) ? "money" : "value";
+    }
+    return "value";
+};
+
 const scalarText = (value: unknown): string => {
     if (typeof value === "string") return value;
     if (typeof value === "number" || typeof value === "bigint") return String(value);
@@ -221,6 +335,9 @@ const scalarText = (value: unknown): string => {
 export const classifyValue = (key: string, value: unknown, present = true, currency?: string): ValueView => {
     if (!present) return { kind: "absent" };
     if (value === null || value === undefined || value === "") return { kind: "empty" };
+    if (value instanceof Date) {
+        return Number.isNaN(value.getTime()) ? { kind: "empty" } : { kind: "datetime", iso: value.toISOString() };
+    }
     if (Array.isArray(value)) {
         if (value.length === 0) return { kind: "empty" };
         return { kind: "list", items: value.map((item) => (typeof item === "string" ? item : scalarText(item))) };
@@ -256,14 +373,22 @@ const MAX_DEPTH = 12;
 const CURRENCY_CODE = /^[A-Z]{3}$/;
 
 /** Nested objects (and arrays of objects) become sub-rows; scalars and scalar arrays stay leaves. */
-export const flattenLeaves = (value: unknown, prefix: string[] = [], currency?: string, depth = 0): Leaf[] => {
+export const flattenLeaves = (
+    value: unknown,
+    prefix: string[] = [],
+    currency?: string,
+    depth = 0,
+    ancestors: readonly unknown[] = [],
+): Leaf[] => {
     const own = isPlainObject(value) && typeof value.currency === "string" && CURRENCY_CODE.test(value.currency) ? value.currency : currency;
-    if (depth < MAX_DEPTH) {
+    if (depth < MAX_DEPTH && value !== null && typeof value === "object") {
+        if (ancestors.includes(value)) return [{ segments: prefix, value: "[Circular]", currency: own }];
+        const nextAncestors = [...ancestors, value];
         if (isPlainObject(value) && Object.keys(value).length > 0) {
-            return Object.entries(value).flatMap(([key, child]) => flattenLeaves(child, [...prefix, key], own, depth + 1));
+            return Object.entries(value).flatMap(([key, child]) => flattenLeaves(child, [...prefix, key], own, depth + 1, nextAncestors));
         }
         if (Array.isArray(value) && value.some((item) => isPlainObject(item) || Array.isArray(item))) {
-            return value.flatMap((child, index) => flattenLeaves(child, [...prefix, String(index)], own, depth + 1));
+            return value.flatMap((child, index) => flattenLeaves(child, [...prefix, String(index)], own, depth + 1, nextAncestors));
         }
     }
     return [{ segments: prefix, value, currency: own }];
@@ -292,6 +417,19 @@ const meaningfulLeaves = (value: unknown, prefix: string[]): Leaf[] =>
 const naturalCompare = (a: string[], b: string[]): number =>
     a.join("/").localeCompare(b.join("/"), undefined, { numeric: true, sensitivity: "base" });
 
+const STATUS_BY_OP: Record<EntryOp, JsonDiffStatus> = {
+    add: "added",
+    remove: "removed",
+    replace: "modified",
+    move: "modified",
+    copy: "added",
+    test: "unchanged",
+    value: "unchanged",
+};
+
+const namedSegment = (segments: string[]): string =>
+    [...segments].reverse().find((segment) => !/^\d+$/.test(segment)) ?? segments[segments.length - 1] ?? "";
+
 const makeEntry = (
     segments: string[],
     op: EntryOp,
@@ -309,6 +447,8 @@ const makeEntry = (
     after,
     hasBefore,
     hasAfter,
+    status: STATUS_BY_OP[op],
+    kind: diffKindOf(namedSegment(segments), hasAfter ? after : before, hasBefore || hasAfter),
     currency,
 });
 
@@ -330,14 +470,18 @@ export const compareValues = (
     for (const key of keys) {
         const b = beforeMap.get(key);
         const a = afterMap.get(key);
+        if (!b && !a) continue;
+        // A newly added / removed blank field in a snapshot carries no information.
+        // Explicit patch operations keep their row even when the value is blank.
+        if (!options.op && (!b || !a) && isBlankValue((a ?? b)!.value)) continue;
         // `null` and "absent" are the same thing in a snapshot diff.
         const bValue = b ? b.value : undefined;
         const aValue = a ? a.value : undefined;
-        if (options.changedOnly !== false && (b || a)) {
-            if ((isBlankValue(bValue) && isBlankValue(aValue)) || deepEqual(bValue, aValue)) continue;
-        }
+        const blank = isBlankValue(bValue) && isBlankValue(aValue);
+        const equal = b && a ? blank || deepEqual(bValue, aValue) : blank;
+        if (equal && options.changedOnly !== false) continue;
         const segments = (b ?? a)!.segments;
-        const op: EntryOp = options.op ?? (b && a ? "replace" : a ? "add" : "remove");
+        const op: EntryOp = options.op ?? (b && a ? (equal ? "value" : "replace") : a ? "add" : "remove");
         entries.push(makeEntry(segments, op, bValue, aValue, Boolean(b), Boolean(a), (a ?? b)!.currency));
     }
     if (options.sort !== false) entries.sort((x, y) => naturalCompare(x.segments, y.segments));
@@ -411,14 +555,14 @@ const operationEntries = (operation: JsonPatchOperation): DiffEntry[] => {
 /**
  * Normalise any diff payload into display entries.
  * - `[ {op,path,...} ]` or `{ operations: [...] }` -> patch
- * - `{ before, after }` -> compare (changed leaves only)
+ * - `{ before, after }` -> compare (changed leaves only unless `includeUnchanged`)
  * - any other object/array/scalar -> payload (all leaves)
  */
-export const normalizeDiff = (input: unknown): DiffModel => {
+export const normalizeDiff = (input: unknown, options: JsonDiffOptions = {}): DiffModel => {
     const value = parseInput(input);
     if (value === null || value === undefined) return { mode: "empty", entries: [] };
     if (isPlainObject(value) && Array.isArray(value.operations) && Object.keys(value).length === 1) {
-        return normalizeDiff(value.operations);
+        return normalizeDiff(value.operations, options);
     }
     if (Array.isArray(value) && value.length === 0) return { mode: "empty", entries: [] };
     if (isPatchArray(value)) {
@@ -430,12 +574,39 @@ export const normalizeDiff = (input: unknown): DiffModel => {
         const entries = compareValues(before, after, {
             hasBefore: before !== undefined && before !== null,
             hasAfter: after !== undefined && after !== null,
+            changedOnly: options.includeUnchanged !== true,
         });
         return { mode: "compare", entries };
     }
     const entries = payloadEntries(value);
     return { mode: entries.length === 0 ? "empty" : "payload", entries };
 };
+
+/**
+ * Flat typed classifier used by `JsonDiffViewer` and payload inspectors.
+ * Unchanged leaves are included by default so a caller can decide whether to
+ * collapse them; pass `{ includeUnchanged: false }` to keep changes only.
+ */
+export const classifyDiff = (input: unknown, options: JsonDiffOptions = {}): JsonDiffRow[] => {
+    const model = normalizeDiff(input, { includeUnchanged: options.includeUnchanged !== false });
+    return model.entries.map((entry) => ({
+        path: entry.path,
+        key: entry.segments.length > 0 ? entry.segments[entry.segments.length - 1]! : "",
+        segments: entry.segments,
+        label: entry.label,
+        before: entry.before,
+        after: entry.after,
+        hasBefore: entry.hasBefore,
+        hasAfter: entry.hasAfter,
+        status: entry.status,
+        kind: entry.kind,
+        op: entry.op,
+        currency: entry.currency,
+    }));
+};
+
+/** Alias with a row-oriented name for page code. */
+export const diffRows = classifyDiff;
 
 /** View model of the `before` / `after` side of an entry. */
 export const entryView = (entry: DiffEntry, side: "before" | "after"): ValueView => {

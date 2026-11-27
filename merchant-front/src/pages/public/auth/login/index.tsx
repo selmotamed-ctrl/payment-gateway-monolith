@@ -1,6 +1,6 @@
 import { GOOGLE_REDIRECT_PATHS, isAllowedIdentityRedirect, parseIdentityHosts } from "@/utils/security/identityRedirect";
 import { dc } from "@/utils/dc";
-import {VAlert, PgButton, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { computed, ref } from "vue";
 import { api } from "@/state/api";
@@ -164,21 +164,21 @@ const LoginPage = dc(() => {
                 <SurfaceCard title={t("Merchant Portal")} subtitle={t("Sign in to continue")}>
                     <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                         {error.value && (
-                            <VAlert type="error" variant="tonal" density="compact">
+                            <PgAlert tone="danger" density="compact">
                                 {error.value}
-                            </VAlert>
+                            </PgAlert>
                         )}
                         {notice.value && (
-                            <VAlert type="success" variant="tonal" density="compact">
+                            <PgAlert tone="success" density="compact">
                                 {notice.value}
-                            </VAlert>
+                            </PgAlert>
                         )}
 
                         {challengeId.value ? (
                             <>
-                                <VAlert type="info" variant="tonal" density="compact">
+                                <PgAlert tone="info" density="compact">
                                     {mfaMessage.value}
-                                </VAlert>
+                                </PgAlert>
                                 <FormField label={t("Verification Code")} required>
                                     <PgTextField
                                         aria-label={t("Verification Code")}
@@ -192,11 +192,11 @@ const LoginPage = dc(() => {
                                 </FormField>
                                 <PgButton
                                     block
+                                    variant="primary"
                                     size="large"
                                     loading={loading.value}
                                     disabled={mfaCode.value.trim().length !== 6}
                                     onClick={() => void submit()}
-                                    style={{ height: "38px" }}
                                 >
                                     {t("Verify")}
                                 </PgButton>
@@ -248,11 +248,11 @@ const LoginPage = dc(() => {
 
                                 <PgButton
                                     block
+                                    variant="primary"
                                     size="large"
                                     loading={loading.value}
                                     disabled={!identity.value || !password.value}
                                     onClick={() => void submit()}
-                                    style={{ height: "38px" }}
                                 >
                                     {t("Login")}
                                 </PgButton>
@@ -264,8 +264,7 @@ const LoginPage = dc(() => {
                                         prependIcon="mdi-google"
                                         loading={loading.value}
                                         onClick={() => void loginWithGoogle()}
-                                        style={{ height: "38px" }}
-                                    >
+                                        >
                                         {t("Login With Google")}
                                     </PgButton>
                                 )}

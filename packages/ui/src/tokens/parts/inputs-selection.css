@@ -1,0 +1,658 @@
+/* Area overrides for inputs-selection. Loaded after components.css. */
+
+/* ==========================================================================
+ * PgCheckbox — 2026 tactile squircle
+ * ========================================================================== */
+.pg-checkbox-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-inline-size: 0;
+}
+.pg-checkbox-field--card { gap: 6px; }
+.pg-checkbox-field--disabled { cursor: not-allowed; }
+
+.pg-chk {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: 10px;
+    min-height: 32px;
+    position: relative;
+    color: var(--pg-ink-primary);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+    text-align: start;
+    cursor: pointer;
+    user-select: none;
+}
+.pg-chk__native,
+.pg-switch__native,
+.pg-radio__native,
+.pg-file__native {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    clip-path: inset(50%);
+    overflow: hidden;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+}
+.pg-chk__native:focus-visible,
+.pg-switch__native:focus-visible,
+.pg-radio__native:focus-visible,
+.pg-file__native:focus-visible {
+    outline: none;
+}
+.pg-chk__box {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    inline-size: 18px;
+    block-size: 18px;
+    flex: 0 0 auto;
+    margin-block-start: 1px;
+    border: 1.5px solid var(--pg-border-strong);
+    border-radius: 5px;
+    background: var(--pg-bg-surface);
+    color: transparent;
+    box-sizing: border-box;
+    transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1), border-color 140ms cubic-bezier(0.2, 0, 0, 1),
+        box-shadow 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+.pg-chk__box::before {
+    content: "";
+    position: absolute;
+    inline-size: 32px;
+    block-size: 32px;
+    inset: 0;
+    margin: auto;
+}
+.pg-chk--sm .pg-chk__box {
+    inline-size: 16px;
+    block-size: 16px;
+}
+.pg-chk:hover:where(:not(.pg-chk--disabled)) .pg-chk__box {
+    border-color: var(--pg-ink-primary);
+    background: var(--pg-bg-surface-hover);
+}
+.pg-chk--checked .pg-chk__box,
+.pg-chk--indeterminate .pg-chk__box {
+    border-color: var(--pg-accent-primary);
+    background: var(--pg-accent-primary);
+    color: var(--pg-ink-on-accent);
+}
+.pg-chk:has(.pg-chk__native:focus-visible) .pg-chk__box {
+    border-color: var(--pg-border-focus);
+    box-shadow: var(--pg-focus-ring);
+}
+.pg-chk--disabled,
+.pg-chk--disabled:hover {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+.pg-chk--disabled .pg-chk__box { cursor: not-allowed; }
+.pg-chk__check,
+.pg-chk__dash { display: block; }
+.pg-chk__body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-inline-size: 0;
+}
+.pg-chk__label { color: var(--pg-ink-primary); }
+.pg-chk__description {
+    color: var(--pg-ink-muted);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.5;
+}
+.pg-chk__error { margin-block-start: 2px; }
+
+/* Compliance / maker-checker card row (PgFormChecklist and safeguard cards). */
+.pg-chk--card {
+    inline-size: 100%;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--pg-border-subtle);
+    border-radius: 10px;
+    background: var(--pg-bg-surface);
+    box-sizing: border-box;
+    transition: background-color 140ms ease, border-color 140ms ease;
+}
+.pg-chk--card:hover:where(:not(.pg-chk--disabled)) {
+    background: var(--pg-bg-surface-hover);
+    border-color: var(--pg-border-default);
+}
+.pg-chk--card.pg-chk--checked {
+    background: var(--pg-status-success-bg);
+    border-color: var(--pg-status-success-border);
+}
+.pg-chk--card .pg-chk__body { gap: 2px; }
+.pg-chk--card .pg-chk__label {
+    font-size: 13px;
+    font-weight: 600;
+}
+.pg-chk--card .pg-chk__description {
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+/* ==========================================================================
+ * PgSwitch — tactile boolean toggle
+ * ========================================================================== */
+.pg-switch-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-inline-size: 0;
+}
+.pg-switch-field--disabled { cursor: not-allowed; }
+.pg-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 32px;
+    position: relative;
+    color: var(--pg-ink-primary);
+    text-align: start;
+    cursor: pointer;
+    user-select: none;
+}
+.pg-switch--disabled { cursor: not-allowed; opacity: 0.45; }
+.pg-switch__track {
+    position: relative;
+    inline-size: 38px;
+    block-size: 22px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: var(--pg-border-strong);
+    transition: background-color 160ms ease;
+}
+.pg-switch--sm .pg-switch__track {
+    inline-size: 32px;
+    block-size: 18px;
+}
+.pg-switch:hover:not(.pg-switch--disabled) .pg-switch__track:not(.pg-switch__track--on) {
+    background: var(--pg-border-default);
+}
+.pg-switch__track--on { background: var(--pg-accent-brand); }
+.pg-switch--brand .pg-switch__track--on { background: var(--pg-accent-brand); }
+.pg-switch--success .pg-switch__track--on { background: var(--pg-status-success-dot); }
+.pg-switch--warning .pg-switch__track--on { background: var(--pg-status-warning-dot); }
+.pg-switch--danger .pg-switch__track--on { background: var(--pg-status-danger-dot); }
+.pg-switch:has(.pg-switch__native:focus-visible) .pg-switch__track {
+    box-shadow: var(--pg-focus-ring);
+    outline: 1px solid var(--pg-border-focus);
+    outline-offset: 1px;
+}
+.pg-switch__thumb {
+    position: absolute;
+    inset-block-start: 2px;
+    inset-inline-start: 2px;
+    inline-size: 18px;
+    block-size: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    transition: transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.pg-switch--sm .pg-switch__thumb {
+    inline-size: 14px;
+    block-size: 14px;
+}
+.pg-switch__thumb--loading { color: var(--pg-accent-brand); }
+.pg-switch--loading .pg-switch__track { cursor: progress; }
+.pg-switch__track--on .pg-switch__thumb { transform: translateX(16px); }
+.pg-switch--sm .pg-switch__track--on .pg-switch__thumb { transform: translateX(14px); }
+html[dir="rtl"] .pg-switch__track--on .pg-switch__thumb { transform: translateX(-16px); }
+html[dir="rtl"] .pg-switch--sm .pg-switch__track--on .pg-switch__thumb { transform: translateX(-14px); }
+.pg-switch__text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-inline-size: 0;
+    order: 2;
+}
+.pg-switch__track { order: 1; }
+.pg-switch--label-start .pg-switch__text { order: 0; }
+.pg-switch__label {
+    font-size: 13.5px;
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--pg-ink-primary);
+}
+.pg-switch__description {
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--pg-ink-muted);
+}
+.pg-switch__error { margin-block-start: 2px; }
+
+/* ==========================================================================
+ * PgRadioGroup / PgRadio
+ * ========================================================================== */
+.pg-radio-field { min-inline-size: 0; }
+.pg-radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.pg-radio-group--inline {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 20px;
+}
+.pg-radio {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-height: 32px;
+    position: relative;
+    color: var(--pg-ink-primary);
+    font-size: 13.5px;
+    line-height: 1.4;
+    text-align: start;
+    cursor: pointer;
+}
+.pg-radio__circle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    inline-size: 18px;
+    block-size: 18px;
+    flex: 0 0 auto;
+    margin-block-start: 1px;
+    border: 1.5px solid var(--pg-border-strong);
+    border-radius: 999px;
+    background: var(--pg-bg-surface);
+    box-sizing: border-box;
+    transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+.pg-radio__circle::before {
+    content: "";
+    position: absolute;
+    inline-size: 32px;
+    block-size: 32px;
+    inset: 0;
+    margin: auto;
+}
+.pg-radio:hover:where(:not(.pg-radio--disabled)) .pg-radio__circle { border-color: var(--pg-accent-brand); }
+.pg-radio--checked .pg-radio__circle {
+    border-color: var(--pg-accent-brand);
+    background: var(--pg-accent-brand);
+    color: var(--pg-ink-on-accent);
+}
+.pg-radio:has(.pg-radio__native:focus-visible) .pg-radio__circle {
+    box-shadow: var(--pg-focus-ring);
+    border-color: var(--pg-border-focus);
+}
+.pg-radio__dot {
+    inline-size: 8px;
+    block-size: 8px;
+    border-radius: 999px;
+}
+.pg-radio--disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+.pg-radio__body {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-inline-size: 0;
+}
+.pg-radio__label {
+    font-size: 13.5px;
+    font-weight: 500;
+    color: var(--pg-ink-primary);
+}
+.pg-radio__description {
+    display: block;
+    flex-basis: 100%;
+    font-size: 12px;
+    color: var(--pg-ink-muted);
+}
+
+/* ==========================================================================
+ * PgChoice — rich radio / checkbox selection card
+ * ========================================================================== */
+.pg-choice {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    inline-size: 100%;
+    min-height: 60px;
+    padding: 14px 16px;
+    border: 1.5px solid var(--pg-border-subtle);
+    border-radius: 10px;
+    background: var(--pg-bg-surface);
+    color: var(--pg-ink-primary);
+    text-align: start;
+    cursor: pointer;
+    box-sizing: border-box;
+    transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+.pg-choice:hover:where(:not(.pg-choice--disabled)) {
+    background: var(--pg-bg-surface-hover);
+    border-color: var(--pg-border-default);
+}
+.pg-choice--checked,
+.pg-choice--selected {
+    border-color: var(--pg-accent-brand);
+    background: var(--pg-accent-brand-soft);
+}
+.pg-choice--good {
+    border-color: var(--pg-status-success-border);
+    background: var(--pg-status-success-bg);
+    color: var(--pg-status-success-text);
+}
+.pg-choice--bad {
+    border-color: var(--pg-status-danger-border);
+    background: var(--pg-status-danger-bg);
+    color: var(--pg-status-danger-text);
+}
+.pg-choice--missed {
+    border-color: var(--pg-status-warning-border);
+    background: var(--pg-status-warning-bg);
+    color: var(--pg-status-warning-text);
+}
+.pg-choice:focus-visible {
+    outline: none;
+    box-shadow: var(--pg-focus-ring);
+    border-color: var(--pg-border-focus);
+}
+.pg-choice--disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.pg-choice__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    inline-size: 36px;
+    block-size: 36px;
+    flex: 0 0 auto;
+    border-radius: 8px;
+    background: var(--pg-bg-surface-subtle);
+    color: var(--pg-ink-muted);
+}
+.pg-choice__body {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1 1 auto;
+    min-inline-size: 0;
+}
+.pg-choice__title {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: inherit;
+}
+.pg-choice__description {
+    font-size: 12.5px;
+    line-height: 1.4;
+    color: var(--pg-ink-muted);
+}
+.pg-choice__badge {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--pg-accent-brand-soft);
+    color: var(--pg-accent-brand);
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.pg-choice__indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    margin-block-start: 1px;
+}
+.pg-choice__mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    inline-size: 18px;
+    block-size: 18px;
+    border: 1.5px solid var(--pg-border-strong);
+    border-radius: 5px;
+    background: var(--pg-bg-surface);
+    color: transparent;
+    box-sizing: border-box;
+    transition: background-color 140ms ease, border-color 140ms ease;
+}
+.pg-choice__mark--radio {
+    border-radius: 999px;
+}
+.pg-choice__mark--checkbox {
+    border-radius: 5px;
+}
+.pg-choice--checkbox .pg-choice__mark { border-radius: 5px; }
+.pg-choice--radio .pg-choice__mark { border-radius: 999px; }
+.pg-choice__mark--on {
+    border-color: var(--pg-accent-brand);
+    background: var(--pg-accent-brand);
+    color: var(--pg-ink-on-accent);
+}
+.pg-choice__dot {
+    inline-size: 8px;
+    block-size: 8px;
+    border-radius: 999px;
+    background: var(--pg-ink-on-accent);
+}
+.pg-choice__check { display: block; }
+.pg-choice.ac-choice--locked { cursor: default; }
+.pg-choice--locked { cursor: default; }
+
+/* ==========================================================================
+ * PgFileUpload — KYB document & asset dropzone
+ * ========================================================================== */
+.pg-file-upload { display: block; min-inline-size: 0; }
+.pg-file-upload--compact .pg-dropzone {
+    min-height: 84px;
+    padding: 14px;
+}
+.pg-dropzone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    inline-size: 100%;
+    min-height: 112px;
+    padding: 20px;
+    border: 1.5px dashed var(--pg-border-strong);
+    border-radius: 12px;
+    background: var(--pg-bg-surface-subtle);
+    color: var(--pg-ink-secondary);
+    font: inherit;
+    text-align: center;
+    cursor: pointer;
+    box-sizing: border-box;
+    transition: background-color 140ms ease, border-color 140ms ease;
+}
+.pg-dropzone:hover:not(:disabled) { background: var(--pg-bg-surface-hover); }
+.pg-dropzone.pg-dropzone--drag {
+    border-color: var(--pg-accent-brand);
+    background: var(--pg-accent-brand-soft);
+}
+.pg-dropzone--error { border-color: var(--pg-status-danger-dot); }
+.pg-dropzone--disabled { opacity: 0.5; cursor: not-allowed; }
+.pg-dropzone:focus-visible {
+    outline: none;
+    box-shadow: var(--pg-focus-ring);
+    border-color: var(--pg-border-focus);
+}
+.pg-file-upload:has(.pg-file__native:focus-visible) .pg-dropzone {
+    box-shadow: var(--pg-focus-ring);
+    border-color: var(--pg-border-focus);
+}
+.pg-dropzone__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    inline-size: 36px;
+    block-size: 36px;
+    border-radius: 10px;
+    background: var(--pg-bg-surface);
+    color: var(--pg-ink-muted);
+    box-shadow: var(--pg-shadow-xs);
+}
+.pg-dropzone__title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--pg-ink-primary);
+}
+.pg-dropzone__hint {
+    font-size: 12px;
+    color: var(--pg-ink-muted);
+    font-variant-numeric: tabular-nums;
+}
+.pg-file-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-block-start: 10px;
+}
+.pg-file-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+    padding: 8px 12px;
+    border: 1px solid var(--pg-border-subtle);
+    border-radius: 8px;
+    background: var(--pg-bg-surface);
+}
+.pg-file-row__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    color: var(--pg-ink-muted);
+}
+.pg-file-row__body {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex: 1 1 auto;
+    min-inline-size: 0;
+}
+.pg-file-row__name {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--pg-ink-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.pg-file-row__size {
+    font-size: 12px;
+    color: var(--pg-ink-muted);
+    font-variant-numeric: tabular-nums;
+}
+.pg-file-row__progress { margin-block-start: 4px; }
+.pg-file-row__remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    inline-size: 32px;
+    block-size: 32px;
+    flex: 0 0 auto;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--pg-ink-muted);
+    font: inherit;
+    cursor: pointer;
+}
+.pg-file-row__remove:hover:not(:disabled) {
+    background: var(--pg-bg-surface-hover);
+    color: var(--pg-status-danger-dot);
+}
+.pg-file-row__remove:focus-visible {
+    outline: none;
+    box-shadow: var(--pg-focus-ring);
+}
+.pg-file-row__remove:disabled { cursor: not-allowed; opacity: 0.5; }
+
+/* Reduced motion: keep every state change instant. */
+@media (prefers-reduced-motion: reduce) {
+    .pg-chk__box,
+    .pg-switch__track,
+    .pg-switch__thumb,
+    .pg-radio__circle,
+    .pg-choice,
+    .pg-choice__mark,
+    .pg-dropzone {
+        transition: none;
+    }
+}
+
+/* Native controls stay focusable and become the real hit target over their
+ * visual box, so pointer and automation clicks both work without a label
+ * intercepting the input. */
+.pg-chk__native {
+    position: absolute;
+    inset-block-start: 2px;
+    inset-inline-start: 0;
+    inline-size: 18px;
+    block-size: 18px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    clip-path: none;
+    pointer-events: auto;
+    cursor: pointer;
+    z-index: 2;
+}
+.pg-chk--sm .pg-chk__native {
+    inline-size: 16px;
+    block-size: 16px;
+}
+.pg-switch__native {
+    position: absolute;
+    inset: 0;
+    inline-size: 100%;
+    block-size: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    clip-path: none;
+    pointer-events: auto;
+    cursor: pointer;
+    z-index: 2;
+}
+.pg-chk__box,
+.pg-switch__track,
+.pg-switch__thumb {
+    pointer-events: none;
+}
+
+/* A selected checkbox stays selected on hover; only the accent darkens. */
+.pg-chk--checked:hover .pg-chk__box,
+.pg-chk--indeterminate:hover .pg-chk__box {
+    background: var(--pg-accent-primary-hover);
+    border-color: var(--pg-accent-primary-hover);
+    color: var(--pg-ink-on-accent);
+}

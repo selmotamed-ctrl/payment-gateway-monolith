@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
-import {VAlert, PgCol, PgRow} from "@pg/ui";
+import {PgAlert, PgCol, PgRow} from "@pg/ui";
 import PortalLayout from "@/layouts/portal";
 import RailChaosCard from "@/components/RailChaosCard";
 import {TableRowActions} from "@pg/ui";
@@ -64,7 +64,7 @@ const ChaosMatrixPage = dc(() => {
             { key: "outage", label: "Full outage", icon: "mdi-power-plug-off", danger: true, dividerBefore: true, onClick: () => globalPreset("outage") },
           ]}
         />
-        {message.value ? <VAlert type="success" variant="tonal" density="compact">{message.value}</VAlert> : null}
+        {message.value ? <PgAlert tone="success" density="compact">{message.value}</PgAlert> : null}
       </div>
       <PgRow>
         {rails.value.map((rail) => (

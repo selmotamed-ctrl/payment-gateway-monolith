@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import {VAlert, PgButton, PgFileUpload, PgAutocomplete, PgTextarea, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgFileUpload, PgAutocomplete, PgTextarea, PgTextField} from "@pg/ui";
 import { fileToBase64 } from "@/utils/FileToB64";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
@@ -709,7 +709,7 @@ const AmlReportingStudioPage = dc(() => {
     return () => (
         <ScreenContainer>
             <PageHeader title={t("Reporting Studio")} subtitle={t("Declarative XML/XLSX/DOCX schemas, mapping, validation and filing gates")}><PgButton color="primary" onClick={openCreate}>{t("New schema")}</PgButton></PageHeader>
-            {error.value && <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert>}
+            {error.value && <PgAlert tone="danger" class="mb-4">{error.value}</PgAlert>}
             <ThemedView style={{ display: "grid", gap: "12px" }}>
                 {loading.value && <ThemedText>{t("Loading schemas")}</ThemedText>}
                 {defaultRows.value.map((row) => (
@@ -774,9 +774,9 @@ const AmlReportingStudioPage = dc(() => {
                         {issues.value.length > 0 && (
                             <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                                 {issues.value.slice(0, 12).map((issue, index) => (
-                                    <VAlert key={`${issue.path}-${index}`} type={issue.severity === "error" ? "error" : "warning"} variant="tonal" density="compact">
+                                    <PgAlert key={`${issue.path}-${index}`} tone={issue.severity === "error" ? "danger" : "warning"} density="compact">
                                         <MonoRef value={issue.path} /> {issue.message}
-                                    </VAlert>
+                                    </PgAlert>
                                 ))}
                             </ThemedView>
                         )}
@@ -789,7 +789,7 @@ const AmlReportingStudioPage = dc(() => {
                                     <ThemedText>{t("Definition hash")}: <MonoRef value={detail.value.schema.definitionSha256 ?? ""} /></ThemedText>
                                     <ThemedText>{t("Mapping hash")}: <MonoRef value={detail.value.schema.mappingSha256 ?? ""} /></ThemedText>
                                     <ThemedText>{t("Usage")}: {detail.value.usage.defaultBindings} {t("default bindings")} · {detail.value.usage.outputs} {t("outputs")}</ThemedText>
-                                    {detail.value.approval && <VAlert type="info" variant="tonal">{t("Approval")}: {detail.value.approval.state}</VAlert>}
+                                    {detail.value.approval && <PgAlert tone="info">{t("Approval")}: {detail.value.approval.state}</PgAlert>}
                                 </SurfaceCardText>
                             </SurfaceCard>
                         )}
@@ -937,7 +937,7 @@ const AmlReportingStudioPage = dc(() => {
                                         {(templateAnalysis.value || templateBindingDraft.value) && (
                                             <ThemedView style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                                 {templateAnalysis.value && <ThemedText>{t("Sheets")}: {templateAnalysis.value.sheets.length} · {t("Named ranges")}: {templateAnalysis.value.namedRanges.length} · {t("Formulas")}: {templateAnalysis.value.formulaCount} · {t("Cells")}: {templateAnalysis.value.cellCount}</ThemedText>}
-                                                {templateAnalysis.value && templateAnalysis.value.issues.length > 0 && <VAlert type="warning" variant="tonal">{templateAnalysis.value.issues.map((issue) => issue.message).join(" · ")}</VAlert>}
+                                                {templateAnalysis.value && templateAnalysis.value.issues.length > 0 && <PgAlert tone="warning">{templateAnalysis.value.issues.map((issue) => issue.message).join(" · ")}</PgAlert>}
                                                 {(templateAnalysis.value?.sheets ?? templateBindingDraft.value?.sheets ?? []).map((sheet) => {
                                                     const binding = ensureTemplateBinding(sheet.name);
                                                     return (
@@ -1078,9 +1078,9 @@ const AmlReportingStudioPage = dc(() => {
                 submitLabel={t("Submit for approval")}
                 onSubmit={() => void setDefault()}
             >
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("Changing the default binding is submitted for four-eyes approval. Only a confirmed schema that matches the binding key can be selected.")}
-                </VAlert>
+                </PgAlert>
                 <FormChecklist
                     checks={[...DEFAULT_BINDING_CHECKS]}
                     modelValue={defaultChecklist.value}
@@ -1092,7 +1092,7 @@ const AmlReportingStudioPage = dc(() => {
                 />
             </FormModal>
             <FormModal modelValue={promoting.value !== null} onUpdate:modelValue={(value: boolean) => { if (!value) promoting.value = null; }} title={t("Promote reporting schema")} subtitle={promoting.value ? `${promoting.value.schemaCode} · v${promoting.value.version}` : ""} size="md" loading={actionLoading.value} submitLabel={t("Submit for approval")} onSubmit={() => void promote()}>
-                <VAlert type="info" variant="tonal">{t("Promotion creates a four-eyes approval request. The schema stays DRAFT until a different checker approves it.")}</VAlert>
+                <PgAlert tone="info">{t("Promotion creates a four-eyes approval request. The schema stays DRAFT until a different checker approves it.")}</PgAlert>
                 <FormChecklist
                     checks={[...PROMOTION_CHECKS]}
                     modelValue={promotionChecklist.value}
@@ -1106,7 +1106,7 @@ const AmlReportingStudioPage = dc(() => {
             <FormModal modelValue={cloneOpen.value} onUpdate:modelValue={(value: boolean) => (cloneOpen.value = value)} title={t("Clone schema as new version")} size="sm" loading={actionLoading.value} submitLabel={t("Clone")} onSubmit={() => void cloneSchema()}>
                 <FormField label={t("Name")}><PgTextField modelValue={cloneName.value} onUpdate:modelValue={(value: string) => (cloneName.value = value)} hideDetails /></FormField>
                 <FormField label={t("Version")}><PgTextField type="number" modelValue={cloneVersion.value ?? ""} onUpdate:modelValue={(value: string) => (cloneVersion.value = Number(value) || null)} hideDetails /></FormField>
-                <VAlert type="info" variant="tonal">{t("The clone copies the definition, mapping and template but not approvals, defaults or sample PII.")}</VAlert>
+                <PgAlert tone="info">{t("The clone copies the definition, mapping and template but not approvals, defaults or sample PII.")}</PgAlert>
             </FormModal>
         </ScreenContainer>
     );

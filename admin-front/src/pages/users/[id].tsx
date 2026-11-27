@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import {VAlert, PgButton} from "@pg/ui";
+import {PgAlert, PgButton, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -316,15 +316,15 @@ const UserDetailPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Admin User")} subtitle={t("Operator identity, authorities, and audited access history.")}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Admin User")} subtitle={t("Operator identity, authorities, and audited access history.")}>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <PgButton variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "AdminUsers" })}>{t("Back to users")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyAccessSummary()}>{t("Copy access summary")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export access record")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
@@ -355,7 +355,7 @@ const UserDetailPage = dc(() => {
                             <SurfaceCard>
                                 <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Pending invitation")}</ThemedText>
-                                    <VAlert type="warning" variant="tonal" density="compact">{t("The invitee has not set a password yet. Re-issuing the invitation discards any earlier credential and sends a new single-use code.")}</VAlert>
+                                    <PgAlert tone="warning" density="compact">{t("The invitee has not set a password yet. Re-issuing the invitation discards any earlier credential and sends a new single-use code.")}</PgAlert>
                                     <FormChecklist
                                         checks={[...RESEND_INVITATION_CHECKS]}
                                         modelValue={resendChecklist.value}
@@ -458,7 +458,7 @@ const UserDetailPage = dc(() => {
                         </SurfaceCard>
                     </>
                 ) : null}
-            </ThemedView>
+            </PgStack>
             <FormModal
                 modelValue={exportOpen.value}
                 onUpdate:modelValue={(value: boolean) => (exportOpen.value = value)}

@@ -73,11 +73,13 @@ export const AdminGuideToolsPage = defineComponent({
                 <PageHeader title={L("Tools and simulators", "الأدوات والمحاكيات")} subtitle={L(
                         "Safe, client-only teaching tools. They are not connected to any real system.",
                         "أدوات تعليمية آمنة تعمل في المتصفح فقط. غير متصلة بأي نظام حقيقي.",
-                    )} breadcrumbs={[{ label: L("Guide", "الدليل"), to: "/guide" }, { label: L("Tools", "الأدوات") }]}>selected.value ? (
+                    )} breadcrumbs={[{ label: L("Guide", "الدليل"), to: "/guide" }, { label: L("Tools", "الأدوات") }]}>
+                    {selected.value ? (
                         <button type="button" class="guide-secondary-button" onClick={() => void copyToolLink()}>
                             {linkCopied.value ? L("Link copied", "تم نسخ الرابط") : L("Copy link", "نسخ الرابط")}
                         </button>
-                    ) : null</PageHeader>
+                    ) : null}
+                </PageHeader>
                 <div class="guide-tools-page">
                     <nav class="guide-tool-picker" aria-label={L("Choose a tool", "اختر أداة")}>
                         {TOOLS.map((tool) => (

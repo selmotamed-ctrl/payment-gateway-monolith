@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import {VAlert, PgButton, PgAutocomplete, PgTextField, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgTextField, PgTextarea} from "@pg/ui";
 import {SurfaceCard, SurfaceCardText} from "@pg/ui";
 import {FormField} from "@pg/ui";
 import {FormChecklist} from "@pg/ui";
@@ -240,9 +240,9 @@ export const StepSimulator = dc(
                             </PgButton>
                         </div>
                         {dryRunError.value && (
-                            <VAlert type="error" variant="tonal" density="compact">
+                            <PgAlert tone="danger" density="compact">
                                 {dryRunError.value}
-                            </VAlert>
+                            </PgAlert>
                         )}
                         {dryRunOutput.value && (
                             <pre
@@ -289,9 +289,9 @@ export const StepSimulator = dc(
                         />
 
                         {suiteError.value && (
-                            <VAlert type="error" variant="tonal" density="compact">
+                            <PgAlert tone="danger" density="compact">
                                 {suiteError.value}
-                            </VAlert>
+                            </PgAlert>
                         )}
 
                         <div style={{ display: "flex", flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>

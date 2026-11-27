@@ -1,6 +1,6 @@
 import { defineComponent } from "@/utils/dc";
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
-import {VAlert, PgButton, PgDivider, PgTextarea, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgDivider, PgTextarea, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import {SlideOverDrawer} from "@pg/ui";
 import {SegmentedTabs} from "@pg/ui";
@@ -230,13 +230,15 @@ export const SettingDetailDrawer = defineComponent({
             const entry = props.entry;
             return (
                 <SlideOverDrawer
-                    modelValue={props.modelValue && Boolean(entry)}
+                    modelValue={props.modelValue && Boolean(props.entry)}
                     onUpdate:modelValue={(value: boolean) => emit("update:modelValue", value)}
-                    title={entry ? title.value : t("Setting")}
-                    subtitle={entry?.key ?? ""}
+                    title={props.entry ? title.value : t("Setting")}
+                    subtitle={props.entry?.key ?? ""}
                     width={780}
                     v-slots={{
-                        default: () => entry ? (
+                        default: () => {
+                            const entry = props.entry;
+                            return entry ? (
                     <div style={{ display: "flex", flexDirection: "column", gap: "16px", minInlineSize: 0 }}>
                         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                             <StatusBadge status={entry.displayStatus} label={t(status.value.label)} toneOverride={status.value.tone} showDot={false} />
@@ -251,9 +253,9 @@ export const SettingDetailDrawer = defineComponent({
                         <div style={{ fontSize: "12.5px", color: "var(--pg-ink-muted)", lineHeight: 1.5 }}>{t(status.value.description)}</div>
 
                         {warnings.value.map((warning) => (
-                            <VAlert key={warning} type={entry.displayStatus === "DECISION" || entry.displayStatus === "FALLBACK" ? "warning" : entry.displayStatus === "UNREGISTERED" || entry.displayStatus === "DEPRECATED" ? "error" : "info"} variant="tonal" density="compact">
+                            <PgAlert key={warning} tone={entry.displayStatus === "DECISION" || entry.displayStatus === "FALLBACK" ? "warning" : entry.displayStatus === "UNREGISTERED" || entry.displayStatus === "DEPRECATED" ? "danger" : "info"} density="compact">
                                 {warning}
-                            </VAlert>
+                            </PgAlert>
                         ))}
 
                         <SegmentedTabs
@@ -388,13 +390,16 @@ export const SettingDetailDrawer = defineComponent({
                                     complete={checklistComplete.value}
                                     incompleteMessage={t("Complete all setting checklist items before saving.")}
                                 />
-                                {editError.value && <VAlert type="error" variant="tonal" density="compact">{editError.value}</VAlert>}
+                                {editError.value && <PgAlert tone="danger" density="compact">{editError.value}</PgAlert>}
                                 {isUnchanged.value && <span style={{ fontSize: "11.5px", color: "var(--pg-ink-muted)" }}>{t("Nothing changed: the value is identical to the current version.")}</span>}
                             </>
                         )}
                     </div>
-                        ) : null,
-                        footer: () => entry ? (
+                            ) : null;
+                        },
+                        footer: () => {
+                            const entry = props.entry;
+                            return entry ? (
                             <>
                                 {entry.definition.managePath && (
                                     <PgButton variant="tonal" to={entry.definition.managePath}>{t("Open the owning screen")}</PgButton>
@@ -413,7 +418,8 @@ export const SettingDetailDrawer = defineComponent({
                                     </PgButton>
                                 )}
                             </>
-                        ) : null,
+                            ) : null;
+                        },
                     }}
                 />
             );

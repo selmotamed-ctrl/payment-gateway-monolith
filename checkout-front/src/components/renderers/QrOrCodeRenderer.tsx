@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgSpinner} from "@pg/ui";
+import {PgAlert, PgSpinner} from "@pg/ui";
 import QRCode from "qrcode";
 import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
@@ -54,9 +54,9 @@ export const QrOrCodeRenderer = dc(
                 </ThemedText>
 
                 {(props.error || qrError.value) && (
-                    <VAlert type="error" variant="tonal" density="compact">
+                    <PgAlert tone="danger" density="compact">
                         {props.error || qrError.value}
-                    </VAlert>
+                    </PgAlert>
                 )}
 
                 {qrDataUrl.value ? (

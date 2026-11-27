@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
-import {PgButton} from "@pg/ui";
+import {PgButton, PgStack} from "@pg/ui";
 import { useRouter } from "vue-router";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
@@ -529,8 +529,8 @@ const KybReviewPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("KYB Review")} subtitle={t("Review KYB evidence, document integrity and expiry posture before accepting or rejecting a merchant.")} badge={t("KYB review")} badgeTone="info">(
+            <PgStack gap="lg">
+                <PageHeader title={t("KYB Review")} subtitle={t("Review KYB evidence, document integrity and expiry posture before accepting or rejecting a merchant.")} badge={t("KYB review")} badgeTone="info">
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                             <StatusBadge status="info" label={`${total.value} ${t("documents")}`} toneOverride="info" showDot={false} />
                             <StatusBadge status="success" label={`${actionableCount.value} ${t("actionable")}`} toneOverride="success" showDot={false} />
@@ -538,7 +538,7 @@ const KybReviewPage = dc(() => {
                             <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
                 {summary.value && (
                     <SummaryExportCard
@@ -559,13 +559,7 @@ const KybReviewPage = dc(() => {
                     </SummaryExportCard>
                 )}
 
-                {areHelpPanelsVisible() && (
-                    <SurfaceCard>
-                        <SurfaceCardText>
-                            <KybHelpPanel />
-                        </SurfaceCardText>
-                    </SurfaceCard>
-                )}
+                {areHelpPanelsVisible() && <KybHelpPanel />}
                 <ApiTable<KybDocumentSummary>
                     title={t("KYB Review")}
                     url={urlsMap.kybDocumentsList}
@@ -619,7 +613,7 @@ const KybReviewPage = dc(() => {
                         />
                     )}
                 />
-            </ThemedView>
+            </PgStack>
 
             <SlideOverDrawer
                 modelValue={previewOpen.value}

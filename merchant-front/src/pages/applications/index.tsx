@@ -1,10 +1,9 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {PgTextField, PgTextarea} from "@pg/ui";
+import {PgTextField, PgTextarea, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
 import {StateView} from "@pg/ui";
 import { DataTable } from "@/tables/DataTable";
 import {TableRowActions} from "@pg/ui";
@@ -188,7 +187,7 @@ const ApplicationsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
+            <PgStack gap="lg">
                 <PageHeader
                     title={t("Applications")}
                     subtitle={t("Payment applications, environments, and configuration.")}
@@ -209,7 +208,7 @@ const ApplicationsPage = dc(() => {
                         setSearchValue={(value) => (search.value = value)}
                     />
                 )}
-            </ThemedView>
+            </PgStack>
 
             <FormModal
                 modelValue={dialogOpen.value}

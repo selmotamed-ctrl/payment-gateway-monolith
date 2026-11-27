@@ -122,3 +122,12 @@ A second read-only sweep covered Books 1-13 against the working tree after the f
 | Dashboard and roles | Gross Volume follows the selected currency; the Security Admin default can read credential sets and settings; the Finance default can open reconciliation and pricing; sandbox routes are visible to the roles the Guide names. |
 
 These corrections keep the Guide and the Academy consistent with each other and with the working tree.
+
+## Context-help route mapping (2026-11-27)
+
+| Screen | Change | Reason | Source |
+| :--- | :--- | :--- | :--- |
+| Transactions (new) | Added a `Transactions` screen with `routeNames: ["Transactions"]`, `pageDir: pages/transactions`, summary from article `b03-11` and that article as its reading list. | `/transactions` was listed under `OperatorCases`, so the help drawer opened operator-case help on the Transactions page. A screen per page is the only way to open the Transactions help; the summary reuses the existing `b03-11` plain-words paragraph. | `admin-front/src/router/index.ts`, `design/07-guides-and-academy/guide_system_design_and_content.md` article `b03-11` |
+| OperatorCases | Removed `Transactions` from `routeNames`. | The route name belongs to the new Transactions screen. | `admin-front/src/router/index.ts` |
+
+`ContextHelpDrawer` now resolves the current path with `resolveGuideScreenForPath` (exact path, dynamic route, exact name, longest segment-aligned page-directory prefix, fallback). The prefix rule is segment-aligned, so `/operator-cases` cannot capture `/transactions`.

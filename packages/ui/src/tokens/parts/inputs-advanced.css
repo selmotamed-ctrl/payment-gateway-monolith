@@ -1,0 +1,764 @@
+/*
+ * Area overrides for inputs-advanced. Loaded after components.css.
+ *
+ * 2026 contracts:
+ * - PgAutocomplete / PgApiAutocomplete: borderless inner input, 300px panel,
+ *   36px option rows, checkbox rows for multi-select, inline async states.
+ * - PgDateInput / PgDateRangeInput: 304px calendar, 34px day cells, LTR
+ *   Sunday→Saturday weekdays, 152px preset sidebar and dual months.
+ * - PgTableFilters: a single label per filter, wrapping chips + Clear all.
+ */
+
+/* === Autocomplete ========================================================= */
+
+.pg-ac-trigger {
+  height: auto;
+  min-height: var(--pg-control-h-md);
+  padding: 4px 10px;
+  gap: 6px;
+  cursor: text;
+}
+
+.pg-control-box--sm.pg-ac-trigger {
+  min-height: var(--pg-control-h-sm);
+  padding: 2px 8px;
+}
+
+.pg-ac-trigger--readonly {
+  cursor: default;
+}
+
+.pg-ac-values {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.pg-ac-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 160px;
+  height: 22px;
+  padding: 0 4px 0 8px;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-xs);
+  background: var(--pg-bg-surface-subtle);
+  color: var(--pg-ink-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pg-ac-chip__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pg-ac-chip__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--pg-ink-muted);
+  cursor: pointer;
+}
+
+.pg-ac-chip__remove:hover {
+  background: var(--pg-bg-surface-active);
+  color: var(--pg-ink-primary);
+}
+
+.pg-ac-chip--overflow {
+  padding: 0 6px;
+  color: var(--pg-ink-muted);
+  font-weight: 600;
+}
+
+/*
+ * The search input lives inside `.pg-control-box`, which already paints the
+ * single border/focus ring. Any native border here would draw a second box.
+ */
+.pg-ac-input,
+.pg-ac-input:hover,
+.pg-ac-input:focus,
+.pg-ac-input:focus-visible,
+.pg-control-box .pg-ac-input:focus-visible {
+  flex: 1 1 80px;
+  min-width: 60px;
+  height: 100%;
+  padding: 0;
+  border: 0 !important;
+  border-radius: 0;
+  outline: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--pg-ink-primary);
+}
+
+.pg-ac-input::placeholder {
+  color: var(--pg-ink-faint);
+}
+
+.pg-ac-spinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: var(--pg-ink-muted);
+}
+
+.pg-ac-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--pg-ink-muted);
+  transition: transform 140ms ease;
+}
+
+.pg-ac-chevron--open {
+  transform: rotate(180deg);
+}
+
+.pg-ac-panel {
+  max-height: 300px;
+  min-width: 220px;
+  padding: 6px;
+  border-radius: 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.pg-ac-option {
+  min-height: 36px;
+  padding: 7px 10px;
+  gap: 10px;
+  border-radius: 7px;
+}
+
+.pg-ac-option:hover,
+.pg-ac-option--active {
+  background: var(--pg-bg-surface-hover);
+}
+
+.pg-ac-option--selected {
+  background: var(--pg-accent-brand-soft);
+  font-weight: 600;
+}
+
+.pg-ac-option--selected:hover,
+.pg-ac-option--selected.pg-ac-option--active {
+  background: var(--pg-accent-brand-soft);
+}
+
+.pg-ac-option-check {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 1.5px solid var(--pg-border-strong);
+  border-radius: 5px;
+  background: var(--pg-bg-surface);
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.pg-ac-option-check--on {
+  border-color: var(--pg-accent-primary);
+  background: var(--pg-accent-primary);
+  color: var(--pg-ink-on-accent);
+}
+
+.pg-ac-option-text {
+  gap: 1px;
+}
+
+.pg-ac-create-btn.pg-ac-create-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  margin-top: 2px;
+  padding: 7px 10px;
+  border: 1px dashed var(--pg-border-default);
+  border-radius: 7px;
+  background: var(--pg-bg-surface-subtle);
+  color: var(--pg-ink-primary);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.pg-ac-create-btn.pg-ac-create-row:hover {
+  background: var(--pg-bg-surface-hover);
+}
+
+.pg-ac-empty {
+  padding: 14px 12px;
+  text-align: center;
+}
+
+.pg-ac-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--pg-border-subtle);
+  color: var(--pg-status-danger-text);
+  font-size: 12px;
+}
+
+.pg-ac-error__message {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pg-ac-error__retry {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--pg-status-danger-border);
+  border-radius: var(--pg-radius-xs);
+  background: var(--pg-status-danger-bg);
+  color: var(--pg-status-danger-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pg-ac-load-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 34px;
+  margin-top: 2px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--pg-accent-brand);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pg-ac-load-more:hover {
+  background: var(--pg-bg-surface-hover);
+}
+
+/* === Date & range ========================================================= */
+
+.pg-date-trigger {
+  cursor: pointer;
+}
+
+.pg-date-trigger__icon {
+  color: var(--pg-ink-muted);
+}
+
+.pg-date-input,
+.pg-date-input:hover,
+.pg-date-input:focus,
+.pg-date-input:focus-visible {
+  border: 0 !important;
+  outline: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  direction: ltr;
+  font-family: var(--pg-font-mono);
+  font-variant-numeric: tabular-nums;
+  unicode-bidi: isolate;
+}
+
+.pg-date-input::placeholder {
+  color: var(--pg-ink-faint);
+}
+
+.pg-date-panel {
+  width: 304px;
+  padding: 14px;
+  border-radius: 14px;
+  overflow: visible;
+}
+
+.pg-date-panel__header {
+  margin-bottom: 10px;
+}
+
+.pg-date-panel .pg-date-nav {
+  width: 30px;
+  height: 30px;
+}
+
+.pg-date-label {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pg-cal-weekdays {
+  gap: 3px;
+  margin-bottom: 4px;
+}
+
+.pg-cal-weekday {
+  padding: 4px 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-transform: uppercase;
+  color: var(--pg-ink-muted);
+}
+
+.pg-cal-grid {
+  gap: 3px;
+  justify-items: center;
+}
+
+.pg-cal-day {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--pg-ink-primary);
+  transition:
+    background-color 100ms ease,
+    box-shadow 100ms ease;
+}
+
+.pg-cal-day:hover {
+  background: var(--pg-bg-surface-hover);
+}
+
+.pg-cal-day--outside {
+  color: var(--pg-ink-faint);
+}
+
+.pg-cal-day--today {
+  box-shadow: inset 0 0 0 1.5px var(--pg-accent-primary);
+  font-weight: 600;
+}
+
+.pg-cal-day--in-range {
+  background: var(--pg-accent-brand-soft);
+  border-radius: 0;
+}
+
+.pg-cal-day--hover-end {
+  background: var(--pg-accent-brand-soft);
+}
+
+.pg-cal-day--selected {
+  background: var(--pg-accent-primary);
+  color: var(--pg-ink-on-accent);
+  font-weight: 600;
+}
+
+.pg-cal-day--selected:hover {
+  background: var(--pg-accent-primary-hover);
+}
+
+.pg-cal-day--range-start {
+  border-start-start-radius: 8px;
+  border-end-start-radius: 8px;
+}
+
+.pg-cal-day--range-end {
+  border-start-end-radius: 8px;
+  border-end-end-radius: 8px;
+}
+
+.pg-cal-grid--months,
+.pg-cal-grid--years {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.pg-cal-month,
+.pg-cal-year {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  border: 0;
+  border-radius: var(--pg-radius-xs);
+  background: transparent;
+  color: var(--pg-ink-primary);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.pg-cal-month:hover,
+.pg-cal-year:hover {
+  background: var(--pg-bg-surface-hover);
+}
+
+.pg-cal-month--active,
+.pg-cal-year--active {
+  background: var(--pg-accent-primary);
+  color: var(--pg-ink-on-accent);
+  font-weight: 700;
+}
+
+.pg-cal-day:focus-visible,
+.pg-cal-month:focus-visible,
+.pg-cal-year:focus-visible,
+.pg-date-nav:focus-visible,
+.pg-date-label:focus-visible {
+  outline: none;
+  box-shadow: var(--pg-focus-ring);
+}
+
+.pg-date-panel__footer {
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.pg-date-presets {
+  gap: 2px;
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.pg-date-preset {
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--pg-radius-xs);
+  background: transparent;
+  color: var(--pg-ink-secondary);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: start;
+  cursor: pointer;
+}
+
+.pg-date-preset:hover {
+  background: var(--pg-bg-surface-hover);
+  color: var(--pg-ink-primary);
+}
+
+.pg-date-preset:focus-visible {
+  outline: none;
+  box-shadow: var(--pg-focus-ring);
+}
+
+/* --- Range picker --------------------------------------------------------- */
+
+.pg-date-range-panel {
+  display: flex;
+  align-items: stretch;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  padding: 0;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.pg-date-range__presets {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 152px;
+  width: 152px;
+  padding: 12px 8px;
+  border-inline-end: 1px solid var(--pg-border-subtle);
+  background: var(--pg-bg-surface-subtle);
+  overflow-y: auto;
+}
+
+.pg-date-preset--active {
+  background: var(--pg-accent-brand-soft);
+  color: var(--pg-accent-brand);
+  font-weight: 600;
+}
+
+.pg-date-range__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pg-date-range__months {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 14px;
+}
+
+.pg-date-range__month {
+  width: 304px;
+  min-width: 0;
+}
+
+.pg-date-range__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--pg-border-subtle);
+  background: var(--pg-bg-surface);
+}
+
+.pg-date-range__summary {
+  min-width: 0;
+  color: var(--pg-ink-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pg-date-range__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 767px) {
+  .pg-date-range__month[data-pg-date-month="1"] {
+    display: none;
+  }
+
+  .pg-date-range__presets {
+    flex-basis: 132px;
+    width: 132px;
+  }
+}
+
+/* === Table filters ======================================================== */
+
+.pg-table-filters__field {
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Exactly one label is rendered by TableFilters; controls never add another. */
+.pg-table-filters__field .pg-field__label {
+  display: none;
+}
+
+.pg-table-filters .pg-control-box,
+.pg-table-filters .pg-ac-trigger,
+.pg-table-filters .pg-date-trigger {
+  height: var(--pg-control-h-sm);
+  min-height: var(--pg-control-h-sm);
+}
+
+.pg-table-filters .pg-ac-trigger {
+  padding-block: 2px;
+}
+
+.pg-table-filters .pg-ac-chip {
+  height: 20px;
+  font-size: 11.5px;
+}
+
+.pg-table-filters__active {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pg-table-filters__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.pg-table-filters__clear {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.pg-filter-chip {
+  max-width: 100%;
+}
+
+.pg-filter-chip__value {
+  max-width: 32ch;
+}
+
+.pg-filter-control .pg-ac-trigger {
+  width: 100%;
+}
+
+/* Autocomplete popover: a flat, bordered list that belongs to the table/form
+ * language. No inner padding, square full-width option rows, a clear hover
+ * surface and a visible selected row. */
+.pg-ac-panel {
+    padding: 0 !important;
+    border-radius: 0 !important;
+    border: 1px solid var(--pg-border-strong) !important;
+    background: var(--pg-bg-elevated) !important;
+    box-shadow: var(--pg-shadow-popover) !important;
+    overflow-y: auto;
+}
+.pg-ac-panel .pg-ac-option {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 10px 12px !important;
+    min-height: 40px;
+    border: 0 !important;
+    border-bottom: 1px solid var(--pg-border-subtle);
+    border-radius: 0 !important;
+    background: transparent;
+    gap: 10px;
+}
+.pg-ac-panel .pg-ac-option:last-child {
+    border-bottom: 0;
+}
+.pg-ac-panel .pg-ac-option:hover,
+.pg-ac-panel .pg-ac-option--active {
+    background: color-mix(in srgb, var(--pg-ink-primary) 8%, var(--pg-bg-elevated)) !important;
+}
+.pg-ac-panel .pg-ac-option--selected {
+    background: color-mix(in srgb, var(--pg-ink-primary) 5%, var(--pg-bg-elevated)) !important;
+    font-weight: 600;
+}
+.pg-ac-panel .pg-ac-option--selected:hover,
+.pg-ac-panel .pg-ac-option--selected.pg-ac-option--active {
+    background: color-mix(in srgb, var(--pg-ink-primary) 11%, var(--pg-bg-elevated)) !important;
+}
+.pg-ac-panel .pg-ac-option__check,
+.pg-ac-panel .pg-ac-option-check {
+    border-radius: 4px;
+    flex: 0 0 auto;
+}
+.pg-ac-option-text { min-width: 0; }
+.pg-ac-option-label { overflow-wrap: anywhere; }
+.pg-ac-chip {
+    max-width: 180px;
+    min-width: 0;
+    flex: 0 1 auto;
+    padding-inline: 6px 3px;
+    gap: 3px;
+}
+.pg-ac-chip__remove {
+    width: 14px;
+    height: 14px;
+}
+.pg-ac-chip__label { min-width: 0; }
+.pg-ac-values {
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    overflow: hidden;
+}
+.pg-ac-trigger {
+    align-items: center;
+}
+.pg-control-box .pg-ac-input,
+.pg-control-box .pg-ac-input:hover,
+.pg-control-box .pg-ac-input:focus,
+.pg-control-box .pg-ac-input:focus-visible {
+    flex: 0 1 52px;
+    min-width: 32px;
+}
+[data-theme="dark"] .pg-ac-panel .pg-ac-option:hover,
+[data-theme="dark"] .pg-ac-panel .pg-ac-option--active {
+    background: var(--pg-bg-surface-active) !important;
+}
+
+/* === One monochrome focus outline for every input family =================
+ * The 2026 contract: in light mode the whole control gains a black outline,
+ * in dark mode a white one, with a 1px offset. No blue ring, no soft grey
+ * halo and no second inner outline. Error keeps the danger colour. */
+.pg-control-box:focus-within,
+.pg-control-box--focused,
+.pg-control-box--error:focus-within,
+.pg-control-box--error.pg-control-box--focused,
+.pg-otp__box:focus,
+.pg-otp__box:focus-visible,
+.pg-otp__box--focused,
+.pg-json-editor__frame:focus-within,
+.pg-input:focus,
+.pg-select:focus,
+.pg-input:focus-visible,
+.pg-select:focus-visible {
+    border-color: var(--pg-border-focus) !important;
+    box-shadow: none !important;
+    outline: 2px solid var(--pg-border-focus) !important;
+    outline-offset: 1px !important;
+}
+.pg-control-box--error:focus-within,
+.pg-control-box--error.pg-control-box--focused,
+.pg-otp__box--error:focus,
+.pg-otp--error .pg-otp__box:focus,
+.pg-json-editor__frame--invalid:focus-within {
+    border-color: var(--pg-status-danger-dot) !important;
+    outline-color: var(--pg-status-danger-dot) !important;
+}
+.pg-chk:has(.pg-chk__native:focus-visible) .pg-chk__box,
+.pg-radio:has(.pg-radio__native:focus-visible) .pg-radio__circle,
+.pg-switch:has(.pg-switch__native:focus-visible) .pg-switch__track,
+.pg-choice:focus-visible,
+.pg-dropzone:focus-visible,
+.pg-file-upload:has(.pg-file__native:focus-visible) .pg-dropzone,
+.pg-slider__native:focus-visible {
+    border-color: var(--pg-border-focus) !important;
+    box-shadow: none !important;
+    outline: 2px solid var(--pg-border-focus) !important;
+    outline-offset: 2px !important;
+}
+.pg-chk__native:focus,
+.pg-chk__native:focus-visible,
+.pg-switch__native:focus,
+.pg-switch__native:focus-visible,
+.pg-radio__native:focus,
+.pg-radio__native:focus-visible,
+.pg-file__native:focus,
+.pg-file__native:focus-visible,
+.pg-slider__native:focus,
+.pg-slider__native:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+
+/* Calendar cells and presets use the same monochrome focus, never a halo. */
+.pg-cal-day:focus-visible,
+.pg-cal-month:focus-visible,
+.pg-cal-year:focus-visible,
+.pg-date-nav:focus-visible,
+.pg-date-label:focus-visible,
+.pg-date-preset:focus-visible,
+.pg-control-clear-btn:focus-visible,
+.pg-control-action-btn:focus-visible {
+    outline: 2px solid var(--pg-border-focus) !important;
+    outline-offset: 1px !important;
+    box-shadow: none !important;
+}

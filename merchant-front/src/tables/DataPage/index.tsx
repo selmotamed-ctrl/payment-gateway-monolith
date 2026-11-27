@@ -2,9 +2,8 @@ import { dc } from "@/utils/dc";
 import { ref, watch } from "vue";
 import { DataTable } from "@/tables/DataTable";
 import type { TableHeader } from "@pg/ui";
-import {PgPage as ScreenContainer} from "@pg/ui";
+import {PgPage as ScreenContainer, PgStack} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
 import {StateView} from "@pg/ui";
 import { api } from "@/state/api";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -61,7 +60,7 @@ export const DataPage = dc(
 
         return () => (
             <ScreenContainer>
-                <ThemedView style={{ gap: "18px" }}>
+                <PgStack gap="lg">
                     <PageHeader title={props.title}><>{props.topSlot?.({ refresh: load, loading: loading.value })}</></PageHeader>
                     {props.subtitle && (
                         <div style={{ fontSize: "13px", opacity: 0.65, marginTop: "-8px" }}>{props.subtitle}</div>
@@ -80,7 +79,7 @@ export const DataPage = dc(
                             setSearchValue={(value) => (search.value = value)}
                         />
                     )}
-                </ThemedView>
+                </PgStack>
             </ScreenContainer>
         );
     },

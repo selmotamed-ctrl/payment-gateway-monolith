@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import {PgButton, PgTextField} from "@pg/ui";
+import {PgButton, PgTextField, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -173,8 +173,8 @@ const PosTerminalsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("POS Terminals")} subtitle={t("Point-of-sale terminals and payment screens.")}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("POS Terminals")} subtitle={t("Point-of-sale terminals and payment screens.")}>
                         <PgButton
                             variant="tonal"
                             onClick={() => {
@@ -185,7 +185,7 @@ const PosTerminalsPage = dc(() => {
                         >
                             {t("Create")}
                         </PgButton>
-                    )</PageHeader>
+                </PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
@@ -202,7 +202,7 @@ const PosTerminalsPage = dc(() => {
                         setSearchValue={(value) => (search.value = value)}
                     />
                 )}
-            </ThemedView>
+            </PgStack>
 
             <FormModal
                 modelValue={terminalOpen.value}

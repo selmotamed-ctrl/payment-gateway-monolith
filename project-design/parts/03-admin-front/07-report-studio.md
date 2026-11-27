@@ -63,6 +63,19 @@ The Studio page:
 - saves a draft and publishes a verified version;
 - shows the inferred roles/authorities and, for a Security Admin, the override form with a mandatory justification.
 
+### 3.1 Authoring page composition (2026-11-27)
+
+Step 1 stacks the full-width Domains autocomplete above its two transcript download buttons; it is not a
+side-by-side row that vertically centres the actions against a labelled field. Step 2 keeps the two `PgFileUpload`
+dropzones, the `JsonSpecEditor` and the Verify/Save/Publish actions in the card body. The Chrome upload card has the
+same anatomy (spec JSON, optional logo/seal bundle, editor and Verify & Save).
+
+Both cards pass `headerActions` through a **static** slot object whose value is a function:
+`v-slots={{ headerActions: () => (condition ? <X/> : null) }}`. A conditional slot object
+(`v-slots={condition ? {...} : undefined}`) compiles in Vapor without the `default` slot and renders an empty card;
+the same trap previously blanked the diagnostics, scorecard and authority cards. Governance rule UI-20 rejects the
+broken form, and `tests/e2e/admin/report-studio-render.spec.ts` asserts both upload bodies render.
+
 ## 4. Chrome registry
 
 The Chrome page lists header/footer specs with server-side pagination, search and sort through `ApiTable`, shows their type/status/supported locales and the single global default per type, and archives a header/footer instead of hard-deleting it. It creates a new version from an edited spec and sets the global default. Save/publish failures map duplicate, reference and storage/database errors to explicit API codes, render `ReportDiagnosticsPanel` when the server returns diagnostics, and invalid JSON/schema input returns 400 rather than 500. The default seed creates `cbl-institutional-header-v1` and `cbl-institutional-footer-v1`.

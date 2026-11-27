@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import {VAlert, PgButton, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgTextField} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {SurfaceCard} from "@pg/ui";
@@ -144,16 +144,16 @@ const SandboxWalletDetailPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={wallet.value?.wallet.name || t("Sandbox Wallet")} subtitle={wallet.value?.wallet.id ?? walletId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Wallets"), to: "/sandbox/wallets" }, { label: wallet.value?.wallet.name ?? walletId() }]}>(
+            <PageHeader title={wallet.value?.wallet.name || t("Sandbox Wallet")} subtitle={wallet.value?.wallet.id ?? walletId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Wallets"), to: "/sandbox/wallets" }, { label: wallet.value?.wallet.name ?? walletId() }]}>
                     <div class="d-flex flex-wrap ga-2">
                         <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => { void load(); ledgerRefresh.value?.(); }}>{t("Refresh")}</PgButton>
                         <PgButton variant="tonal" prependIcon="mdi-cash-plus" onClick={() => openAction("CREDIT")}>{t("Top up")}</PgButton>
                         <PgButton variant="tonal" prependIcon="mdi-cash-fast" onClick={() => openAction("CASHOUT")}>{t("Simulate cash-out")}</PgButton>
                         <PgButton variant="tonal" prependIcon="mdi-pause" onClick={() => openAction(wallet.value?.wallet.status === "FROZEN" ? "UNFREEZE" : "FREEZE")}>{wallet.value?.wallet.status === "FROZEN" ? t("Activate") : t("Freeze")}</PgButton>
                     </div>
-                )</PageHeader>
+            </PageHeader>
             <SandboxBanner subtitle={t("Sandbox ledger only. Balance changes post balanced journal entries.")} />
-            {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
+            {error.value ? <PgAlert tone="danger" class="mb-4">{error.value}</PgAlert> : null}
             <StateView loading={loading.value} minHeight="220px">
                 {wallet.value ? (
                     <div class="d-flex flex-column ga-4">

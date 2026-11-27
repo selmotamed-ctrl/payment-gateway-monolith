@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton} from "@pg/ui";
+import {PgAlert, PgButton} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import type { EmbeddedClientAction } from "./types";
@@ -106,9 +106,9 @@ export const EmbeddedWidgetRenderer = dc(
                 </ThemedText>
 
                 {(props.error || localError.value) && (
-                    <VAlert type="error" variant="tonal" density="compact">
+                    <PgAlert tone="danger" density="compact">
                         {props.error || localError.value}
-                    </VAlert>
+                    </PgAlert>
                 )}
 
                 {props.action.iframe_src ? (

@@ -1,0 +1,688 @@
+/* Area overrides for overlays. Loaded after components.css. */
+
+/* ==========================================================================
+ * Dialogs — strict header / scrollable body / sticky footer
+ * ======================================================================== */
+.pg-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--pg-z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--pg-bg-overlay);
+  /* No backdrop-filter: it establishes a containing block for position:fixed
+     descendants and shifted autocomplete/date panels inside dialogs by the
+     16 px backdrop padding. */
+}
+
+.pg-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 580px);
+  max-width: 100%;
+  max-height: min(86vh, 840px);
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-lg);
+  background: var(--pg-bg-elevated);
+  box-shadow: var(--pg-shadow-modal);
+  animation: pg-dialog-in 160ms ease-out;
+}
+
+.pg-dialog--sm { width: min(100%, 460px); }
+.pg-dialog--md { width: min(100%, 580px); }
+.pg-dialog--lg { width: min(100%, 760px); }
+.pg-dialog--xl { width: min(100%, 960px); }
+
+.pg-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex: 0 0 auto;
+  padding: var(--pg-space-dialog-header);
+  border-bottom: 1px solid var(--pg-border-subtle);
+  background: var(--pg-bg-elevated);
+}
+
+.pg-dialog__heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.pg-dialog__header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.pg-dialog__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--pg-ink-primary);
+  overflow-wrap: anywhere;
+}
+
+.pg-dialog__subtitle {
+  margin: 3px 0 0;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--pg-ink-muted);
+  overflow-wrap: anywhere;
+}
+
+/* 32x32 ghost close button inside the header flex row — never absolute. */
+.pg-dialog__close {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  flex: 0 0 32px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--pg-ink-muted);
+}
+
+.pg-dialog__close:hover {
+  border-color: var(--pg-border-subtle);
+  background: var(--pg-bg-surface-subtle);
+  color: var(--pg-ink-primary);
+}
+
+.pg-dialog__close:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pg-dialog__body > * {
+    flex: 0 0 auto;
+}
+.pg-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--pg-space-dialog-body);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.pg-dialog__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: var(--pg-space-dialog-footer);
+  border-top: 1px solid var(--pg-border-subtle);
+  background: var(--pg-bg-surface-subtle);
+}
+
+.pg-dialog__footer-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-inline-end: auto;
+  font-size: 12.5px;
+  color: var(--pg-ink-muted);
+}
+
+/* ==========================================================================
+ * Drawers — end-side, independent body scroll
+ * ======================================================================== */
+.pg-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--pg-z-modal);
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  padding: 0;
+  background: var(--pg-bg-overlay);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.pg-drawer-backdrop--no-scrim {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  pointer-events: none;
+}
+
+.pg-drawer-backdrop--no-scrim .pg-slideover {
+  pointer-events: auto;
+}
+
+.pg-slideover {
+  display: flex;
+  flex-direction: column;
+  width: min(100vw, 540px);
+  height: 100vh;
+  max-height: 100dvh;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  border-inline-start: 1px solid var(--pg-border-subtle);
+  background: var(--pg-bg-elevated);
+  box-shadow: var(--pg-shadow-modal);
+  animation: pg-drawer-in 200ms ease-out;
+}
+
+html[dir="rtl"] .pg-slideover {
+  animation-name: pg-drawer-in-rtl;
+}
+
+.pg-slideover--sm { width: min(100vw, 420px); }
+.pg-slideover--md { width: min(100vw, 540px); }
+.pg-slideover--lg { width: min(100vw, 680px); }
+.pg-slideover--xl { width: min(100vw, 840px); }
+
+.pg-slideover__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex: 0 0 auto;
+  padding: var(--pg-space-dialog-header);
+  border-bottom: 1px solid var(--pg-border-subtle);
+  background: var(--pg-bg-elevated);
+}
+
+.pg-slideover__heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.pg-slideover__header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.pg-slideover__eyebrow {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pg-ink-muted);
+}
+
+html[dir="rtl"] .pg-slideover__eyebrow {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.pg-slideover__title {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.pg-slideover__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pg-space-form-gap);
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--pg-space-dialog-body);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The inspector body is a flex column and a scroll container. Its children
+ * must keep their content height: without this a card with `overflow:hidden`
+ * collapses to a 2px strip and the rest of the drawer becomes unreachable. */
+.pg-slideover__body > * {
+    flex: 0 0 auto;
+}
+
+.pg-slideover__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: var(--pg-space-dialog-footer);
+  border-top: 1px solid var(--pg-border-subtle);
+  background: var(--pg-bg-surface-subtle);
+}
+
+/* ==========================================================================
+ * Command palette — centered near the top, no close X
+ * ======================================================================== */
+.pg-command-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--pg-z-modal);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-block: min(12vh, 96px) 24px;
+  padding-inline: 16px;
+  background: var(--pg-bg-overlay);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.pg-command-palette {
+  display: flex;
+  flex-direction: column;
+  width: min(680px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  max-height: 70vh;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-lg);
+  background: var(--pg-bg-elevated);
+  box-shadow: var(--pg-shadow-modal);
+  animation: pg-dialog-in 140ms ease-out;
+}
+
+.pg-command-palette__search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  height: 56px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--pg-border-subtle);
+  background: var(--pg-bg-elevated);
+}
+
+.pg-command-palette__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--pg-ink-primary);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 400;
+}
+
+.pg-command-palette__input::placeholder {
+  color: var(--pg-ink-muted);
+}
+
+.pg-command-palette__input:focus,
+.pg-command-palette__input:focus-visible {
+  border: 0;
+  outline: none;
+  box-shadow: none;
+}
+
+.pg-command-palette__results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.pg-command-palette__results [role="option"],
+.pg-command-palette__results [role="menuitem"],
+.pg-command-palette__results [data-pg-command-item] {
+  padding: 10px 12px;
+  border-radius: var(--pg-radius-sm);
+  cursor: pointer;
+}
+
+.pg-command-palette__results [role="option"]:hover,
+.pg-command-palette__results [role="menuitem"]:hover,
+.pg-command-palette__results [data-pg-command-item]:hover,
+.pg-command-palette__results .pg-command-palette__item--active {
+  background: var(--pg-bg-surface-active);
+  color: var(--pg-ink-primary);
+}
+
+.pg-command-palette__results [role="option"]:focus-visible,
+.pg-command-palette__results [role="menuitem"]:focus-visible,
+.pg-command-palette__results [data-pg-command-item]:focus-visible {
+  outline: none;
+  box-shadow: var(--pg-focus-ring);
+}
+
+.pg-command-palette__footer {
+  flex: 0 0 auto;
+  padding: 10px 20px;
+  border-top: 1px solid var(--pg-border-subtle);
+  background: var(--pg-bg-surface-subtle);
+}
+
+/* ==========================================================================
+ * Menus — fixed, viewport-aware popovers
+ * ======================================================================== */
+.pg-menu-anchor {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.pg-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pg-menu-panel {
+  position: fixed;
+  z-index: var(--pg-z-popover);
+  min-width: 180px;
+  max-width: min(420px, calc(100vw - 16px));
+  max-height: min(320px, calc(100vh - 16px));
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-md);
+  background: var(--pg-bg-elevated);
+  box-shadow: var(--pg-shadow-popover);
+  animation: pg-overlay-pop 120ms ease-out;
+}
+
+.pg-menu-panel:focus-visible {
+  outline: none;
+  box-shadow: var(--pg-focus-ring), var(--pg-shadow-popover);
+}
+
+/* ==========================================================================
+ * Tooltips — inverted high-contrast pill
+ * ======================================================================== */
+.pg-tooltip-anchor {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.pg-tooltip {
+  position: fixed;
+  z-index: var(--pg-z-tooltip);
+  width: max-content;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 6px 10px;
+  border-radius: 7px;
+  background: var(--pg-ink-primary);
+  color: var(--pg-bg-surface);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  box-shadow: var(--pg-shadow-popover);
+  pointer-events: none;
+  animation: pg-overlay-fade 140ms ease-out;
+}
+
+.pg-z-tooltip {
+  z-index: var(--pg-z-tooltip);
+}
+
+/* ==========================================================================
+ * Confirm dialog
+ * ======================================================================== */
+.pg-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.pg-confirm__hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.pg-confirm__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--pg-radius-md);
+}
+
+.pg-confirm__icon--danger {
+  background: var(--pg-status-danger-bg);
+  color: var(--pg-status-danger-text);
+  box-shadow: inset 0 0 0 1px var(--pg-status-danger-border);
+}
+
+.pg-confirm__icon--warning {
+  background: var(--pg-status-warning-bg);
+  color: var(--pg-status-warning-text);
+  box-shadow: inset 0 0 0 1px var(--pg-status-warning-border);
+}
+
+.pg-confirm__icon--info {
+  background: var(--pg-status-info-bg);
+  color: var(--pg-status-info-text);
+  box-shadow: inset 0 0 0 1px var(--pg-status-info-border);
+}
+
+.pg-confirm__icon--brand {
+  background: var(--pg-accent-brand-soft);
+  color: var(--pg-accent-brand);
+  box-shadow: inset 0 0 0 1px var(--pg-accent-brand-soft);
+}
+
+.pg-confirm__message {
+  margin: 4px 0 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--pg-ink-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pg-confirm__lock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pg-confirm__cancel,
+.pg-confirm__confirm {
+  min-width: 96px;
+}
+
+/* ==========================================================================
+ * Form modal & details
+ * ======================================================================== */
+.pg-form-modal__footer-host {
+    display: contents;
+}
+.pg-form-modal__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pg-space-form-gap);
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.pg-form-modal__submit-proxy {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.pg-details {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+.pg-details__sections {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.pg-details__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 180px;
+  color: var(--pg-ink-muted);
+  font-size: 13px;
+}
+
+.pg-details__empty {
+  margin: 0;
+  padding: 24px 0;
+  text-align: center;
+  color: var(--pg-ink-muted);
+  font-size: 13px;
+}
+
+/* ==========================================================================
+ * Motion
+ * ======================================================================== */
+@keyframes pg-overlay-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes pg-dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes pg-drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pg-drawer-in-rtl {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pg-overlay-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pg-dialog,
+  .pg-slideover,
+  .pg-command-palette,
+  .pg-menu-panel,
+  .pg-tooltip {
+    animation: none;
+  }
+}
+
+/* Small screens: dialogs/drawers keep their edges inside the viewport. */
+@media (max-width: 640px) {
+  .pg-dialog-backdrop {
+    padding: 8px;
+  }
+
+  .pg-dialog {
+    max-height: calc(100dvh - 16px);
+  }
+
+  .pg-command-backdrop {
+    padding-block-start: min(8vh, 56px);
+    padding-inline: 8px;
+  }
+
+  .pg-command-palette {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+  }
+}
+
+/* Help is a full-height inspector: it owns the viewport and sits above the app bar. */
+.guide-context-drawer {
+    position: fixed !important;
+    inset-block: 0 !important;
+    inset-inline-end: 0 !important;
+    inset-inline-start: auto !important;
+    width: min(560px, 100vw) !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    z-index: var(--pg-z-modal) !important;
+    border-inline-start: 1px solid var(--pg-border-subtle) !important;
+    border-inline-end: 0 !important;
+    box-shadow: var(--pg-shadow-modal) !important;
+}
+
+/* Bare dialog: the slot content owns the only surface (command palettes). */
+.pg-dialog--bare {
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+  animation: none;
+}
+
+.pg-dialog--bare > .pg-dialog__body {
+  gap: 0;
+  padding: 0;
+  overflow: visible;
+}

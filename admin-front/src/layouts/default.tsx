@@ -1,9 +1,9 @@
 import { dc } from "@/utils/dc";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { RouterLink, RouterView } from "vue-router/experimental/vapor";
 import { SandboxBanner } from "@/features/sandbox/SandboxBanner";
-import {VAlert, PgAppBar, PgAvatar, PgButton, PgDivider, PgIcon, PgList, PgListItem, PgListSubheader, PgMain, PgMenu, PgNavigationDrawer, PgProgressBar} from "@pg/ui";
+import {PgAlert, PgAppBar, PgAvatar, PgButton, PgDivider, PgIcon, PgList, PgListItem, PgListSubheader, PgMain, PgMenu, PgNavigationDrawer, PgProgressBar} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { useDisplay } from "@/utils/vuetify-compat";
 import LogoSvg from "@/assets/images/logo.svg";
@@ -72,10 +72,6 @@ const DefaultLayout = dc(() => {
             if (isCompact.value) {
                 drawerOpen.value = false;
             }
-            void nextTick(() => {
-                const main = document.getElementById("pg-main-content");
-                main?.focus({ preventScroll: true });
-            });
         },
     );
 
@@ -218,7 +214,11 @@ const DefaultLayout = dc(() => {
                 onClick={(event: MouseEvent) => {
                     event.preventDefault();
                     const main = document.getElementById("pg-main-content");
-                    main?.focus();
+                    const heading = main?.querySelector<HTMLElement>("h1");
+                    if (heading) {
+                        heading.tabIndex = -1;
+                        heading.focus({ preventScroll: true });
+                    }
                     main?.scrollIntoView({ block: "start" });
                 }}
             >
@@ -380,9 +380,17 @@ const DefaultLayout = dc(() => {
                     </div>
                     <div class="pg-drawer__brand-text">
                         <span class="pg-drawer__title">{t("Payment Gateway")}</span>
-                        <span class="pg-drawer__subtitle">{t("Admin Back Office")}</span>
+                        <span class="pg-drawer__meta">
+                            <span class="pg-drawer__subtitle">{t("Admin Back Office")}</span>
+                            <StatusBadge
+                                status="LAN"
+                                label="LAN"
+                                toneOverride="neutral"
+                                showDot={false}
+                                size="sm"
+                            />
+                        </span>
                     </div>
-                    <StatusBadge status="LAN" label="LAN" toneOverride="neutral" showDot={false} />
                 </div>
                 <div class="pg-drawer__search">
                     <button
@@ -484,11 +492,11 @@ const DefaultLayout = dc(() => {
             )}
             <PgMain
                 class="pg-main"
-                {...{ id: "pg-main-content", tabindex: "-1", "aria-busy": routeLoading.value ? "true" : "false" }}
+                {...{ id: "pg-main-content", "aria-busy": routeLoading.value ? "true" : "false" }}
             >
                 {communicationMaintenance.value && canConfigureCommunication.value ? (
                     <div style={{ padding: "12px 24px 0" }}>
-                        <VAlert type="warning" variant="tonal" density="compact">
+                        <PgAlert tone="warning" density="compact">
                             <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                                 <span style={{ flex: 1 }}>
                                     {t("Email delivery is not configured. Merchant registration and sign-in are in maintenance.")}
@@ -497,7 +505,7 @@ const DefaultLayout = dc(() => {
                                     {t("Configure communication")}
                                 </RouterLink>
                             </div>
-                        </VAlert>
+                        </PgAlert>
                     </div>
                 ) : null}
                 {route.meta.sandboxMirror ? (

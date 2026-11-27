@@ -57,6 +57,9 @@ test.describe("admin guide reader", () => {
     await page.goto("/guide/a/b07-02");
     const wrapper = page.locator(".guide-table-wrap").first();
     await expect(wrapper).toBeVisible();
+    // The reader is a client-rendered article; wait for the table rules before
+    // measuring (a full-suite run can otherwise sample a node mid-hydration).
+    await expect(wrapper).toHaveCSS("overflow-x", "auto");
 
     const metrics = await wrapper.evaluate((element) => {
       const cell = element.querySelector("th,td")!;

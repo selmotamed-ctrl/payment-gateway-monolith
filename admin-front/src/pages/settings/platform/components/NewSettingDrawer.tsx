@@ -1,6 +1,6 @@
 import { defineComponent } from "@/utils/dc";
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
-import {VAlert, PgButton, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import {SlideOverDrawer} from "@pg/ui";
 import {StatusBadge} from "@pg/ui";
@@ -93,9 +93,9 @@ export const NewSettingDrawer = defineComponent({
                             );
                         })}
                     </div>
-                    <VAlert type="info" variant="tonal" density="compact">
+                    <PgAlert tone="info" density="compact">
                         {t("A custom key is only a stored value. The platform will not read it until a core reader and a catalog entry exist.")}
-                    </VAlert>
+                    </PgAlert>
                     <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                         <span style={{ fontSize: "13px", fontWeight: 600 }}>{t("Advanced: custom key")}</span>
                         <div style={{ display: "flex", gap: "8px", alignItems: "flex-start", flexWrap: "wrap" }}>

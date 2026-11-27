@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
 import {SurfaceCard, SurfaceCardText} from "@pg/ui";
 import {FormField} from "@pg/ui";
 import {StatusBadge} from "@pg/ui";
@@ -336,9 +336,9 @@ export const StepClientAction = dc(
                         }}
                     >
                         {guardError.value && (
-                            <VAlert type="warning" variant="tonal" density="compact">
+                            <PgAlert tone="warning" density="compact">
                                 {guardError.value}
-                            </VAlert>
+                            </PgAlert>
                         )}
 
                         {props.model.confirmationChannels.map((channel, index) => (

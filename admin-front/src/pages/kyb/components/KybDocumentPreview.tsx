@@ -2,7 +2,7 @@ import { safePreviewMime } from "@/utils/safeBlob";
 import { dc } from "@/utils/dc";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton, PgSpinner} from "@pg/ui";
+import {PgAlert, PgButton, PgSpinner} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import { api } from "@/state/api";
@@ -97,7 +97,7 @@ const KybDocumentPreview = dc(
                         </ThemedView>
                     )}
                     {!loading.value && error.value && (
-                        <VAlert type="warning" variant="tonal">{error.value}</VAlert>
+                        <PgAlert tone="warning">{error.value}</PgAlert>
                     )}
                     {!loading.value && !error.value && objectUrl.value && kind.value === "pdf" && (
                         <iframe
@@ -116,7 +116,7 @@ const KybDocumentPreview = dc(
                         </div>
                     )}
                     {!loading.value && !error.value && objectUrl.value && kind.value === "other" && (
-                        <VAlert type="info" variant="tonal">{t("This file type cannot be rendered inline. Use Open in new tab.")}</VAlert>
+                        <PgAlert tone="info">{t("This file type cannot be rendered inline. Use Open in new tab.")}</PgAlert>
                     )}
                 </ThemedView>
             ));

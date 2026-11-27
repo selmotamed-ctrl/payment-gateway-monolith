@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import {PgButton, PgCheckbox, PgIcon, PgProgressBar, PgTextField} from "@pg/ui";
+import {PgButton, PgCheckbox, PgIcon, PgProgressBar, PgTextField, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -504,7 +504,7 @@ curl ${shellQuote(paymentEndpoint.value)} \\
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
+            <PgStack gap="lg">
                 <PageHeader
                     title={isArabic.value ? "دليل التاجر التفاعلي والمطوّر" : "Merchant Interactive User & Developer Guide"}
                     subtitle={isArabic.value ? "إجراءات المتجر والرسوم والنزاعات وواجهة API." : "Store operations, fees, disputes, and API guidance."}
@@ -689,7 +689,7 @@ ${webhookPayload.value}`}
                         </ThemedView>
                     </SurfaceCardText>
                 </SurfaceCard>
-            </ThemedView>
+            </PgStack>
 
             <FormModal
                 modelValue={chapterOpen.value}

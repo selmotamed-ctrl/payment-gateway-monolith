@@ -1910,6 +1910,14 @@
   gap: 12px;
 }
 
+.guide-context-drawer__heading {
+  min-width: 0;
+}
+
+.guide-context-drawer__close {
+  flex: 0 0 auto;
+}
+
 .guide-context-drawer__footer {
   border-bottom: 0;
   border-top: 1px solid var(--pg-border-subtle);
@@ -1981,6 +1989,14 @@
   cursor: pointer;
   font-weight: 600;
   font-size: 12.5px;
+}
+
+.guide-context-card summary > span:first-child {
+  min-width: 0;
+}
+
+.guide-context-card summary .pg-badge {
+  flex: 0 0 auto;
 }
 
 .guide-context-card__body {
@@ -2080,8 +2096,14 @@
   border-bottom: 1px solid var(--pg-border-subtle);
 }
 
+.guide-search-header > .pg-icon,
+.guide-search-header > .pg-kbd-badge {
+  flex: 0 0 auto;
+}
+
 .guide-search-input {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   border: 0;
   outline: 0;
   font: inherit;
@@ -2205,4 +2227,20 @@
   .guide-article-main {
     font-size: 15px;
   }
+}
+
+/* Context-help disclosure: a calm hover row and a little breathing room above
+ * the prose. The bottom inset already matched the drawer rhythm. */
+.guide-context-card summary {
+  transition: background-color 120ms ease;
+}
+.guide-context-card summary:hover {
+  background: var(--pg-bg-surface-hover);
+}
+.guide-context-card summary:focus-visible {
+  outline: 2px solid var(--pg-border-focus);
+  outline-offset: -2px;
+}
+.guide-context-card__body {
+  padding-block-start: 12px;
 }

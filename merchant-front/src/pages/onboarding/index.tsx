@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton, PgFileUpload, PgAutocomplete, PgTextField, PgTextarea, PgTimeline, PgTimelineItem} from "@pg/ui";
+import {PgAlert, PgButton, PgFileUpload, PgAutocomplete, PgTextField, PgTextarea, PgTimeline, PgTimelineItem, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -350,13 +350,13 @@ const OnboardingPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
+            <PgStack gap="lg">
                 <PageHeader title={t("Merchant Onboarding")} subtitle={t("Complete KYB, payout, and storefront details for activation.")}>joinStatus.value ? <StatusBadge status={joinStatus.value} toneOverride="info" /> : <></></PageHeader>
 
                 {requestedInfo.value && (
-                    <VAlert type="warning" variant="tonal" density="compact">
+                    <PgAlert tone="warning" density="compact">
                         {requestedInfo.value}
-                    </VAlert>
+                    </PgAlert>
                 )}
 
                 {revalidations.value.length > 0 && (
@@ -754,7 +754,7 @@ const OnboardingPage = dc(() => {
                         </ThemedView>
                     </>
                 )}
-            </ThemedView>
+            </PgStack>
         </ScreenContainer>
     );
 });

@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import {PgButton} from "@pg/ui";
+import {PgButton, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -496,12 +496,12 @@ const TransactionsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Transactions")} subtitle={t("Every payment attempt and provider callback across all merchants.")} badge={t("Operations")} badgeTone="info">(
+            <PgStack gap="lg">
+                <PageHeader title={t("Transactions")} subtitle={t("Every payment attempt and provider callback across all merchants.")} badge={t("Operations")} badgeTone="info">
                         <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>
                             {t("Refresh")}
                         </PgButton>
-                    )</PageHeader>
+                </PageHeader>
                 <SegmentedTabs
                     modelValue={tab.value}
                     onUpdate:modelValue={(value: string) => (tab.value = value as TabKey)}
@@ -512,7 +512,7 @@ const TransactionsPage = dc(() => {
                     ]}
                 />
                 {tab.value === "attempts" ? attemptsView() : inboundView()}
-            </ThemedView>
+            </PgStack>
 
             <MerchantTransactionDialog
                 open={attemptId.value !== null}

@@ -1,0 +1,554 @@
+{
+  "joinRequest": {
+    "id": "10be6c18-d37b-747e-8889-00000000062d",
+    "createdAt": "2026-11-15T11:25:25.000Z",
+    "updatedAt": "2026-11-27T17:14:59.886Z",
+    "merchantId": "10be6c18-d37b-747e-8889-000000000629",
+    "submittedByUserId": "10be6c18-d37b-747e-8889-00000000062a",
+    "status": "EXPIRED",
+    "onboardingChannel": "SELF_SERVICE",
+    "submittedAt": "2026-11-16T12:45:25.000Z",
+    "assignedReviewerId": "10be6c18-d37b-747e-8889-00000000000d",
+    "slaDueAt": "2026-11-21T12:45:25.000Z",
+    "screeningId": "10be6c18-d37b-747e-8889-000000029114",
+    "proposedRiskTier": "HIGH",
+    "fourEyesRequired": true,
+    "fourEyesReasons": [
+      "HIGH_RISK"
+    ],
+    "decision": null,
+    "decisionReasonCode": null,
+    "decisionNotes": null,
+    "infoRequestJson": null,
+    "profileJson": {
+      "taxId": "TEST-0001",
+      "country": "LY",
+      "currency": "LYD",
+      "legalName": "Test Merchant",
+      "tradeName": "Test Merchant",
+      "websiteUrl": "https://merchant.example.test",
+      "contactEmail": "test@example.test",
+      "contactPhone": "+218910000000",
+      "payoutAccount": "LY000000000000000000000000",
+      "businessCategory": "PHARMACY",
+      "registeredAddress": "Tripoli, Libya",
+      "registrationNumber": "TEST-0001",
+      "expectedMonthlyVolume": "33750.0000",
+      "businessUseDescription": "Test merchant selling goods online."
+    },
+    "reviewChecklistJson": {
+      "Identity Verified": true,
+      "Risk Tier Assigned": false,
+      "Screening Result Reviewed": true,
+      "Business Existence Verified": true,
+      "Beneficial Owners Identified": true,
+      "Category And Volume Consistent": false,
+      "Payout Account Ownership Verified": false
+    },
+    "duplicateFlagsJson": [],
+    "slaPausedAt": null,
+    "slaRemainingSeconds": null,
+    "lastScreenedAt": "2026-11-16T12:53:25.000Z",
+    "resubmissionOfId": null,
+    "approvalRequestId": null,
+    "merchant": {
+      "id": "10be6c18-d37b-747e-8889-000000000629",
+      "version": 1,
+      "createdAt": "2026-11-15T11:25:25.000Z",
+      "updatedAt": "2026-11-16T12:45:25.000Z",
+      "legalName": "Test Merchant",
+      "tradeName": "Test Merchant",
+      "displayName": "Test Merchant",
+      "logoUrl": null,
+      "supportEmail": "test@example.test",
+      "supportPhone": "+218910000000",
+      "taxId": "TEST-0001",
+      "registrationNo": "TEST-0001",
+      "businessCategory": "Pharmacies",
+      "status": "PENDING",
+      "kybStatus": "PENDING",
+      "riskTier": "HIGH",
+      "onboardingChannel": "SELF_SERVICE",
+      "country": "LY",
+      "contactPhone": "+218910000000",
+      "contactEmail": "test@example.test",
+      "activatedAt": null,
+      "suspendedAt": null,
+      "suspensionReasonCode": null,
+      "suspensionNotes": null,
+      "closedAt": null,
+      "closedReasonCode": null,
+      "closedNotes": null,
+      "commissionReceivableCeiling": null,
+      "negativeBalanceCeiling": "0",
+      "payoutBankDetailsJson": {
+        "bank": "Jumhouria Bank",
+        "holder": "Test Merchant",
+        "account": "LY000000000000000000000000",
+        "address": "Tripoli, Libya"
+      },
+      "payoutAccountHash": "7130bbec30bc1a51f34c4b518936760196cb0fa5ded7db85123fa167bb7baf1d",
+      "nextKybReviewAt": null,
+      "wallets": [
+        {
+          "id": "10be6c18-d37b-747e-8889-00000000063b",
+          "createdAt": "2026-11-15T11:25:25.000Z",
+          "updatedAt": "2026-11-15T11:25:25.000Z",
+          "merchantId": "10be6c18-d37b-747e-8889-000000000629",
+          "glAccountId": "LY000000000000000000000000",
+          "currency": "LYD",
+          "name": null,
+          "status": "PENDING"
+        }
+      ]
+    },
+    "submittedBy": {
+      "id": "10be6c18-d37b-747e-8889-00000000062a",
+      "email": "test@example.test"
+    },
+    "assignedReviewer": {
+      "id": "10be6c18-d37b-747e-8889-00000000000d",
+      "email": "test@example.test"
+    },
+    "approvalRequest": null,
+    "screening": {
+      "id": "10be6c18-d37b-747e-8889-000000029114",
+      "createdAt": "2026-11-16T12:53:25.000Z",
+      "updatedAt": "2026-11-16T12:53:25.000Z",
+      "subjectType": "MERCHANT",
+      "subjectId": "10be6c18-d37b-747e-8889-000000000629",
+      "trigger": "ONBOARDING",
+      "providerCode": "INTERNAL_WATCHLIST",
+      "providerRequestRef": "scr-8aa44298fff2",
+      "listVersionsJson": {
+        "pep": "v2026.10",
+        "sanctions": "v2026.10",
+        "adverse_media": "v2026.09"
+      },
+      "inputHash": "30796983d6625991a70ffb42159b8d4416ab7152f0fbd2f6fcf98f40a88ab162",
+      "result": "CLEAR",
+      "matchCount": 0,
+      "highestScore": null,
+      "requestedAt": "2026-11-16T12:53:25.000Z",
+      "completedAt": "2026-11-16T12:55:25.000Z",
+      "matches": [],
+      "amlCases": []
+    },
+    "kybDocuments": [
+      {
+        "id": "10be6c18-d37b-747e-8889-00000000062f",
+        "createdAt": "2026-11-18T09:11:51.075Z",
+        "updatedAt": "2026-11-27T17:17:13.466Z",
+        "merchantId": "10be6c18-d37b-747e-8889-000000000629",
+        "joinRequestId": "10be6c18-d37b-747e-8889-00000000062d",
+        "subjectType": "MERCHANT",
+        "subjectId": "10be6c18-d37b-747e-8889-000000000629",
+        "docType": "COMMERCIAL_REGISTRY",
+        "originalFileName": "document.pdf",
+        "sha256": "24003c24e9f0a5b22c5d347c2645d9ee98d74f83b7ee50614a08a45277b8811a",
+        "mime": "application/pdf",
+        "sizeBytes": 2947436,
+        "avStatus": "CLEAN",
+        "status": "UPLOADED",
+        "reviewedById": null,
+        "uploadedBy": {
+          "id": "10be6c18-d37b-747e-8889-00000000062a",
+          "email": "test@example.test"
+        },
+        "reviewedBy": null,
+        "reviewedAt": null,
+        "expiresOn": null,
+        "rejectionReasonCode": null,
+        "reviewNotes": null,
+        "duplicateJustification": null,
+        "statusChangedAt": null,
+        "expiredAt": null
+      },
+      {
+        "id": "10be6c18-d37b-747e-8889-000000000637",
+        "createdAt": "2026-11-17T08:21:52.617Z",
+        "updatedAt": "2026-11-27T17:17:13.690Z",
+        "merchantId": "10be6c18-d37b-747e-8889-000000000629",
+        "joinRequestId": "10be6c18-d37b-747e-8889-00000000062d",
+        "subjectType": "MERCHANT",
+        "subjectId": "10be6c18-d37b-747e-8889-000000000629",
+        "docType": "OTHER",
+        "originalFileName": "document.pdf",
+        "sha256": "23a73de8ff6edac6888815367660a7f7419c000f66123a6c3adba01244e8fc0e",
+        "mime": "application/pdf",
+        "sizeBytes": 1414374,
+        "avStatus": "CLEAN",
+        "status": "REJECTED",
+        "reviewedById": "10be6c18-d37b-747e-8889-000000000015",
+        "uploadedBy": {
+          "id": "10be6c18-d37b-747e-8889-00000000062a",
+          "email": "test@example.test"
+        },
+        "reviewedBy": {
+          "id": "10be6c18-d37b-747e-8889-000000000015",
+          "email": "test@example.test"
+        },
+        "reviewedAt": "2026-11-18T10:03:28.570Z",
+        "expiresOn": null,
+        "rejectionReasonCode": "BLURRY_OR_EXPIRED",
+        "reviewNotes": "The scan is not readable; request a fresh copy.",
+        "duplicateJustification": null,
+        "statusChangedAt": "2026-11-18T10:03:28.570Z",
+        "expiredAt": null
+      },
+      {
+        "id": "10be6c18-d37b-747e-8889-000000000632",
+        "createdAt": "2026-11-16T22:01:34.468Z",
+        "updatedAt": "2026-11-27T17:17:13.548Z",
+        "merchantId": "10be6c18-d37b-747e-8889-000000000629",
+        "joinRequestId": "10be6c18-d37b-747e-8889-00000000062d",
+        "subjectType": "MERCHANT",
+        "subjectId": "10be6c18-d37b-747e-8889-000000000629",
+        "docType": "PROOF_OF_ADDRESS",
+        "originalFileName": "document.pdf",
+        "sha256": "dd8b91f4c59efb3a5d53c8fa3ccb60aebfe96446d75634e32413ddd8fff62a44",
+        "mime": "application/pdf",
+        "sizeBytes": 1473196,
+        "avStatus": "CLEAN",
+        "status": "ACCEPTED",
+        "reviewedById": "10be6c18-d37b-747e-8889-000000000015",
+        "uploadedBy": {
+          "id": "10be6c18-d37b-747e-8889-00000000062a",
+          "email": "test@example.test"
+        },
+        "reviewedBy": {
+          "id": "10be6c18-d37b-747e-8889-000000000015",
+          "email": "test@example.test"
+        },
+        "reviewedAt": "2026-11-16T23:32:47.149Z",
+        "expiresOn": null,
+        "rejectionReasonCode": null,
+        "reviewNotes": null,
+        "duplicateJustification": null,
+        "statusChangedAt": "2026-11-16T23:32:47.149Z",
+        "expiredAt": null
+      },
+      {
+        "id": "10be6c18-d37b-747e-8889-000000000634",
+        "createdAt": "2026-11-16T17:20:16.986Z",
+        "updatedAt": "2026-11-27T17:17:13.604Z",
+        "merchantId": "10be6c18-d37b-747e-8889-000000000629",
+        "joinRequestId": "10be6c18-d37b-747e-8889-00000000062d",
+        "subjectType": "MERCHANT",
+        "subjectId": "10be6c18-d37b-747e-8889-000000000629",
+        "docType": "SIGNATORY_ID",
+        "originalFileName": "document.pdf",
+        "sha256": "b47da3b8e0cd568dc71c311433e9e065bfb6f12083d5ac4244b7f4347fd35de0",
+        "mime": "application/pdf",
+        "sizeBytes": 968056,
+        "avStatus": "CLEAN",
+        "status": "ACCEPTED",
+        "reviewedById": "10be6c18-d37b-747e-8889-000000000011",
+        "uploadedBy": {
+          "id": "10be6c18-d37b-747e-8889-00000000062a",
+          "email": "test@example.test"
+        },
+        "reviewedBy": {
+          "id": "10be6c18-d37b-747e-8889-000000000011",
+          "email": "test@example.test"
+        },
+        "reviewedAt": "2026-11-17T23:58:06.362Z",
+        "expiresOn": null,
+        "rejectionReasonCode": null,
+        "reviewNotes": null,
+        "duplicateJustification": null,
+        "statusChangedAt": "2026-11-17T23:58:06.362Z",
+        "expiredAt": null
+      },
+      {
+        "id": "10be6c18-d37b-747e-8889-000000000631",
+        "createdAt": "2026-11-16T13:16:23.023Z",
+        "updatedAt": "2026-11-27T17:17:13.520Z",
+        "merchantId": "10be6c18-d37b-747e-8889-000000000629",
+        "joinRequestId": "10be6c18-d37b-747e-8889-00000000062d",
+        "subjectType": "MERCHANT",
+        "subjectId": "10be6c18-d37b-747e-8889-000000000629",
+        "docType": "BANK_LETTER",
+        "originalFileName": "document.pdf",
+        "sha256": "25af64427a1d23ceff6745268e3f5ac3c980357630e6b347ad509e296997f361",
+        "mime": "application/pdf",
+        "sizeBytes": 3334787,
+        "avStatus": "CLEAN",
+        "status": "UPLOADED",
+        "reviewedById": null,
+        "uploadedBy": {
+          "id": "10be6c18-d37b-747e-8889-00000000062a",
+          "email": "test@example.test"
+        },
+        "reviewedBy": null,
+        "reviewedAt": null,
+        "expiresOn": null,
+        "rejectionReasonCode": null,
+        "reviewNotes": null,
+        "duplicateJustification": null,
+        "statusChangedAt": null,
+        "expiredAt": null
+      },
+      {
+        "id": "10be6c18-d37b-747e-8889-000000000633",
+        "createdAt": "2026-11-16T12:31:21.695Z",
+        "updatedAt": "2026-11-27T17:17:13.575Z",
+        "merchantId": "10be6c18-d37b-747e-8889-000000000629",
+        "joinRequestId": "10be6c18-d37b-747e-8889-00000000062d",
+        "subjectType": "MERCHANT",
+        "subjectId": "10be6c18-d37b-747e-8889-000000000629",
+        "docType": "ARTICLES_OF_ASSOCIATION",
+        "originalFileName": "document.pdf",
+        "sha256": "4725007248ab752fcfed89c3a3b212182d72dba95cf9155ade3be554e2cfaaa0",
+        "mime": "application/pdf",
+        "sizeBytes": 1881332,
+        "avStatus": "CLEAN",
+        "status": "UPLOADED",
+        "reviewedById": null,
+        "uploadedBy": {
+          "id": "10be6c18-d37b-747e-8889-00000000062a",
+          "email": "test@example.test"
+        },
+        "reviewedBy": null,
+        "reviewedAt": null,
+        "expiresOn": null,
+        "rejectionReasonCode": null,
+        "reviewNotes": null,
+        "duplicateJustification": null,
+        "statusChangedAt": null,
+        "expiredAt": null
+      },
+      {
+        "id": "10be6c18-d37b-747e-8889-00000000062e",
+        "createdAt": "2026-11-16T05:48:44.895Z",
+        "updatedAt": "2026-11-27T17:17:13.439Z",
+        "merchantId": "10be6c18-d37b-747e-8889-000000000629",
+        "joinRequestId": "10be6c18-d37b-747e-8889-00000000062d",
+        "subjectType": "MERCHANT",
+        "subjectId": "10be6c18-d37b-747e-8889-000000000629",
+        "docType": "COMMERCIAL_REGISTRY",
+        "originalFileName": "document.pdf",
+        "sha256": "3ac2218fcf804522087f29775b3aa037af126f463cae880043c2e442fa63b1cd",
+        "mime": "application/pdf",
+        "sizeBytes": 1182215,
+        "avStatus": "CLEAN",
+        "status": "EXPIRED",
+        "reviewedById": "10be6c18-d37b-747e-8889-00000000000b",
+        "uploadedBy": {
+          "id": "10be6c18-d37b-747e-8889-00000000062a",
+          "email": "test@example.test"
+        },
+        "reviewedBy": {
+          "id": "10be6c18-d37b-747e-8889-00000000000b",
+          "email": "test@example.test"
+        },
+        "reviewedAt": "2026-11-16T07:53:20.179Z",
+        "expiresOn": "2026-11-17T00:00:00.000Z",
+        "rejectionReasonCode": null,
+        "reviewNotes": null,
+        "duplicateJustification": null,
+        "statusChangedAt": "2026-11-17T00:56:45.061Z",
+        "expiredAt": "2026-11-17T00:56:45.061Z"
+      },
+      {
+        "id": "10be6c18-d37b-747e-8889-000000000636",
+        "createdAt": "2026-11-15T23:24:08.151Z",
+        "updatedAt": "2026-11-27T17:17:13.661Z",
+        "merchantId": "10be6c18-d37b-747e-8889-000000000629",
+        "joinRequestId": "10be6c18-d37b-747e-8889-00000000062d",
+        "subjectType": "MERCHANT",
+        "subjectId": "10be6c18-d37b-747e-8889-000000000629",
+        "docType": "OWNER_ID",
+        "originalFileName": "document.pdf",
+        "sha256": "4f9f6c68bc782a576870473e7732a4b5a783ba1c64457857aa8beb613a0b2bd5",
+        "mime": "application/pdf",
+        "sizeBytes": 409164,
+        "avStatus": "CLEAN",
+        "status": "REJECTED",
+        "reviewedById": "10be6c18-d37b-747e-8889-00000000000d",
+        "uploadedBy": {
+          "id": "10be6c18-d37b-747e-8889-00000000062a",
+          "email": "test@example.test"
+        },
+        "reviewedBy": {
+          "id": "10be6c18-d37b-747e-8889-00000000000d",
+          "email": "test@example.test"
+        },
+        "reviewedAt": "2026-11-16T01:44:37.424Z",
+        "expiresOn": null,
+        "rejectionReasonCode": "BLURRY_OR_EXPIRED",
+        "reviewNotes": "The scan is not readable; request a fresh copy.",
+        "duplicateJustification": null,
+        "statusChangedAt": "2026-11-16T01:44:37.424Z",
+        "expiredAt": null
+      },
+      {
+        "id": "10be6c18-d37b-747e-8889-000000000630",
+        "createdAt": "2026-11-15T20:40:59.417Z",
+        "updatedAt": "2026-11-27T17:17:13.492Z",
+        "merchantId": "10be6c18-d37b-747e-8889-000000000629",
+        "joinRequestId": "10be6c18-d37b-747e-8889-00000000062d",
+        "subjectType": "MERCHANT",
+        "subjectId": "10be6c18-d37b-747e-8889-000000000629",
+        "docType": "TAX_CERTIFICATE",
+        "originalFileName": "document.pdf",
+        "sha256": "13621294faf5757e2dd332c53beb124a5d313ad06574e7e0c178d6836cde18b4",
+        "mime": "application/pdf",
+        "sizeBytes": 1554302,
+        "avStatus": "CLEAN",
+        "status": "UPLOADED",
+        "reviewedById": null,
+        "uploadedBy": {
+          "id": "10be6c18-d37b-747e-8889-00000000062a",
+          "email": "test@example.test"
+        },
+        "reviewedBy": null,
+        "reviewedAt": null,
+        "expiresOn": null,
+        "rejectionReasonCode": null,
+        "reviewNotes": null,
+        "duplicateJustification": null,
+        "statusChangedAt": null,
+        "expiredAt": null
+      },
+      {
+        "id": "10be6c18-d37b-747e-8889-000000000635",
+        "createdAt": "2026-11-15T18:03:10.413Z",
+        "updatedAt": "2026-11-27T17:17:13.632Z",
+        "merchantId": "10be6c18-d37b-747e-8889-000000000629",
+        "joinRequestId": "10be6c18-d37b-747e-8889-00000000062d",
+        "subjectType": "MERCHANT",
+        "subjectId": "10be6c18-d37b-747e-8889-000000000629",
+        "docType": "SECTOR_LICENSE",
+        "originalFileName": "document.pdf",
+        "sha256": "1caace67d078eb0580bb0431cc923160b01ab68dc2274bb43e46d9921ff0fcc8",
+        "mime": "application/pdf",
+        "sizeBytes": 1616132,
+        "avStatus": "CLEAN",
+        "status": "ACCEPTED",
+        "reviewedById": "10be6c18-d37b-747e-8889-000000000013",
+        "uploadedBy": {
+          "id": "10be6c18-d37b-747e-8889-00000000062a",
+          "email": "test@example.test"
+        },
+        "reviewedBy": {
+          "id": "10be6c18-d37b-747e-8889-000000000013",
+          "email": "test@example.test"
+        },
+        "reviewedAt": "2026-11-16T13:59:43.831Z",
+        "expiresOn": "2027-08-05T00:00:00.000Z",
+        "rejectionReasonCode": null,
+        "reviewNotes": null,
+        "duplicateJustification": null,
+        "statusChangedAt": "2026-11-16T13:59:43.831Z",
+        "expiredAt": null
+      }
+    ],
+    "beneficialOwners": [
+      {
+        "id": "10be6c18-d37b-747e-8889-000000000638",
+        "createdAt": "2026-11-15T11:25:25.000Z",
+        "updatedAt": "2026-11-15T11:25:25.000Z",
+        "merchantId": "10be6c18-d37b-747e-8889-000000000629",
+        "fullNameAr": "Test Merchant",
+        "fullNameEn": "Test Merchant",
+        "nationalIdCiphertext": "kyb-national-id:TO9vmLT6cAuhVlq6:m1uyg8Km/ncsZsgKefnz5A==:m/X2fiPQ/FP0+Zrx",
+        "nationalIdHash": "0ecea3b6c9959522d1037c329ac39518a0f9f77b63011ae765bfc8fa2cc06418",
+        "dateOfBirth": "1985-06-22T00:00:00.000Z",
+        "nationality": "AE",
+        "ownershipPercent": "72",
+        "role": "OWNER",
+        "pepDeclared": false,
+        "screeningStatus": "CLEAR",
+        "active": true,
+        "validFrom": "2026-11-15T11:25:25.000Z",
+        "validTo": null
+      },
+      {
+        "id": "10be6c18-d37b-747e-8889-000000000639",
+        "createdAt": "2026-11-15T11:25:25.000Z",
+        "updatedAt": "2026-11-15T11:25:25.000Z",
+        "merchantId": "10be6c18-d37b-747e-8889-000000000629",
+        "fullNameAr": "Test Merchant",
+        "fullNameEn": "Test Merchant",
+        "nationalIdCiphertext": "kyb-national-id:fY8kG2LiqsrCZe9Q:WbnT8LoOHldFjfzLtKickg==:dIra3f0vHysaApkT",
+        "nationalIdHash": "d76697543a00345059a48e812f78c9d9a31e1cbea66d52719ba7285661bb974c",
+        "dateOfBirth": "1961-04-14T00:00:00.000Z",
+        "nationality": "LY",
+        "ownershipPercent": "28",
+        "role": "OWNER",
+        "pepDeclared": false,
+        "screeningStatus": "CLEAR",
+        "active": true,
+        "validFrom": "2026-11-15T11:25:25.000Z",
+        "validTo": null
+      }
+    ],
+    "readiness": {
+      "ready": false,
+      "blockers": [
+        "MISSING_REQUIRED_DOCUMENTS",
+        "EXPIRED_REQUIRED_DOCUMENTS",
+        "REVIEW_CHECKLIST_INCOMPLETE"
+      ],
+      "checklistComplete": false,
+      "requiredDocuments": [
+        "COMMERCIAL_REGISTRY",
+        "TAX_CERTIFICATE",
+        "BANK_LETTER",
+        "PROOF_OF_ADDRESS"
+      ],
+      "acceptedDocuments": [
+        "PROOF_OF_ADDRESS",
+        "SECTOR_LICENSE",
+        "SIGNATORY_ID"
+      ],
+      "missingDocuments": [
+        "COMMERCIAL_REGISTRY",
+        "TAX_CERTIFICATE",
+        "BANK_LETTER"
+      ],
+      "expiredDocuments": [
+        "10be6c18-d37b-747e-8889-00000000062e"
+      ],
+      "ownersTotal": 100,
+      "ownerThreshold": 25,
+      "ownersReady": true,
+      "screeningResult": "CLEAR",
+      "screeningBlocked": false,
+      "duplicateFlags": [],
+      "approvalPending": false,
+      "payoutBankReady": true
+    },
+    "auditTrail": [
+      {
+        "id": "01a21e00-d1d3-7e64-8731-4c87a37bdab7",
+        "createdAt": "2026-11-27T17:14:59.923Z",
+        "action": "JOIN_REQUEST_EXPIRED",
+        "role": "SYSTEM",
+        "beforeJson": {
+          "status": "IN_REVIEW"
+        },
+        "afterJson": {
+          "reason": "REVIEW_OVERDUE",
+          "status": "EXPIRED"
+        },
+        "approvalRequestId": null,
+        "actor": {
+          "id": "01a21e00-6f2b-71a9-aae0-a585f202b1e5",
+          "email": "test@example.test"
+        }
+      }
+    ],
+    "checklistKeys": [
+      "Identity Verified",
+      "Business Existence Verified",
+      "Beneficial Owners Identified",
+      "Screening Result Reviewed",
+      "Category And Volume Consistent",
+      "Payout Account Ownership Verified",
+      "Risk Tier Assigned"
+    ],
+    "amlDetailsRedacted": false
+  }
+}

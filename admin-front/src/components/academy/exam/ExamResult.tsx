@@ -189,7 +189,9 @@ export const ExamResult = dc((props: Props) => {
         const r = props.result;
         const modules = Object.entries(r.moduleScores);
         const tone = r.passed ? "pass" : "fail";
-        const emptyText = filter.value === "incorrect" ? t("You answered every question correctly.") : t("No questions in this view.");
+        const emptyText = computed(() =>
+        filter.value === "incorrect" ? t("You answered every question correctly.") : t("No questions in this view."),
+    );
         return (
             <div class="ac-exam-result">
                 <div class={["ac-exam-verdict", `ac-exam-verdict--${tone}`]} role="status" aria-live="polite">
@@ -244,7 +246,7 @@ export const ExamResult = dc((props: Props) => {
                         </div>
                         {visible.value.length === 0 ? (
                             <SurfaceCard class="ac-card">
-                                <EmptyState icon="mdi-check-circle-outline" title={emptyText} />
+                                <EmptyState icon="mdi-check-circle-outline" title={emptyText.value} />
                             </SurfaceCard>
                         ) : (
                             <ol class="ac-stack ac-exam-rev__list">{visible.value.map(({ item, index }) => renderItem(item, index))}</ol>

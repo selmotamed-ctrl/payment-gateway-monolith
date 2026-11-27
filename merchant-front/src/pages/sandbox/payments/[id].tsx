@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import {VAlert, PgButton, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgTextField} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {SurfaceCard} from "@pg/ui";
@@ -138,15 +138,15 @@ const SandboxPaymentDetailPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={t("Sandbox Payment")} subtitle={detail.value?.attempt.reference ?? attemptId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Payments"), to: "/sandbox/payments" }, { label: detail.value?.attempt.reference ?? attemptId() }]}>(
+            <PageHeader title={t("Sandbox Payment")} subtitle={detail.value?.attempt.reference ?? attemptId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Payments"), to: "/sandbox/payments" }, { label: detail.value?.attempt.reference ?? attemptId() }]}>
                     <div class="d-flex flex-wrap ga-2">
                         <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</PgButton>
                         <PgButton variant="tonal" prependIcon="mdi-cash-refund" onClick={() => { refundAmount.value = ""; refundReason.value = ""; refundOpen.value = true; }}>{t("Refund")}</PgButton>
                         <PgButton variant="tonal" color="warning" loading={busy.value === t("Sandbox dispute created")} disabled={detail.value?.attempt.status !== "SUCCEEDED"} onClick={() => void action(t("Sandbox dispute created"), `/payments/${detail.value?.attempt.id}/simulate-dispute`)}>{t("Simulate dispute")}</PgButton>
                     </div>
-                )</PageHeader>
+            </PageHeader>
             <SandboxBanner subtitle={t("Refunds and disputes post to the sandbox ledger and governance queues only.")} />
-            {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
+            {error.value ? <PgAlert tone="danger" class="mb-4">{error.value}</PgAlert> : null}
             <StateView loading={loading.value} minHeight="220px">
                 {detail.value ? (
                     <div class="d-flex flex-column ga-4">

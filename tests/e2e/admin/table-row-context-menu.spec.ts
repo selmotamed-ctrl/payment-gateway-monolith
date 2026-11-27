@@ -52,12 +52,12 @@ const actionCell = (page: import("@playwright/test").Page) =>
     page.locator("tbody .pg-col-actions").first();
 
 const openContextMenu = async (page: import("@playwright/test").Page, rowIndex = 0) => {
-    const row = page.locator("tbody tr").nth(rowIndex);
+    const row = page.locator("tbody tr:not(.pg-table-empty-row):not(.pg-table-skeleton-row)").nth(rowIndex);
     await expect(row).toBeVisible();
     await expect(row.getByRole("button", { name: "Row actions" })).toBeVisible();
     await row.locator("td").nth(2).click({ button: "right" });
     // Wait for the *active* menu: the previous one may still be in its close transition.
-    const menu = page.locator('.v-menu.v-overlay--active [role="menu"][aria-label="Row actions"]').last();
+    const menu = page.locator('.pg-row-actions__panel[role="menu"][aria-label="Row actions"]').last();
     await expect(menu).toBeVisible();
     return menu;
 };
@@ -112,13 +112,13 @@ test("right-click opens the row actions at the pointer and runs them", async ({ 
 test("the right-click menu opens at the pointer, not at the top-left of the page", async ({ page }) => {
     await page.goto("/merchants");
     for (const rowIndex of [0, 1]) {
-        const cell = page.locator("tbody tr").nth(rowIndex).locator("td").nth(2);
+        const cell = page.locator("tbody tr:not(.pg-table-empty-row):not(.pg-table-skeleton-row)").nth(rowIndex).locator("td").nth(2);
         await expect(cell).toBeVisible();
         await cell.scrollIntoViewIfNeeded(); // the click scrolls the row into view: measure where it will actually be
         const box = (await cell.boundingBox())!;
         const click = { x: box.x + 24, y: box.y + 8 };
         await cell.click({ button: "right", position: { x: 24, y: 8 } });
-        const menu = page.locator('.v-menu.v-overlay--active [role="menu"][aria-label="Row actions"]').last();
+        const menu = page.locator('.pg-row-actions__panel[role="menu"][aria-label="Row actions"]').last();
         await expect(menu).toBeVisible();
         // Vuetify animates the overlay in and may flip it near an edge: wait for it to settle, then compare.
         await page.waitForTimeout(350);
@@ -132,7 +132,7 @@ test("the right-click menu opens at the pointer, not at the top-left of the page
         expect(nearY, `menu y (${rect.y}) is next to the pointer y (${click.y}) for row ${rowIndex}`).toBeLessThan(24);
         expect(rect.x + rect.width, "menu stays inside the viewport").toBeLessThanOrEqual(viewport.width + 1);
         await page.keyboard.press("Escape");
-        await expect(page.locator('.v-menu.v-overlay--active [role="menu"][aria-label="Row actions"]')).toHaveCount(0);
+        await expect(page.locator('.pg-row-actions__panel[role="menu"][aria-label="Row actions"]')).toHaveCount(0);
     }
 });
 
@@ -142,12 +142,12 @@ test("only one row menu is open at a time", async ({ page }) => {
     await expect(page.getByRole("menu", { name: "Row actions" })).toHaveCount(1);
 
     await openContextMenu(page, 1);
-    await expect(page.locator('.v-menu.v-overlay--active [role="menu"][aria-label="Row actions"]')).toHaveCount(1);
+    await expect(page.locator('.pg-row-actions__panel[role="menu"][aria-label="Row actions"]')).toHaveCount(1);
 });
 
 test("Shift+F10 opens the row actions and Escape closes them", async ({ page }) => {
     await page.goto("/merchants");
-    const trigger = page.locator("tbody tr").first().getByRole("button", { name: "Row actions" });
+    const trigger = page.locator("tbody tr:not(.pg-table-empty-row):not(.pg-table-skeleton-row)").first().getByRole("button", { name: "Row actions" });
     await trigger.focus();
     await page.keyboard.press("Shift+F10");
 
@@ -161,7 +161,7 @@ test("Shift+F10 opens the row actions and Escape closes them", async ({ page }) 
 
 test("a right-click on a link keeps the native context menu", async ({ page }) => {
     await page.goto("/merchants");
-    const row = page.locator("tbody tr").first();
+    const row = page.locator("tbody tr:not(.pg-table-empty-row):not(.pg-table-skeleton-row)").first();
     await expect(row).toBeVisible();
 
     const prevented = await row.evaluate((element) => {
@@ -197,7 +197,7 @@ test("the sticky action column flips in RTL and the context menu is translated",
     expect(cellBox).not.toBeNull();
     expect(cellBox!.x, "action cell is pinned to the left in RTL").toBeLessThanOrEqual(wrapperBox!.x + 1);
 
-    const row = page.locator("tbody tr").first();
+    const row = page.locator("tbody tr:not(.pg-table-empty-row):not(.pg-table-skeleton-row)").first();
     await expect(row.locator(".pg-col-actions button[aria-haspopup='menu']").first()).toBeVisible();
     await row.locator("td").nth(2).click({ button: "right" });
     const menu = page.getByRole("menu", { name: "إجراءات الصف" });

@@ -50,6 +50,21 @@ describe("governance audit", () => {
         expect(violations.map((violation) => violation.rule.slice(0, 5))).toEqual(["UI-08", "UI-09"]);
     });
 
+    it("flags conditional v-slots expressions that drop the default slot", () => {
+        const bad = scanSource({
+            file: "admin-front/src/pages/a.tsx",
+            isPage: true,
+            source: `<PgCard v-slots={cond ? { headerActions: () => null } : undefined}>Body</PgCard>`,
+        });
+        expect(bad.map((violation) => violation.rule.slice(0, 5))).toEqual(["UI-20"]);
+        const good = scanSource({
+            file: "admin-front/src/pages/a.tsx",
+            isPage: true,
+            source: `<PgCard v-slots={{ headerActions: () => (cond ? null : null) }}>Body</PgCard>`,
+        });
+        expect(good).toHaveLength(0);
+    });
+
     it("flags a primitive directory shared by two portals", () => {
         const violations = findDuplicatedComponentDirs(
             [

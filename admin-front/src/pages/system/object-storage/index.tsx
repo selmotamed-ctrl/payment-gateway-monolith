@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import {VAlert, PgButton, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgTextarea, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -585,8 +585,8 @@ const ObjectStoragePage = dc(() => {
 
   return (): JSX.Element => (
     <ScreenContainer>
-      <ThemedView style={{ gap: "18px" }}>
-        <PageHeader title={t("Object & Asset Storage")} subtitle={t("Shared encrypted vault, quarantine, record locks, retention and legal holds across every core node.")}>(
+    <PgStack gap="lg">
+        <PageHeader title={t("Object & Asset Storage")} subtitle={t("Shared encrypted vault, quarantine, record locks, retention and legal holds across every core node.")}>
             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
               <StatusBadge status="info" label={`${summary.value?.totalObjects ?? 0} ${t("Objects")}`} toneOverride="info" showDot={false} />
               <StatusBadge status="pending" label={`${summary.value?.quarantinePendingCount ?? 0} ${t("Quarantine & AV queue")}`} toneOverride={summary.value?.quarantinePendingCount ? "warning" : "neutral"} showDot={false} />
@@ -595,8 +595,8 @@ const ObjectStoragePage = dc(() => {
                 {t("Refresh")}
               </PgButton>
             </ThemedView>
-          )</PageHeader>
-        {summaryError.value && <VAlert type="error" variant="tonal">{summaryError.value}</VAlert>}
+        </PageHeader>
+        {summaryError.value && <PgAlert tone="danger">{summaryError.value}</PgAlert>}
         <MetricStrip items={metrics.value} loading={summaryLoading.value} />
 
         <SegmentedTabs
@@ -616,7 +616,7 @@ const ObjectStoragePage = dc(() => {
             subtitle={t("Jobs run on this core node. Rewrap rotates the KEK without rewriting encrypted blobs.")}
           >
             {summary.value && !summary.value.health.ok && (
-              <VAlert type="error" variant="tonal" class="mb-4">{summary.value.health.error ?? t("The shared vault is unhealthy")}</VAlert>
+              <PgAlert tone="danger" class="mb-4">{summary.value.health.error ?? t("The shared vault is unhealthy")}</PgAlert>
             )}
             <div class="d-flex flex-wrap ga-2">
               {MAINTENANCE_JOBS.map((job) => (
@@ -821,7 +821,7 @@ const ObjectStoragePage = dc(() => {
             incompleteMessage={t("Complete all maintenance checklist items before running")}
           />
         </FormModal>
-      </ThemedView>
+      </PgStack>
     </ScreenContainer>
   );
 });

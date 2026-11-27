@@ -5,6 +5,7 @@ import type { Term } from "@/content/guide";
 
 export const GlossaryPopover = defineComponent({
     name: "GlossaryPopover",
+    rerender: true,
     props: {
         term: { type: Object as PropType<Term | null>, default: null },
         anchor: { type: Object as PropType<DOMRect | null>, default: null },

@@ -2,14 +2,14 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
-import {PgAutocomplete} from "@pg/ui";
+import {PgAutocomplete, PgStack} from "@pg/ui";
 
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import {StateView} from "@pg/ui";
-import { EChart } from "@/charts/EChart";
+import { PgChart as EChart } from "@pg/ui";
 import {MetricStrip, type MetricItem} from "@pg/ui";
 import {SegmentedTabs} from "@pg/ui";
 import {MoneyDisplay} from "@pg/ui";
@@ -166,8 +166,8 @@ const DashboardPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Dashboard")} subtitle={t("Your wallet, payment volume, and settlement posture.")}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Dashboard")} subtitle={t("Your wallet, payment volume, and settlement posture.")}>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             <SegmentedTabs
                                 modelValue={period.value}
@@ -190,7 +190,7 @@ const DashboardPage = dc(() => {
                                 style={{ maxWidth: "110px" }}
                             />
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
@@ -200,10 +200,10 @@ const DashboardPage = dc(() => {
 
                         <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "18px" }}>
                             <SurfaceCard title={t("Monthly Volume")} style={{ flex: "1 1 440px" }}>
-                                <EChart option={volumeChart()} height="300px" />
+                                <EChart option={volumeChart()} height="300px" empty={!(overview.value?.volumeByDay ?? []).length} emptyText={t("No data for this period")} />
                             </SurfaceCard>
                             <SurfaceCard title={t("By Rail")} style={{ flex: "1 1 340px" }}>
-                                <EChart option={railChart()} height="300px" />
+                                <EChart option={railChart()} height="300px" empty={!(overview.value?.volumeByRail ?? []).length} emptyText={t("No data for this period")} />
                             </SurfaceCard>
                         </ThemedView>
 
@@ -227,7 +227,7 @@ const DashboardPage = dc(() => {
                         </ThemedView>
                     </>
                 )}
-            </ThemedView>
+            </PgStack>
         </ScreenContainer>
     );
 });

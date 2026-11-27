@@ -74,11 +74,13 @@ export const AdminGuideBookPage = defineComponent({
                 <PageHeader title={book.value ? `Book ${book.value.id}: ${book.value.title}` : L("Book not found", "الكتاب غير موجود")} subtitle={book.value?.audience} breadcrumbs={[
                         { label: L("Guide", "الدليل"), to: "/guide" },
                         { label: book.value ? `Book ${book.value.id}` : String(route.params.bookId) },
-                    ]}>book.value ? (
+                    ]}>
+                    {book.value ? (
                         <button type="button" class="guide-secondary-button" onClick={() => void copyBookLink()}>
                             {linkCopied.value ? L("Link copied", "تم نسخ الرابط") : L("Copy link", "نسخ الرابط")}
                         </button>
-                    ) : null</PageHeader>
+                    ) : null}
+                </PageHeader>
                 {loading.value ? (
                     <p class="guide-page-loading">{L("Loading…", "جارٍ التحميل…")}</p>
                 ) : !book.value ? (

@@ -2,13 +2,12 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import {PgButton} from "@pg/ui";
+import {PgButton, PgStack} from "@pg/ui";
 import {FormChecklist} from "@pg/ui";
 import {FormModal} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import {PgPage as ScreenContainer} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
 import {ApiTable} from "@pg/ui";
 import {TableRowActions} from "@pg/ui";
 import type { TableHeader } from "@pg/ui";
@@ -256,8 +255,8 @@ const Page = dc(() => {
 
   return () => (
     <ScreenContainer>
-      <ThemedView style={{ gap: "18px" }}>
-        <PageHeader title={t("Reports Needing Migration")} subtitle={t("Stored reports that must be regenerated or migrated before they can run again")} badge="NEEDS_MIGRATION" badgeLabel={t("Needs migration")} badgeTone="danger">(
+    <PgStack gap="lg">
+        <PageHeader title={t("Reports Needing Migration")} subtitle={t("Stored reports that must be regenerated or migrated before they can run again")} badge="NEEDS_MIGRATION" badgeLabel={t("Needs migration")} badgeTone="danger">
             <div class="d-flex flex-wrap ga-2">
               <PgButton variant="tonal" prependIcon="mdi-page-layout-header-footer" onClick={() => void router.push({ name: "ReportsChromeNeedsMigration" })}>
                 {t("Headers & Footers migration")}
@@ -269,7 +268,7 @@ const Page = dc(() => {
                 {t("Refresh")}
               </PgButton>
             </div>
-          )</PageHeader>
+        </PageHeader>
         <SegmentedTabs
           modelValue={source.value}
           onUpdate:modelValue={changeSource}
@@ -303,7 +302,7 @@ const Page = dc(() => {
             });
           }}
         />
-      </ThemedView>
+      </PgStack>
       <FormModal
         modelValue={exportOpen.value}
         onUpdate:modelValue={(value: boolean) => (exportOpen.value = value)}

@@ -2,10 +2,9 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import {PgButton} from "@pg/ui";
+import {PgButton, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
 import {StateView} from "@pg/ui";
 import { DataTable } from "@/tables/DataTable";
 import {TableFilters} from "@pg/ui";
@@ -262,12 +261,12 @@ const StatementsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Statements")} subtitle={t("Settlement statements and downloadable reconciliation records.")}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Statements")} subtitle={t("Settlement statements and downloadable reconciliation records.")}>
                         <PgButton variant="tonal" disabled={!walletId.value} onClick={() => void exportStatement()}>
                             {t("Export")}
                         </PgButton>
-                    )</PageHeader>
+                </PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void loadStatement()} />
@@ -301,7 +300,7 @@ const StatementsPage = dc(() => {
                         )}
                     </>
                 )}
-            </ThemedView>
+            </PgStack>
         </ScreenContainer>
     );
 });

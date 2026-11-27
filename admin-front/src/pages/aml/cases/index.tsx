@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import {VAlert, PgButton, PgFileUpload, PgSpinner, PgAutocomplete, PgTextarea, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgFileUpload, PgSpinner, PgAutocomplete, PgTextarea, PgTextField, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -622,17 +622,17 @@ const AmlCasesPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("AML Cases")} subtitle={t("Investigate, disposition, and escalate AML cases under restricted compliance access.")} badge="AML-CONFIDENTIAL" badgeTone="danger">(
+            <PgStack gap="lg">
+                <PageHeader title={t("AML Cases")} subtitle={t("Investigate, disposition, and escalate AML cases under restricted compliance access.")} badge="AML-CONFIDENTIAL" badgeTone="danger">
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { caseExportChecklist.value = {}; caseExportOpen.value = true; }}>{t("Export Excel")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
-                <VAlert type="error" variant="tonal">
+                <PgAlert tone="danger">
                     {t("AML-CONFIDENTIAL · This queue is restricted to Compliance, MLRO and authorised AML reviewers. Never disclose case details to the merchant or payer.")}
-                </VAlert>
+                </PgAlert>
 
                 {summary.value && (
                     <SummaryExportCard
@@ -723,7 +723,7 @@ const AmlCasesPage = dc(() => {
                         />
                     )}
                 />
-            </ThemedView>
+            </PgStack>
 
             <SlideOverDrawer
                 modelValue={detailsOpen.value}
@@ -876,9 +876,9 @@ const AmlCasesPage = dc(() => {
                 submitLabel={t("Export")}
                 onSubmit={() => void exportExcel()}
             >
-                <VAlert type="error" variant="tonal">
+                <PgAlert tone="danger">
                     {t("AML case exports are confidential evidence. Confirm the scope, handling rules and your authority before exporting.")}
-                </VAlert>
+                </PgAlert>
                 <FormChecklist
                     checks={[...AML_EXPORT_CHECKS]}
                     modelValue={caseExportChecklist.value}
@@ -900,7 +900,7 @@ const AmlCasesPage = dc(() => {
                 cancelLabel={t("Close")}
                 onSubmit={() => void propose()}
             >
-                <VAlert type="info" variant="tonal">{t("The resolution is proposed to a different MLRO checker. No ledger posting occurs until approval.")}</VAlert>
+                <PgAlert tone="info">{t("The resolution is proposed to a different MLRO checker. No ledger posting occurs until approval.")}</PgAlert>
                 <SectionFields title={t("Resolution proposal")}>
                     <FormField label={t("Resolution")} required sensitiveMakerChecker>
                         <PgAutocomplete

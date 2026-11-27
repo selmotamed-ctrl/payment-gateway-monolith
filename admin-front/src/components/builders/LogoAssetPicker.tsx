@@ -1,6 +1,6 @@
 import { computed, onMounted, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
-import {VAlert, PgButton, PgFileUpload, PgAutocomplete} from "@pg/ui";
+import {PgAlert, PgButton, PgFileUpload, PgAutocomplete} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -162,9 +162,9 @@ export const LogoAssetPicker = defineComponent({
                                     onUpdate:modelValue={(value: File | File[] | null) => void register(value)}
                                 />
                             </FormField>
-                            <VAlert type="info" variant="tonal" density="compact">
+                            <PgAlert tone="info" density="compact">
                                 {t("The logo is stored in the shared encrypted vault, checked for active content and locked by its catalogue record.")}
-                            </VAlert>
+                            </PgAlert>
                             <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                                 <PgButton size="small" variant="text" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Reload assets")}</PgButton>
                                 {selected.value && <PgButton size="small" variant="text" color="error" prependIcon="mdi-delete-outline" onClick={() => void removeSelected()}>{t("Delete selected logo")}</PgButton>}

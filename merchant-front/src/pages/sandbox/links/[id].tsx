@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import {VAlert, PgButton} from "@pg/ui";
+import {PgAlert, PgButton} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {SurfaceCard} from "@pg/ui";
@@ -62,7 +62,7 @@ const SandboxLinkDetailPage = dc(() => {
         <ScreenContainer>
             <PageHeader title={detail.value?.link.title ?? t("Sandbox Link")} subtitle={detail.value?.link.key ?? linkId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Checkout Links"), to: "/sandbox/links" }, { label: detail.value?.link.key ?? linkId() }]}><div class="d-flex flex-wrap ga-2"><PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</PgButton><PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => { copyToClipboard(checkoutUrl()); showSnackBar({ type: "success", message: t("Copied") }); }}>{t("Copy checkout URL")}</PgButton><PgButton color="primary" prependIcon="mdi-open-in-new" onClick={() => window.open(checkoutUrl(), "_blank", "noopener")}>{t("Open checkout")}</PgButton></div></PageHeader>
             <SandboxBanner />
-            {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
+            {error.value ? <PgAlert tone="danger" class="mb-4">{error.value}</PgAlert> : null}
             <StateView loading={loading.value} minHeight="200px">
                 {detail.value ? <div class="d-flex flex-column ga-4">
                     <SurfaceCard title={t("Link")}>

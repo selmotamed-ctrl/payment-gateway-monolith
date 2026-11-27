@@ -1,7 +1,7 @@
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgAutocomplete, PgButton, PgTextField} from "@pg/ui";
+import {PgAlert, PgAutocomplete, PgButton, PgTextField} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import {FormField} from "@pg/ui";
@@ -214,9 +214,9 @@ export const ApplicationPolicyModal = defineComponent({
                     </FormField>
                 )}
                 {railMode.value === "NONE" && (
-                    <VAlert type="warning" variant="tonal" density="compact">
+                    <PgAlert tone="warning" density="compact">
                         {t("With no rails whitelisted the application cannot accept any payment.")}
-                    </VAlert>
+                    </PgAlert>
                 )}
                 <FormField
                     label={t("Redirect domains")}

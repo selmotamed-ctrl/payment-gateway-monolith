@@ -2,11 +2,10 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgAutocomplete, PgButton, PgTextField} from "@pg/ui";
+import {PgAlert, PgAutocomplete, PgButton, PgTextField, PgStack} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import {StateView} from "@pg/ui";
 import {StatusBadge, formatHumanStatus} from "@pg/ui";
@@ -460,9 +459,9 @@ const CredentialSetsPage = dc(() => {
         if (!data) return null;
         return (
             <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
-                <VAlert type="info" variant="tonal" density="compact">
+                <PgAlert tone="info" density="compact">
                     {t("Stored secrets are write-only. To change a value, rotate the credential set and enter every value again.")}
-                </VAlert>
+                </PgAlert>
                 <DescriptionList
                     items={[
                         { label: t("ID"), value: <MonoRef value={data.id} truncate={22} /> },
@@ -573,8 +572,8 @@ const CredentialSetsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Credential Sets")} subtitle={t("Provider credentials held in the vault. Secrets are write-only and are never displayed.")} badge={t("Vault")} badgeTone="info">(
+            <PgStack gap="lg">
+                <PageHeader title={t("Credential Sets")} subtitle={t("Provider credentials held in the vault. Secrets are write-only and are never displayed.")} badge={t("Vault")} badgeTone="info">
                         <>
                             <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshTable}>
                                 {t("Refresh")}
@@ -585,7 +584,7 @@ const CredentialSetsPage = dc(() => {
                                 </PgButton>
                             )}
                         </>
-                    )</PageHeader>
+                </PageHeader>
                 <ApiTable<CredentialRow>
                     title={t("Credential sets")}
                     url={urlsMap.credentialSetsList}
@@ -638,7 +637,7 @@ const CredentialSetsPage = dc(() => {
                         />
                     )}
                 />
-            </ThemedView>
+            </PgStack>
 
             <SlideOverDrawer
                 modelValue={selectedId.value !== null}
@@ -748,9 +747,9 @@ const CredentialSetsPage = dc(() => {
                 errorMessage={rotateError.value}
                 onSubmit={() => void submitRotate()}
             >
-                <VAlert type="warning" variant="tonal" density="compact">
+                <PgAlert tone="warning" density="compact">
                     {t("Rotation replaces every entry. The set becomes untested until it is verified again, so enter all values.")}
-                </VAlert>
+                </PgAlert>
                 <EntriesEditor modelValue={rotateEntries.value} onUpdate:modelValue={(value: EntryDraft[]) => (rotateEntries.value = value)} validation={rotateValidation.value} showErrors={rotateShowErrors.value} />
                 <FormChecklist
                     checks={[...CREDENTIAL_CHECKS]}

@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import {PgPage as ScreenContainer} from "@pg/ui";
+import {PgPage as ScreenContainer, PgStack} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
@@ -42,7 +42,7 @@ const MerchantDeveloperGuidePage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "16px" }}>
+            <PgStack gap="lg">
                 <PageHeader
                     title={isArabic.value ? "دليل المطوّر وواجهة API" : "Developer & API Integration Guide"}
                     subtitle={isArabic.value ? "التكامل الآمن وواجهات API وأمثلة الشيفرة." : "Secure integration patterns, API reference, and code examples."}
@@ -95,7 +95,7 @@ const MerchantDeveloperGuidePage = dc(() => {
                         </SurfaceCardText>
                     </SurfaceCard>
                 ) : null}
-            </ThemedView>
+            </PgStack>
         </ScreenContainer>
     );
 });

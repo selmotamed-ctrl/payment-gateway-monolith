@@ -3,7 +3,7 @@ import "./landing.css";
 import { computed, h, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Component } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton, PgIcon} from "@pg/ui";
+import {PgAlert, PgButton, PgIcon} from "@pg/ui";
 import LogoSvg from "@/assets/images/logo.svg";
 import { setLocale } from "@/plugins/localization";
 import {PgThemeMenu as ThemeMenu} from "@pg/ui";
@@ -348,10 +348,10 @@ const LandingPage = defineComponent({
                 <main id="pgl-main" tabindex={-1} class="pgl-main">
                     {maintenance.value ? (
                         <div class="pgl-container" style={{ paddingBlock: "16px" }}>
-                            <VAlert type="warning" variant="tonal" density="comfortable" closable={false}>
+                            <PgAlert tone="warning" density="comfortable" closable={false}>
                                 <strong>{t("Platform under maintenance")}. </strong>
                                 {maintenance.value.message}
-                            </VAlert>
+                            </PgAlert>
                         </div>
                     ) : null}
                     {/* ------------------------------------------------ Hero */}

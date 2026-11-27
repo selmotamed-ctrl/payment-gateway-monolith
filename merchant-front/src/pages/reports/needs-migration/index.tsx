@@ -2,9 +2,8 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import {PgButton} from "@pg/ui";
+import {PgButton, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
 import {ApiTable} from "@pg/ui";
 import {TableRowActions} from "@pg/ui";
 import type { TableHeader } from "@pg/ui";
@@ -125,8 +124,8 @@ const Page = dc(() => {
 
   return () => (
     <ScreenContainer>
-      <ThemedView style={{ gap: "18px" }}>
-        <PageHeader title={t("Reports Needing Migration")} subtitle={t("Your reports that must be regenerated or migrated before they can run again")} badge="NEEDS_MIGRATION" badgeLabel={t("Needs migration")} badgeTone="danger">(
+    <PgStack gap="lg">
+        <PageHeader title={t("Reports Needing Migration")} subtitle={t("Your reports that must be regenerated or migrated before they can run again")} badge="NEEDS_MIGRATION" badgeLabel={t("Needs migration")} badgeTone="danger">
             <div class="d-flex flex-wrap ga-2">
               <PgButton variant="tonal" prependIcon="mdi-palette-outline" onClick={() => void router.push({ name: "MerchantReportsChromeNeedsMigration" })}>
                 {t("Headers & Footers migration")}
@@ -135,7 +134,7 @@ const Page = dc(() => {
                 {t("Refresh")}
               </PgButton>
             </div>
-          )</PageHeader>
+        </PageHeader>
         <ApiTable<Row>
           title={t("Reports Needing Migration")}
           url={urlsMap.reportEngineStudioNeedsMigration}
@@ -156,7 +155,7 @@ const Page = dc(() => {
             void refreshTable({ queryParams: { page: table.page, pageSize: pageSize.value, ...(search.value ? { search: search.value } : {}) } });
           }}
         />
-      </ThemedView>
+      </PgStack>
     </ScreenContainer>
   );
 });

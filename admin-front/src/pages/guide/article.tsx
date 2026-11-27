@@ -170,7 +170,7 @@ export const AdminGuideArticlePage = defineComponent({
                             ? [{ label: `Book ${book.value.id}: ${book.value.title}`, to: `/guide/book/${book.value.id}` }]
                             : []),
                         { label: article.value?.title ?? articleId.value },
-                    ]}>(
+                    ]}>
                         <div class="guide-article-actions">
                             {article.value ? (
                                 <>
@@ -187,7 +187,7 @@ export const AdminGuideArticlePage = defineComponent({
                                 </>
                             ) : null}
                         </div>
-                    )</PageHeader>
+                </PageHeader>
                 {loading.value ? (
                     <p class="guide-page-loading">{L("Loading the article…", "جارٍ تحميل المقال…")}</p>
                 ) : !article.value ? (

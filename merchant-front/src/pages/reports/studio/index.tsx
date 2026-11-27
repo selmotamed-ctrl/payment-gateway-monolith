@@ -2,9 +2,8 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import {VAlert, PgButton, PgBtnToggle, PgFileUpload, PgSwitch, PgTextarea} from "@pg/ui";
+import {PgAlert, PgButton, PgBtnToggle, PgFileUpload, PgSwitch, PgTextarea, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
 import { DataTable } from "@/tables/DataTable";
 import {TableRowActions} from "@pg/ui";
 import type { TableHeader } from "@pg/ui";
@@ -354,8 +353,8 @@ const MerchantReportStudioPage = dc(() => {
 
   return () => (
     <ScreenContainer>
-      <ThemedView style={{ gap: "18px" }}>
-        <PageHeader title={t("Report Studio")} subtitle={t("Author your own merchant reports with the AI transcript, verify them and publish")}>(
+    <PgStack gap="lg">
+        <PageHeader title={t("Report Studio")} subtitle={t("Author your own merchant reports with the AI transcript, verify them and publish")}>
             <div class="d-flex flex-wrap ga-2">
               <PgButton variant="tonal" prependIcon="mdi-download" loading={busy.value} onClick={() => void downloadTranscript()}>
                 {t("Download AI transcript")}
@@ -364,12 +363,12 @@ const MerchantReportStudioPage = dc(() => {
                 {t("Refresh")}
               </PgButton>
             </div>
-          )</PageHeader>
+        </PageHeader>
 
         {route.query.from === "migration" && (
-          <VAlert type="warning" variant="tonal">
+          <PgAlert tone="warning">
             {t("This report needs migration. Copy the migration prompt from the migration page, paste the migrated JSON here, verify and save it as a new version.")}
-          </VAlert>
+          </PgAlert>
         )}
 
         {usage.value && (
@@ -572,7 +571,7 @@ const MerchantReportStudioPage = dc(() => {
           numberOfItemsPerPage={100}
           numberOfItemsPerPageChoices={false}
         />
-      </ThemedView>
+      </PgStack>
     </ScreenContainer>
   );
 });

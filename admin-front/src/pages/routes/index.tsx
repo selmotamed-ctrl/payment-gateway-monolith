@@ -4,7 +4,7 @@ import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
 import { useRoute, useRouter } from "vue-router";
 import { areChecklistsVisible } from "@/constants/env";
-import {VAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgTextField, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -656,19 +656,19 @@ const RoutesPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Routes")} subtitle={t("Routing priority, limits, and circuit-breaker health.")}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Routes")} subtitle={t("Routing priority, limits, and circuit-breaker health.")}>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</PgButton>
                             <PgButton color="primary" variant="flat" prependIcon={"mdi-plus"} onClick={() => void openCreateRoute()}>
                                 {t("Add Route")}
                             </PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("A route binds a rail to a gateway. Health and circuit-breaker state are operational facts, not editable fields.")}
-                </VAlert>
+                </PgAlert>
 
                 {summary.value && (
                     <SummaryExportCard
@@ -739,7 +739,7 @@ const RoutesPage = dc(() => {
                         />
                     )}
                 />
-            </ThemedView>
+            </PgStack>
 
             <RouteHealthDrawer
                 modelValue={healthOpen.value}
@@ -764,7 +764,7 @@ const RoutesPage = dc(() => {
                 submitLabel={t("Export")}
                 onSubmit={() => void exportExcel()}
             >
-                <VAlert type="warning" variant="tonal">{t("The export contains route priorities, limits and health states. Handle it as confidential operational evidence.")}</VAlert>
+                <PgAlert tone="warning">{t("The export contains route priorities, limits and health states. Handle it as confidential operational evidence.")}</PgAlert>
                 <FormChecklist
                     checks={[...EXPORT_CHECKS]}
                     modelValue={exportChecklist.value}

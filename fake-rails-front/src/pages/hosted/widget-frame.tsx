@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { computed } from "vue";
-import {VAlert} from "@pg/ui";
+import {PgAlert} from "@pg/ui";
 import {TableRowActions} from "@pg/ui";
 import {StatusBadge} from "@pg/ui";
 import { postHostedAction } from "@/utils/api";
@@ -69,9 +69,9 @@ const WidgetFramePage = dc(() => {
       <div class="d-flex justify-space-between mb-4">
         <span>Amount</span><strong class="pg-money pg-tabular">{amount}</strong>
       </div>
-      <VAlert type="info" variant="tonal" density="compact" class="mb-3">
+      <PgAlert tone="info" density="compact" class="mb-3">
         Sandbox card: 4111 1111 1111 1111 · any future expiry · CVV 123
-      </VAlert>
+      </PgAlert>
       <div class="d-flex justify-end">
         <TableRowActions
           primaryAction={{

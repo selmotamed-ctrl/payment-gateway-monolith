@@ -1,10 +1,9 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgButton, PgAutocomplete, PgTextField, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
-import {PageHeader} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
+import {PageHeader, PgSubHeader} from "@pg/ui";
 import {StateView} from "@pg/ui";
 import { DataTable } from "@/tables/DataTable";
 import {TableRowActions} from "@pg/ui";
@@ -274,12 +273,14 @@ const WebhooksPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Webhooks")} subtitle={t("Receive signed notifications when payments, disputes and cash-outs change.")}>canManage.value ? (
+            <PgStack gap="lg">
+                <PageHeader title={t("Webhooks")} subtitle={t("Receive signed notifications when payments, disputes and cash-outs change.")}>
+                    {canManage.value ? (
                             <PgButton variant="tonal" onClick={openCreate} disabled={applications.value.length === 0}>
                                 {t("Add Endpoint")}
                             </PgButton>
-                        ) : null</PageHeader>
+                        ) : null}
+                </PageHeader>
 
                 {shownSecret.value && (
                     <SurfaceCard title={t("Signing Secret")}>
@@ -301,7 +302,7 @@ const WebhooksPage = dc(() => {
                     <DataTable title={t("Webhooks")} data={endpoints.value} headers={endpointHeaders} loading={loading.value} showNumber={true} xlsx={false} noElevation={true} />
                 )}
 
-                <PageHeader title={t("Deliveries")} subtitle={t("The latest deliveries. A parked delivery failed every attempt and can be redelivered.")}>(
+                <PgSubHeader title={t("Deliveries")} subtitle={t("The latest deliveries. A parked delivery failed every attempt and can be redelivered.")}>
                         <PgAutocomplete
                             modelValue={deliveryFilter.value}
                             onUpdate:modelValue={(value: string | null) => {
@@ -318,9 +319,9 @@ const WebhooksPage = dc(() => {
                             hideDetails
                             style={{ minWidth: "160px" }}
                         />
-                    )</PageHeader>
+                </PgSubHeader>
                 <DataTable title={t("Deliveries")} data={deliveries.value} headers={deliveryHeaders} loading={deliveriesLoading.value} showNumber={true} xlsx={false} noElevation={true} />
-            </ThemedView>
+            </PgStack>
 
             <FormModal
                 modelValue={formOpen.value}

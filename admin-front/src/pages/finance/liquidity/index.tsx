@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton, PgProgressBar} from "@pg/ui";
+import {PgAlert, PgButton, PgProgressBar, PgStack} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
@@ -155,14 +155,14 @@ const LiquidityPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Liquidity")} subtitle={t("Monitor treasury cover, clearing ageing, cash-out demand, and held balances.")} badge={t("Treasury control")} badgeTone="info">(
+            <PgStack gap="lg">
+                <PageHeader title={t("Liquidity")} subtitle={t("Monitor treasury cover, clearing ageing, cash-out demand, and held balances.")} badge={t("Treasury control")} badgeTone="info">
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             {data.value?.checkedAt && <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Updated")} {new Date(data.value.checkedAt).toLocaleTimeString()}</ThemedText>}
                             <PgButton variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={refreshAll}>{t("Refresh")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export snapshot")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
@@ -171,9 +171,9 @@ const LiquidityPage = dc(() => {
                 ) : (
                     <ThemedView style={{ flexDirection: "column", gap: "18px" }}>
                         {Number(data.value?.coverRatio ?? 1) < 1 && (
-                            <VAlert type="error" variant="tonal">
+                            <PgAlert tone="danger">
                                 {t("Treasury cover is below 1. Review clearing balances and cash-out demand before releasing payouts.")}
-                            </VAlert>
+                            </PgAlert>
                         )}
 
                         <MetricStrip items={[
@@ -183,7 +183,7 @@ const LiquidityPage = dc(() => {
                             { key: "cover", label: t("Treasury Cover"), value: data.value?.coverRatio ?? "-", badge: Number(data.value?.coverRatio ?? 1) < 1 ? t("Failed") : t("Passed"), badgeTone: Number(data.value?.coverRatio ?? 1) < 1 ? "danger" : "success" },
                         ]} />
 
-                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "18px" }}>
+                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))", gap: "18px" }}>
                             <SurfaceCard title={t("Cash-Out Queue")}>
                                 <DescriptionList
                                     items={[
@@ -346,7 +346,7 @@ const LiquidityPage = dc(() => {
                         </SurfaceCard>
                     </ThemedView>
                 )}
-            </ThemedView>
+            </PgStack>
             <FormModal
                 modelValue={exportOpen.value}
                 onUpdate:modelValue={(value: boolean) => (exportOpen.value = value)}
@@ -356,7 +356,7 @@ const LiquidityPage = dc(() => {
                 submitLabel={t("Export")}
                 onSubmit={() => void exportSnapshot()}
             >
-                <VAlert type="warning" variant="tonal">{t("The export contains treasury, clearing, obligations and aging figures. Handle it as confidential financial evidence.")}</VAlert>
+                <PgAlert tone="warning">{t("The export contains treasury, clearing, obligations and aging figures. Handle it as confidential financial evidence.")}</PgAlert>
                 <FormChecklist
                     checks={[...EXPORT_CHECKS]}
                     modelValue={exportChecklist.value}

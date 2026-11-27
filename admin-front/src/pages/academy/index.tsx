@@ -300,11 +300,11 @@ export const AdminAcademyPage = defineComponent({
             return (
                 <AcademyShell
                     header={() => (
-                        <PageHeader title={t("My learning")} subtitle={t("Learn, check, do, prove: one next step at a time.")}>(
+                        <PageHeader title={t("My learning")} subtitle={t("Learn, check, do, prove: one next step at a time.")}>
                                 <PgButton variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyLearningSummary()}>
                                     {t("Copy learning summary")}
                                 </PgButton>
-                            )</PageHeader>
+                        </PageHeader>
                     )}
                 >
                     {body()}

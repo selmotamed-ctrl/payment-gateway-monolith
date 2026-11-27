@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import {VAlert, PgAutocomplete, PgButton, PgCheckbox, PgDivider, PgTextField} from "@pg/ui";
+import {PgAlert, PgAutocomplete, PgButton, PgCheckbox, PgDivider, PgTextField, PgStack} from "@pg/ui";
 import { useRouter } from "vue-router";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
@@ -801,8 +801,8 @@ const OperatorCasesPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Operator Cases")} subtitle={t("Triage unknown outcomes, conflicts and reconciliation breaks with SLA-aware operator workflows.")} badge={summary.value ? `${summary.value.p1Open} ${t("P1 open")}` : t("P1 queue")} badgeTone={summary.value && summary.value.p1Open > 0 ? "danger" : "info"}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Operator Cases")} subtitle={t("Triage unknown outcomes, conflicts and reconciliation breaks with SLA-aware operator workflows.")} badge={summary.value ? `${summary.value.p1Open} ${t("P1 open")}` : t("P1 queue")} badgeTone={summary.value && summary.value.p1Open > 0 ? "danger" : "info"}>
                         <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
                             <StatusBadge status="cases" label={`${total.value} ${t("cases")}`} toneOverride="info" showDot={false} />
                             <StatusBadge status="selected" label={`${selectedCount.value} ${t("selected")}`} toneOverride={selectedCount.value > 0 ? "info" : "neutral"} showDot={false} />
@@ -810,7 +810,7 @@ const OperatorCasesPage = dc(() => {
                             <PgButton variant="tonal" prependIcon="mdi-radar" onClick={() => void router.push({ name: "GatewayInquirySchedules" })}>{t("Inquiry Schedule")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
                 {summary.value && (
                     <SummaryExportCard
@@ -961,7 +961,7 @@ const OperatorCasesPage = dc(() => {
                         </ThemedView>
                     )}
                 />
-            </ThemedView>
+            </PgStack>
 
             <SlideOverDrawer
                 modelValue={inspectionOpen.value}
@@ -1033,7 +1033,7 @@ const OperatorCasesPage = dc(() => {
                 submitLabel={t("Export")}
                 onSubmit={() => void exportExcel()}
             >
-                <VAlert type="warning" variant="tonal">{t("The export contains merchant, attempt and resolution details. Handle the file as confidential operational evidence.")}</VAlert>
+                <PgAlert tone="warning">{t("The export contains merchant, attempt and resolution details. Handle the file as confidential operational evidence.")}</PgAlert>
                 <FormChecklist
                     checks={[...EXPORT_CHECKS]}
                     modelValue={exportChecklist.value}

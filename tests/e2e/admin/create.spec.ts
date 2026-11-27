@@ -59,8 +59,8 @@ test("creates a rail from the Rails page", async ({ page }) => {
 
   await page.goto("/rails");
   await page.getByRole("button", { name: "Add Rail" }).click();
-  await page.getByLabel("Rail Code").fill("test-rail");
-  await page.getByLabel("Label (English)").fill("Test Rail");
+  await page.getByRole("textbox", { name: "Rail Code" }).fill("test-rail");
+  await page.getByRole("textbox", { name: "Label (English)" }).fill("Test Rail");
   await page.getByRole("button", { name: "Create", exact: true }).click();
 
   await expect(page.getByRole("button", { name: "Create", exact: true })).toHaveCount(0);
@@ -147,7 +147,7 @@ test("the gateway table filters by the search box", async ({ page }) => {
 
   await page.goto("/gateways");
   await expect(page.locator("table")).toContainText("alpha_gw");
-  await page.getByPlaceholder("Search").fill("beta");
+  await page.getByRole("searchbox", { name: "Search" }).fill("beta");
   await expect.poll(() => searches).toContain("beta");
   await expect(page.locator("table")).toContainText("beta_gw");
   await expect(page.locator("table")).not.toContainText("alpha_gw");

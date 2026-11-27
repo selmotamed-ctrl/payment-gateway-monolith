@@ -1,3 +1,4 @@
+import { createIf } from "@vue/runtime-vapor";
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import {PgButton, PgIcon} from "@pg/ui";
@@ -11,6 +12,8 @@ export type PerRailInstructionsBannerProps = {
     locale: "ar" | "en";
     onOpenHelp?: () => void;
 };
+
+const branch = createIf as any;
 
 const nonEmpty = (values: string[] | null | undefined): string[] =>
     (values ?? []).map((value) => (typeof value === "string" ? value.trim() : "")).filter(Boolean);
@@ -56,11 +59,10 @@ export const PerRailInstructionsBanner = dc(
                 : rail.displayNameEn || rail.displayNameAr;
         });
 
-        return () => {
-            if (!guide.value) {
-                return null;
-            }
-
+        return () =>
+            branch(
+                () => Boolean(guide.value),
+                () => {
             const title = isArabic.value
                 ? `طريقة الدفع عبر ${railName.value}`
                 : `How to pay with ${railName.value}`;
@@ -198,7 +200,8 @@ export const PerRailInstructionsBanner = dc(
                     )}
                 </div>
             );
-        };
+                },
+            );
     },
     {
         props: ["rail", "locale", "onOpenHelp"],

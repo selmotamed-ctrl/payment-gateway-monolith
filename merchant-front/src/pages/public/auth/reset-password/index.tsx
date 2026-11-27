@@ -1,5 +1,5 @@
 import { dc } from "@/utils/dc";
-import {VAlert, PgButton, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { computed, ref } from "vue";
 import { useRoute } from "vue-router";
@@ -51,7 +51,7 @@ const ResetPasswordPage = dc(() => {
         <AuthLayout>
             <SurfaceCard title={t("Reset password")} subtitle={t("Enter the code from your email and choose a new password.")}>
                 <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                    {error.value && <VAlert type="error" variant="tonal" density="compact">{error.value}</VAlert>}
+                    {error.value && <PgAlert tone="danger" density="compact">{error.value}</PgAlert>}
                     <FormField label={t("Email")} required>
                         <PgTextField
                             aria-label={t("Email")}
@@ -92,7 +92,7 @@ const ResetPasswordPage = dc(() => {
                             hideDetails
                         />
                     </FormField>
-                    <PgButton block size="large" loading={loading.value} disabled={!canSubmit.value} onClick={() => void submit()}>
+                    <PgButton block variant="primary" size="large" loading={loading.value} disabled={!canSubmit.value} onClick={() => void submit()}>
                         {t("Reset password")}
                     </PgButton>
                     <PgButton variant="text" onClick={() => void router.push({ name: "Login" })}>

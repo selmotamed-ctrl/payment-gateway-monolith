@@ -1,7 +1,7 @@
 import { ref, watch, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgAutocomplete, PgTextField, PgTextarea} from "@pg/ui";
+import {PgAlert, PgAutocomplete, PgTextField, PgTextarea} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import {FormModal} from "@pg/ui";
@@ -71,9 +71,9 @@ export const RevalidationModal = defineComponent({
                 cancelLabel={t("Cancel")}
                 onSubmit={() => void submit()}
             >
-                <VAlert type="info" variant="tonal" density="compact">
+                <PgAlert tone="info" density="compact">
                     {t("The merchant is notified and the KYB status returns to pending until the document is re-submitted and reviewed.")}
-                </VAlert>
+                </PgAlert>
                 <FormField label={t("Document type")} required error={field("docType")}>
                     <PgAutocomplete
                         modelValue={form.value.docType}

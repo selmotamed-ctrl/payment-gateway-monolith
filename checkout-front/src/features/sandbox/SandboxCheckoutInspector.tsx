@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import {VAlert, PgButton, PgChoice, PgChip, PgDivider, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgChoice, PgChip, PgDivider, PgAutocomplete, PgTextField} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import {MonoRef, StatusBadge, SurfaceCard} from "@pg/ui";
@@ -277,19 +277,19 @@ export const SandboxCheckoutInspector = dc<SandboxCheckoutInspectorProps, {}>((p
         <div class="pa-3 pt-0">
           <PgDivider class="mb-3" />
           {unavailable.value ? (
-            <VAlert type="warning" variant="tonal" density="compact" class="mb-3">
+            <PgAlert tone="warning" density="compact" class="mb-3">
               Fake Rails is not reachable: {unavailable.value}
-            </VAlert>
+            </PgAlert>
           ) : null}
           {error.value ? (
-            <VAlert type="error" variant="tonal" density="compact" class="mb-3">
+            <PgAlert tone="danger" density="compact" class="mb-3">
               {error.value}
-            </VAlert>
+            </PgAlert>
           ) : null}
 
           {activeTab.value === "SECRETS" ? (
             <div class="d-flex flex-column ga-3">
-              <VAlert type="warning" variant="tonal" density="compact">
+              <PgAlert tone="warning" density="compact">
                 <div class="d-flex justify-space-between align-center flex-wrap ga-2">
                   <div>
                     <div class="text-caption">Live generated OTP / confirmation secret for this attempt</div>
@@ -318,7 +318,7 @@ export const SandboxCheckoutInspector = dc<SandboxCheckoutInspectorProps, {}>((p
                     </div>
                   ) : null}
                 </div>
-              </VAlert>
+              </PgAlert>
 
               {activeSecrets.value?.boundAccountIdentifier ? (
                 <div

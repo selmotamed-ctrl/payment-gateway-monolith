@@ -1,4 +1,23 @@
+/*
+ * @pg/ui token entry point.
+ *
+ * Order is non-negotiable: the vael-ui base first, then the 2026 token layer,
+ * then the layout policy, then the component rules that consume both, then the
+ * per-area completion overrides.
+ */
 @import "vael-ui/style.css";
-@import "./components.css";
 @import "./fintech-2026.css";
 @import "./layout-policy.css";
+@import "./components.css";
+@import "./parts/layout.css";
+@import "./parts/actions.css";
+@import "./parts/inputs-text.css";
+@import "./parts/inputs-selection.css";
+@import "./parts/inputs-advanced.css";
+@import "./parts/overlays.css";
+@import "./parts/feedback.css";
+@import "./parts/data.css";
+@import "./parts/table.css";
+@import "./parts/json.css";
+@import "./parts/charts.css";
+@import "./parts/tokens-final.css";

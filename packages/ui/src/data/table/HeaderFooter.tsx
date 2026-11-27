@@ -1,40 +1,143 @@
-import { type IconProps, type RefreshMethodWithNextSkip, type TableHeader as TableHeaderType } from "./types";
+import { createIf } from "@vue/runtime-vapor";
+import { computed, inject, ref } from "vue";
 
-const colors = { blue: { base: "var(--pg-accent-brand)" }, grey: { base: "var(--pg-ink-muted)" } } as any;
+import { defineComponent } from "../../lib/dc";
+
+/** Vapor JSX returns a Block at runtime; the public type is narrower. */
+const branch = createIf as any;
 import { useLocale } from "../../lib/locale";
 import { useDisplay } from "../../lib/display";
+import { usePgUiConfig } from "../../lib/config";
+import { formatMoney, formatPlainNumber } from "../../lib/money";
+import { formatDisplayDate } from "../../lib/date";
 import { PgButton } from "../../actions/PgButton";
 import { PgIcon } from "../../actions/PgIcon";
 import { PgMenu } from "../../overlays/PgMenu";
-import { PgTextField } from "../../inputs/PgTextField";
-import { PgSpinner } from "../../actions/PgFeedbackAtoms";
+import { PgTooltip } from "../../overlays/PgTooltip";
 import { PgSearchInput } from "../../inputs/PgSearchInput";
 import { PgAutocomplete } from "../../inputs/PgAutocomplete";
-import { PgTooltip } from "../../overlays/PgTooltip";
-import { usePgUiConfig } from "../../lib/config";
-import { computed, ref, watch } from "vue";
-import { defineComponent } from "../../lib/dc";
+import { showToast } from "../../feedback/toastStore";
+import { tableFilterSurfaceKey } from "./TableFilters";
+import { readCell, type IconProps, type RefreshMethodWithNextSkip, type TableHeader as TableHeaderType } from "./types";
 
-export const useTableXlsx = (options: {
+/* ------------------------------------------------------------------- XLSX */
+
+const MONEY_COLUMN = /(amount|fee|balance|total|volume|price|value|commission|net|gross|debit|credit|revenue|cost|charge|limit|ceiling)/i;
+const DATE_COLUMN = /(date|time)$/i;
+
+const isMoneyColumn = (header: TableHeaderType<any>): boolean =>
+    header.format === "money" ||
+    header.money === true ||
+    MONEY_COLUMN.test(header.key) ||
+    (typeof header.label === "string" && MONEY_COLUMN.test(header.label));
+
+const isDateColumn = (header: TableHeaderType<any>): boolean =>
+    header.format === "date" ||
+    DATE_COLUMN.test(header.key) ||
+    /At$/.test(header.key) ||
+    (typeof header.label === "string" && /(date|time)/i.test(header.label));
+
+const pad = (value: number) => String(value).padStart(2, "0");
+
+const dateCellText = (value: unknown): string => {
+    if (value === null || value === undefined || value === "") return "";
+    if (value instanceof Date) {
+        if (Number.isNaN(value.getTime())) return "";
+        return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ${pad(value.getHours())}:${pad(value.getMinutes())}`;
+    }
+    const text = String(value).trim();
+    if (!text) return "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return formatDisplayDate(text) || text;
+    if (/^\d{4}-\d{2}-\d{2}T/.test(text)) {
+        // Keep the server's UTC wall clock; never shift a filing timestamp.
+        return text.replace("T", " ").replace(/\.\d+/, "").replace(/Z$/, " UTC");
+    }
+    const parsed = new Date(text);
+    return Number.isNaN(parsed.getTime()) ? text : dateCellText(parsed);
+};
+
+const plainCellText = (value: unknown): string => {
+    if (value === null || value === undefined) return "";
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return String(value);
+    if (value instanceof Date) return dateCellText(value);
+    if (typeof value === "object") {
+        try {
+            return JSON.stringify(value);
+        } catch {
+            return "";
+        }
+    }
+    return String(value);
+};
+
+export type UseTableXlsxOptions = {
     headers: () => TableHeaderType<any>[];
     data: () => any[];
     title: () => string;
-}) => {
+    /** Optional file name; falls back to the table title. */
+    filename?: () => string | undefined;
+    /** Default currency for money columns that do not declare one. */
+    currency?: () => string | undefined;
+};
+
+/**
+ * Shared XLSX export. Every exported cell is a formatted string: money goes
+ * through `formatMoney`, dates through the display formatter and nested objects
+ * are JSON-stringified, so a workbook never contains `[object Object]`.
+ */
+export const useTableXlsx = (options: UseTableXlsxOptions) => {
     const config = usePgUiConfig();
+    const { t } = useLocale();
     const downloadingXlsx = ref(false);
+
+    const cellText = (header: TableHeaderType<any>, row: any, index: number): string => {
+        const raw =
+            header.value !== undefined
+                ? readCell(header.value as any, row, index)
+                : row === null || row === undefined
+                  ? ""
+                  : row?.[header.key];
+        if (raw === null || raw === undefined || raw === "") return "";
+        if (isDateColumn(header)) return dateCellText(raw);
+        if (isMoneyColumn(header)) {
+            const currency = header.currency ?? options.currency?.() ?? config.currency;
+            return formatMoney(raw as any, { currency });
+        }
+        return plainCellText(raw);
+    };
+
+    const exportHeaders = (): TableHeaderType<any>[] =>
+        (options.headers() ?? [])
+            .filter((header) => header && header.key !== "actions")
+            .map((header) => ({
+                ...header,
+                value: (row: any, index: number) => cellText(header, row, index),
+            }));
 
     const downloadXlsx = async () => {
         const rows = options.data() ?? [];
         if (downloadingXlsx.value || rows.length === 0) return;
+        if (!config.exportXlsx) {
+            showToast({ tone: "warning", message: t("Export is not configured") });
+            return;
+        }
         downloadingXlsx.value = true;
         try {
-            await config.exportXlsx?.({
-                headers: options.headers(),
+            const filename = options.filename?.();
+            await config.exportXlsx({
+                headers: exportHeaders(),
                 data: rows,
-                title: options.title(),
+                title: filename ?? options.title(),
+                ...(filename ? { filename } : {}),
+            } as any);
+            showToast({
+                tone: "success",
+                message: `${t("Exported")} ${rows.length} ${t("rows")}`,
             });
         } catch (error) {
             console.error(error);
+            showToast({ tone: "danger", message: t("Could not export the table") });
         } finally {
             downloadingXlsx.value = false;
         }
@@ -43,660 +146,433 @@ export const useTableXlsx = (options: {
     return { downloadingXlsx, downloadXlsx };
 };
 
+/* ---------------------------------------------------------------- controls */
+
 export type TableFilterControl = {
     count: number;
     open: boolean;
     toggle: () => void;
 };
 
-export const TableFooter = defineComponent<{
-    hasPrev: boolean;
-    totalDataLength: number;
-    prev: () => void;
-    setNumberOfItemsPerPage?: (numberOfItemsPerPage: number) => void;
-    numberOfItemsPerPageChoices?: { label: string; value: number }[];
+export type TableColumnChoice = {
+    key: string;
+    label: string;
+    visible: boolean;
+    hideable?: boolean;
+};
 
-    hasNext: boolean;
-    numberOfItemsPerPage: number;
-    loading: boolean;
-
-    currentPage: number;
-    numberOfPages: number;
-    goToPage: (targetPageNumber: number) => void;
-    next: () => void;
-}>(
-    (props) => {
-        const display = useDisplay();
-        const isMobile = computed(() => display.mobile.value);
-
-        return () => {
-            return (isMobile.value ? (
-                    <TableFooterMobile
-                        totalDataLength={props.totalDataLength}
-                        loading={props.loading}
-                        numberOfItemsPerPage={props.numberOfItemsPerPage}
-                        hasNext={props.hasNext}
-                        hasPrev={props.hasPrev}
-                        next={props.next}
-                        prev={props.prev}
-                        currentPage={props.currentPage}
-                        goToPage={props.goToPage}
-                        numberOfItemsPerPageChoices={props.numberOfItemsPerPageChoices}
-                        setNumberOfItemsPerPage={props.setNumberOfItemsPerPage}
-                        numberOfPages={props.numberOfPages}
-                    ></TableFooterMobile>
-                ) : (
-                <TableFooterDesktop
-                    numberOfItemsPerPageChoices={props.numberOfItemsPerPageChoices}
-                    setNumberOfItemsPerPage={props.setNumberOfItemsPerPage}
-                    totalDataLength={props.totalDataLength}
-                    numberOfItemsPerPage={props.numberOfItemsPerPage}
-                    loading={props.loading}
-                    hasNext={props.hasNext}
-                    hasPrev={props.hasPrev}
-                    next={props.next}
-                    prev={props.prev}
-                    currentPage={props.currentPage}
-                    goToPage={props.goToPage}
-                    numberOfPages={props.numberOfPages}
-                ></TableFooterDesktop>
-            ));
-        };
-    },
-    {
-        props: [
-            "currentPage",
-            "goToPage",
-            "hasNext",
-            "hasPrev",
-            "loading",
-            "next",
-            "numberOfItemsPerPage",
-            "numberOfItemsPerPageChoices",
-            "numberOfPages",
-            "prev",
-            "setNumberOfItemsPerPage",
-            "totalDataLength",
-        ],
-    },
-);
-
-type TableHeaderProps = {
-    refresh: RefreshMethodWithNextSkip;
+export type TableHeaderProps = {
+    refresh?: RefreshMethodWithNextSkip;
     setSearchValue?: (text: string | null) => void;
     searchValue?: string | null;
-    onSearch?: () => Promise<void> | void;
+    onSearch?: (value?: string) => Promise<void> | void;
     onRefresh?: () => void | Promise<void>;
     iconName?: string;
+    Icon?: (iconProps: Omit<IconProps, "icon">) => any;
     xlsx?: {
         handler: () => void | Promise<void>;
         disabled: boolean;
         loading: boolean;
     };
-    Icon?: (iconProps: Omit<IconProps, "icon">) => any;
-    title: string;
-    loading: boolean;
+    title?: string;
+    loading?: boolean;
     total?: number;
     filterControl?: TableFilterControl;
+    searchable?: boolean;
+    showSearch?: boolean;
+    exportable?: boolean;
+    exporting?: boolean;
+    onExport?: () => void | Promise<void>;
+    columns?: TableColumnChoice[];
+    onToggleColumn?: (key: string) => void;
+};
+
+const searchEnabled = (props: TableHeaderProps): boolean =>
+    props.searchable !== false &&
+    props.showSearch !== false &&
+    typeof props.onSearch === "function" &&
+    typeof props.setSearchValue === "function";
+
+const exportControl = (props: TableHeaderProps) => {
+    if (props.xlsx) return props.xlsx;
+    if (typeof props.onExport === "function") {
+        return { handler: props.onExport, disabled: false, loading: Boolean(props.exporting) };
+    }
+    return undefined;
 };
 
 export const TableHeader = defineComponent<TableHeaderProps>(
-    (props) => {
-        const display = useDisplay();
-        const isMobile = computed(() => display.mobile.value);
-        return () => {
-            return (isMobile.value ? <TableHeaderMobile {...props}></TableHeaderMobile> : <TableHeaderDesktop {...props}></TableHeaderDesktop>);
-        };
-    },
-    {
-        props: [
-            "Icon",
-            "xlsx",
-            "iconName",
-            "onSearch",
-            "onRefresh",
-            "refresh",
-            "searchValue",
-            "setSearchValue",
-            "title",
-            "loading",
-            "total",
-            "filterControl",
-        ],
-    },
-);
-
-const TableHeaderDesktop = defineComponent(
-    (props: TableHeaderProps) => {
-        return () => (
-            <div class="pg-table-toolbar">
-                <div class="pg-table-toolbar__left">
-                    <HeaderLeft {...props}></HeaderLeft>
-                </div>
-                <div class="pg-table-toolbar__right">
-                    <HeaderRight {...props}></HeaderRight>
-                </div>
-            </div>
-        );
-    },
-    {
-        props: [
-            "Icon",
-            "xlsx",
-            "iconName",
-            "onSearch",
-            "onRefresh",
-            "loading",
-            "refresh",
-            "searchValue",
-            "setSearchValue",
-            "title",
-            "total",
-            "filterControl",
-        ],
-    },
-);
-
-const TableHeaderMobile = defineComponent<TableHeaderProps>(
-    (props) => {
-        return () => (
-            <div class="pg-table-toolbar pg-table-toolbar--mobile">
-                <span class="pg-sr-only">{props.title}</span>
-                <HeaderLeft {...props}></HeaderLeft>
-                <HeaderRight {...props}></HeaderRight>
-            </div>
-        );
-    },
-    {
-        props: [
-            "refresh",
-            "xlsx",
-            "setSearchValue",
-            "searchValue",
-            "onSearch",
-            "onRefresh",
-            "loading",
-            "iconName",
-            "Icon",
-            "title",
-            "total",
-            "filterControl",
-        ],
-    },
-);
-
-const HeaderLeft = defineComponent<TableHeaderProps>(
-    (props) => {
+    (props, { slots }) => {
         const { t } = useLocale();
-        return () => (
-            <div class="pg-table-toolbar__group">
-                <span class="pg-sr-only">{t(props.title)}</span>
-                {!props.onSearch || !props.setSearchValue ? (
-                    <span class="pg-table-toolbar__title">{t(props.title)}</span>
-                ) : (
-                    <Search {...props}></Search>
-                )}
-                {props.filterControl && (
-                    <PgButton
-                        size="small"
-                        variant="outlined"
-                        prependIcon="mdi-filter-variant"
-                        class="pg-filter-trigger"
-                        aria-expanded={props.filterControl.open ? "true" : "false"}
-                        onClick={() => props.filterControl?.toggle()}
-                    >
-                        {t("Filters")}
-                        {props.filterControl.count > 0 && (
-                            <span class="pg-filter-trigger__badge pg-tabular">{props.filterControl.count}</span>
+        const display = useDisplay();
+        const mobile = computed(() => display.mobile.value);
+        // The nearest PgApiTable owns the filter surface; reading its refs inside
+        // the render expression keeps the count badge and aria-expanded live.
+        const surface = inject(tableFilterSurfaceKey, null);
+
+        const filtersCount = (): number => surface?.activeCount.value ?? props.filterControl?.count ?? 0;
+        const filtersOpen = (): boolean => surface?.open.value ?? props.filterControl?.open ?? false;
+        const toggleFilters = () => {
+            if (surface) surface.toggle();
+            else props.filterControl?.toggle();
+        };
+
+        const refreshNow = () => {
+            if (props.loading) return;
+            if (props.onRefresh) {
+                void props.onRefresh();
+                return;
+            }
+            if (props.refresh) void props.refresh({ nextSkip: 0 });
+        };
+
+        return () => {
+            const exporter = exportControl(props);
+            return (
+                <div class={["pg-table-toolbar", mobile.value ? "pg-table-toolbar--mobile" : ""]}>
+                    {slots.prepend?.()}
+                    <div class="pg-table-toolbar__left">
+                        {props.Icon ? (
+                            <span class="pg-table-toolbar__icon">{props.Icon({})}</span>
+                        ) : props.iconName ? (
+                            <PgIcon icon={props.iconName} size={18} />
+                        ) : null}
+                        {props.title && <span class="pg-sr-only">{t(props.title)}</span>}
+                        {searchEnabled(props) ? (
+                            <PgSearchInput
+                                class="pg-table-search"
+                                modelValue={String(props.searchValue ?? "")}
+                                placeholder={t("Search")}
+                                ariaLabel={t("Search")}
+                                debounce={250}
+                                onUpdate:modelValue={(value: string) => props.setSearchValue?.(value)}
+                                onSearch={(value: string) => props.onSearch?.(value)}
+                            />
+                        ) : (
+                            props.title && <span class="pg-table-toolbar__title">{t(props.title)}</span>
                         )}
-                    </PgButton>
-                )}
-            </div>
-        );
+                        {branch(
+                            () => Boolean(props.filterControl),
+                            () => (
+                                <PgButton
+                                    size="small"
+                                    variant="outlined"
+                                    prependIcon="mdi-filter-variant"
+                                    class={["pg-filter-trigger", filtersCount() > 0 ? "pg-filter-trigger--active" : ""]
+                                        .filter(Boolean)
+                                        .join(" ")}
+                                    aria-expanded={filtersOpen() ? "true" : "false"}
+                                    aria-controls="pg-table-filters"
+                                    onClick={toggleFilters}
+                                >
+                                    {t("Filters")}
+                                    {branch(() => filtersCount() > 0, () => (
+                                        <span class="pg-filter-trigger__badge pg-tabular">{filtersCount()}</span>
+                                    ))}
+                                </PgButton>
+                            ),
+                        )}
+                    </div>
+                    <div class="pg-table-toolbar__right">
+                        <span class="pg-record-count pg-tabular">
+                            {typeof props.total === "number" ? `${formatPlainNumber(props.total)} ${t("records")}` : ""}
+                        </span>
+                        <PgTooltip text={t("Refresh")}>
+                            <PgButton
+                                size="sm"
+                                variant="text"
+                                ariaLabel={t("Refresh")}
+                                loading={Boolean(props.loading)}
+                                disabled={Boolean(props.loading)}
+                                onClick={refreshNow}
+                                icon="mdi-refresh"
+                            />
+                        </PgTooltip>
+                        {props.columns && props.columns.length > 0 && (
+                            <PgMenu>
+                                {{
+                                    activator: () => (
+                                        <PgButton
+                                            size="sm"
+                                            variant="text"
+                                            ariaLabel={t("Columns")}
+                                            icon="mdi-view-column-outline"
+                                        />
+                                    ),
+                                    default: () => (
+                                        <div class="pg-menu-list pg-column-picker" role="group" aria-label={t("Columns")}>
+                                            {props.columns!.map((column) => (
+                                                <button
+                                                    key={column.key}
+                                                    type="button"
+                                                    role="menuitemcheckbox"
+                                                    aria-checked={column.visible ? "true" : "false"}
+                                                    class="pg-menu-item pg-column-picker__item"
+                                                    disabled={column.hideable === false}
+                                                    onClick={() => props.onToggleColumn?.(column.key)}
+                                                >
+                                                    <PgIcon
+                                                        icon={column.visible ? "mdi-checkbox-marked-outline" : "mdi-checkbox-blank-outline"}
+                                                        size={16}
+                                                    />
+                                                    <span>{t(column.label)}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    ),
+                                }}
+                            </PgMenu>
+                        )}
+                        {exporter && (
+                            <PgTooltip text={t("Download Current Data as Excel Sheet")}>
+                                <PgButton
+                                    size="sm"
+                                    variant="text"
+                                    ariaLabel={t("Download Current Data as Excel Sheet")}
+                                    disabled={Boolean(props.xlsx?.disabled ?? props.exporting)}
+                                    loading={Boolean(props.xlsx?.loading ?? props.exporting)}
+                                    onClick={() => void exportControl(props)?.handler()}
+                                    icon="mdi-file-excel-outline"
+                                />
+                            </PgTooltip>
+                        )}
+                        {slots.actions?.()}
+                    </div>
+                </div>
+            );
+        };
     },
     {
         props: [
             "refresh",
-            "xlsx",
-            "loading",
             "setSearchValue",
             "searchValue",
             "onSearch",
             "onRefresh",
             "iconName",
             "Icon",
+            "xlsx",
             "title",
+            "loading",
             "total",
             "filterControl",
-        ],
+            "searchable",
+            "showSearch",
+            "exportable",
+            "exporting",
+            "onExport",
+            "columns",
+            "onToggleColumn",
+        ] as any[],
+        slots: ["actions", "prepend"],
     },
 );
 
-const Search = defineComponent<{
-    setSearchValue?: (text: string | null) => void;
-    searchValue?: string | null;
-    refresh: RefreshMethodWithNextSkip;
-    onSearch?: () => Promise<void> | void;
-    loading: boolean;
-}>(
-    (props) => {
-        const { t } = useLocale();
-        return () => (
-            <PgSearchInput
-                class="pg-table-search"
-                modelValue={props.searchValue || ""}
-                onUpdate:modelValue={(text: string) => props.setSearchValue?.(text)}
-                onSearch={() => props.onSearch?.()}
-                disabled={props.loading}
-                placeholder={t("Search")}
-                ariaLabel={t("Search")}
-                debounce={280}
-            />
-        );
-    },
-    { props: ["setSearchValue", "loading", "searchValue", "refresh", "onSearch"] },
-);
+/* ----------------------------------------------------------------- footer */
 
-const HeaderRight = defineComponent(
-    (props: TableHeaderProps) => {
-        const { t } = useLocale();
-        return () => (
-            <div class="pg-table-toolbar__group pg-table-toolbar__group--end">
-                {props.total !== undefined && (
-                    <span class="pg-record-count pg-tabular">
-                        {props.total} {t("records")}
-                    </span>
-                )}
-                <PgTooltip text={t("Refresh")}>
-                    <PgButton
-                        icon
-                        size="sm"
-                        variant="text"
-                        ariaLabel={t("Refresh")}
-                        disabled={props.loading}
-                        onClick={() => {
-                            if (props.onRefresh) {
-                                void props.onRefresh();
-                                return;
-                            }
-                            void props.refresh({ nextSkip: 0 });
-                        }}
-                    >
-                        <PgIcon icon="mdi-refresh" size={18} />
-                    </PgButton>
-                </PgTooltip>
-                {props.xlsx && (
-                    <PgTooltip text={t("Download Current Data as Excel Sheet")}>
-                        <PgButton
-                            icon
-                            size="sm"
-                            variant="text"
-                            ariaLabel={t("Download Current Data as Excel Sheet")}
-                            disabled={props.xlsx!.disabled}
-                            loading={props.xlsx!.loading}
-                            onClick={() => void props.xlsx!.handler()}
-                        >
-                            <PgIcon icon="mdi-file-excel-outline" size={18} />
-                        </PgButton>
-                    </PgTooltip>
-                )}
-            </div>
-        );
-    },
-    { props: ["refresh", "setSearchValue", "searchValue", "onSearch", "onRefresh", "iconName", "Icon", "loading", "title", "total", "filterControl", "xlsx"] },
-);
+export type TableFooterProps = {
+    page?: number;
+    currentPage?: number;
+    pageSize?: number;
+    numberOfItemsPerPage?: number;
+    total?: number;
+    totalDataLength?: number;
+    numberOfPages?: number;
+    pageSizeOptions?: number[];
+    numberOfItemsPerPageChoices?: false | { label: string; value: number }[];
+    setNumberOfItemsPerPage?: (numberOfItemsPerPage: number) => void;
+    goToPage?: (targetPageNumber: number) => void;
+    next?: () => void;
+    prev?: () => void;
+    hasNext?: boolean;
+    hasPrev?: boolean;
+    loading?: boolean;
+};
 
-const PageNumberButton = defineComponent<{
-    page: number;
-    active?: boolean;
-    loading: boolean;
-    label?: string;
-    goToPage: (targetPageNumber: number) => void;
-}>(
-    (props) => {
-        const activate = () => {
-            if (!props.loading) props.goToPage(props.page);
-        };
-        return () => (
-            <div
-                class={["pg-page-number", props.active ? "pg-page-number--active" : ""]}
-                role="button"
-                tabindex={props.loading ? -1 : 0}
-                aria-current={props.active ? "page" : undefined}
-                aria-label={props.label}
-                aria-disabled={props.loading ? "true" : undefined}
-                onKeydown={(event: KeyboardEvent) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        activate();
-                    }
-                }}
-                onClick={activate}
-            >
-                <span>{props.label ?? props.page}</span>
-            </div>
-        );
-    },
-    {
-        props: ["page", "active", "loading", "label", "goToPage"],
-    },
-);
+const DEFAULT_PAGE_SIZES = [10, 25, 50, 100];
 
-const TableFooterLeft = defineComponent(
-    (props: {
-        totalDataLength: number;
-        hasPrev: boolean;
-        prev: () => void;
-        hasNext: boolean;
-        loading: boolean;
-        next: () => void;
-
-        currentPage: number;
-        numberOfPages: number;
-        goToPage: (targetPageNumber: number) => void;
-    }) => {
+export const TableFooter = defineComponent<TableFooterProps>(
+    (props, { emit }) => {
+        const { t, isRtl } = useLocale();
         const display = useDisplay();
-        const { t } = useLocale();
-        return () => {
-            const isMobile = display.mobile.value;
+        const mobile = computed(() => display.mobile.value);
 
-            return (!props.totalDataLength || props.totalDataLength == 0 ? <></> : (
-                <div
-                    class="pg-pagination"
-                    {...{ role: "navigation", "aria-label": t("Pagination") }}
-                    style={{ gap: isMobile ? "12px" : "16px" }}
-                >
-                    <PrevButton loading={props.loading} hasPrev={props.hasPrev} prev={props.prev}></PrevButton>
-                    <PagesNumbers
-                        loading={props.loading}
-                        currentPage={props.currentPage}
-                        goToPage={props.goToPage}
-                        numberOfPages={props.numberOfPages}
-                    ></PagesNumbers>
-                    <NextButton loading={props.loading} hasNext={props.hasNext} next={props.next}></NextButton>
-                </div>
-            ));
-        };
-    },
-    {
-        props: ["totalDataLength", "hasPrev", "prev", "hasNext", "loading", "next", "currentPage", "numberOfPages", "goToPage"],
-    },
-);
+        const page = computed(() => {
+            const value = Number(props.page ?? props.currentPage ?? 1);
+            return Number.isFinite(value) && value > 0 ? Math.floor(value) : 1;
+        });
+        const size = computed(() => {
+            const value = Number(props.pageSize ?? props.numberOfItemsPerPage ?? 25);
+            return Number.isFinite(value) && value > 0 ? Math.floor(value) : 25;
+        });
+        const total = computed(() => {
+            const value = Number(props.total ?? props.totalDataLength ?? 0);
+            return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+        });
+        const pages = computed(() => {
+            const explicit = Number(props.numberOfPages);
+            if (Number.isFinite(explicit) && explicit > 0) return Math.floor(explicit);
+            return Math.max(1, Math.ceil(total.value / Math.max(1, size.value)));
+        });
+        const start = computed(() => (total.value === 0 ? 0 : (page.value - 1) * size.value + 1));
+        const end = computed(() => Math.min(total.value, page.value * size.value));
 
-const PagesNumbers = defineComponent(
-    (props: { currentPage: number; numberOfPages: number; goToPage: (targetPageNumber: number) => void; loading: boolean }) => {
-        return () => {
-            const rangedLength = 2;
-            const startSection =
-                props.currentPage > rangedLength + 1 ? (
-                    <PageNumberButton
-                        page={1}
-                        label={`1${props.currentPage - rangedLength - 1 == 1 ? "" : "..."}`}
-                        loading={props.loading}
-                        goToPage={props.goToPage}
-                    />
-                ) : null;
-
-            const lastSection =
-                props.currentPage < props.numberOfPages - rangedLength ? (
-                    <PageNumberButton
-                        page={props.numberOfPages}
-                        label={`${props.currentPage + rangedLength + 1 == props.numberOfPages ? "" : "..."}${props.numberOfPages}`}
-                        loading={props.loading}
-                        goToPage={props.goToPage}
-                    />
-                ) : null;
-
-            const previousPagesNumbers: any[] = [];
-            for (let i = props.currentPage - rangedLength > 1 ? props.currentPage - rangedLength : 1; i < props.currentPage; i++) {
-                previousPagesNumbers.push(
-                    <PageNumberButton key={`${i}`} page={i} loading={props.loading} goToPage={props.goToPage} />,
-                );
-            }
-
-            const nextPagesNumbers: any[] = [];
-            for (let i = props.currentPage + 1; i <= Math.min(props.numberOfPages, props.currentPage + rangedLength); i++) {
-                nextPagesNumbers.push(
-                    <PageNumberButton key={`${i}`} page={i} loading={props.loading} goToPage={props.goToPage} />,
-                );
-            }
-
-            return (
-                <div class="pg-page-numbers">
-                    {startSection}
-                    {previousPagesNumbers}
-                    <PageNumberButton page={props.currentPage} active loading={props.loading} goToPage={props.goToPage} />
-                    {nextPagesNumbers}
-                    {lastSection}
-                </div>
-            );
-        };
-    },
-    {
-        props: ["currentPage", "numberOfPages", "goToPage", "loading"],
-    },
-);
-
-const PrevButton = defineComponent(
-    (props: { loading: boolean; hasPrev: boolean; prev: () => void }) => {
-        const locale = useLocale();
-        return () => {
-            const isDisabled = !props.hasPrev || props.loading;
-            return (
-                <div
-                    class={["pg-pagination-button", isDisabled ? "pg-pagination-button--disabled" : ""]}
-                    role="button"
-                    tabindex={isDisabled ? -1 : 0}
-                    {...{ "aria-label": locale.t("Previous page"), "aria-disabled": isDisabled ? "true" : "false" }}
-                    onKeydown={(event: KeyboardEvent) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            if (!isDisabled) props.prev();
-                        }
-                    }}
-                    onClick={() => {
-                        if (!isDisabled) props.prev();
-                    }}
-                >
-                    <PgIcon icon={locale.isRtl.value ? "mdi-chevron-right" : "mdi-chevron-left"} size={18} />
-                </div>
-            );
-        };
-    },
-    {
-        props: ["loading", "hasPrev", "prev"],
-    },
-);
-
-const NextButton = defineComponent(
-    (props: { loading: boolean; hasNext: boolean; next: () => void }) => {
-        const locale = useLocale();
-        return () => {
-            const isDisabled = !props.hasNext || props.loading;
-            return (
-                <div
-                    class={["pg-pagination-button", isDisabled ? "pg-pagination-button--disabled" : ""]}
-                    role="button"
-                    tabindex={isDisabled ? -1 : 0}
-                    {...{ "aria-label": locale.t("Next page"), "aria-disabled": isDisabled ? "true" : "false" }}
-                    onKeydown={(event: KeyboardEvent) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            if (!isDisabled) props.next();
-                        }
-                    }}
-                    onClick={() => {
-                        if (!isDisabled) props.next();
-                    }}
-                >
-                    <PgIcon icon={locale.isRtl.value ? "mdi-chevron-left" : "mdi-chevron-right"} size={18} />
-                </div>
-            );
-        };
-    },
-    {
-        props: ["loading", "hasNext", "next"],
-    },
-);
-
-const TableFooterRight = defineComponent(
-    (props: {
-        dataLength: number;
-        numberOfItemsPerPage: number;
-        setNumberOfItemsPerPage?: (numberOfItemsPerPage: number) => void;
-        numberOfItemsPerPageChoices?: { label: string; value: number }[];
-    }) => {
-        const selectedNumberOfItemsPerPage = ref(
-            props.numberOfItemsPerPageChoices?.find((choice) => {
-                return choice.value == props.numberOfItemsPerPage;
-            }) || (null as null | { label: string; value: number }),
+        const rangeLabel = computed(() =>
+            total.value === 0
+                ? t("0 results")
+                : `${t("Showing")} ${formatPlainNumber(start.value)}–${formatPlainNumber(end.value)} ${t("of")} ${formatPlainNumber(total.value)}`,
         );
 
-        watch([() => props.numberOfItemsPerPage], () => {
-            selectedNumberOfItemsPerPage.value =
-                props.numberOfItemsPerPageChoices?.find((choice) => {
-                    return choice.value == props.numberOfItemsPerPage;
-                }) || null;
+        const hasPrev = () => (typeof props.hasPrev === "boolean" ? props.hasPrev : page.value > 1);
+        const hasNext = () => (typeof props.hasNext === "boolean" ? props.hasNext : page.value < pages.value);
+
+        const goto = (target: number) => {
+            if (props.loading) return;
+            if (!Number.isFinite(target) || target < 1 || target > pages.value || target === page.value) return;
+            props.goToPage?.(target);
+            emit?.("update:page", target);
+        };
+        const goPrev = () => {
+            if (!hasPrev() || props.loading) return;
+            if (props.prev) {
+                props.prev();
+                return;
+            }
+            goto(page.value - 1);
+        };
+        const goNext = () => {
+            if (!hasNext() || props.loading) return;
+            if (props.next) {
+                props.next();
+                return;
+            }
+            goto(page.value + 1);
+        };
+
+        const pageList = computed<Array<number | "gap">>(() => {
+            const last = pages.value;
+            const current = Math.min(Math.max(1, page.value), last);
+            if (last <= 7) return Array.from({ length: last }, (_, index) => index + 1);
+            const list: Array<number | "gap"> = [1];
+            const from = Math.max(2, current - 1);
+            const to = Math.min(last - 1, current + 1);
+            if (from > 2) list.push("gap");
+            for (let number = from; number <= to; number += 1) list.push(number);
+            if (to < last - 1) list.push("gap");
+            list.push(last);
+            return list;
         });
 
-        return () => {
-            if (!props.dataLength || !props.setNumberOfItemsPerPage || !props.numberOfItemsPerPageChoices) {
-                return <></>;
+        const sizeChoices = computed(() => {
+            if (Array.isArray(props.numberOfItemsPerPageChoices) && props.numberOfItemsPerPageChoices.length > 0) {
+                return props.numberOfItemsPerPageChoices;
             }
-            return (
-                <div class="pg-page-size">
-                    <PgAutocomplete
-                        aria-label="Rows per page"
-                        items={props.numberOfItemsPerPageChoices}
-                        itemTitle="label"
-                        itemValue="value"
-                        modelValue={selectedNumberOfItemsPerPage.value?.value ?? props.numberOfItemsPerPage}
-                        onUpdate:modelValue={(value: number) => props.setNumberOfItemsPerPage?.(value)}
-                        searchable={false}
-                        clearable={false}
-                        size="sm"
-                        density="compact"
-                        hideDetails
-                    />
-                </div>
+            return (props.pageSizeOptions && props.pageSizeOptions.length > 0 ? props.pageSizeOptions : DEFAULT_PAGE_SIZES).map(
+                (value) => ({ label: String(value), value }),
             );
+        });
+
+        const setSize = (value: unknown) => {
+            const next = Number(value);
+            if (!Number.isFinite(next) || next <= 0 || next === size.value) return;
+            props.setNumberOfItemsPerPage?.(next);
+            emit?.("update:pageSize", next);
         };
-    },
-    {
-        props: ["dataLength", "numberOfItemsPerPage", "setNumberOfItemsPerPage", "numberOfItemsPerPageChoices"],
-    },
-);
 
-const TableFooterMobile = defineComponent(
-    (props: {
-        totalDataLength: number;
-        hasPrev: boolean;
-        setNumberOfItemsPerPage?: (numberOfItemsPerPage: number) => void;
-        numberOfItemsPerPageChoices?: { label: string; value: number }[];
-        numberOfItemsPerPage: number;
-        prev: () => void;
-        hasNext: boolean;
-        loading: boolean;
-        next: () => void;
-
-        currentPage: number;
-        numberOfPages: number;
-        goToPage: (targetPageNumber: number) => void;
-    }) => {
         return () => (
-            <div class="pg-table-footer pg-table-footer--mobile">
-                <TableFooterLeft
-                    totalDataLength={props.totalDataLength}
-                    loading={props.loading}
-                    hasNext={props.hasNext}
-                    hasPrev={props.hasPrev}
-                    next={props.next}
-                    currentPage={props.currentPage}
-                    goToPage={props.goToPage}
-                    numberOfPages={props.numberOfPages}
-                    prev={props.prev}
-                />
-                <TableFooterRight
-                    dataLength={props.totalDataLength}
-                    numberOfItemsPerPageChoices={props.numberOfItemsPerPageChoices}
-                    numberOfItemsPerPage={props.numberOfItemsPerPage}
-                    setNumberOfItemsPerPage={props.setNumberOfItemsPerPage}
-                />
+            <div class={["pg-table-footer", mobile.value ? "pg-table-footer--mobile" : ""]}>
+                <div class="pg-table-footer__range pg-tabular" role="status" aria-live="polite">
+                    {rangeLabel.value}
+                </div>
+                <div class="pg-table-footer__controls">
+                    <nav class="pg-pagination" role="navigation" aria-label={t("Pagination")}>
+                        <button
+                            type="button"
+                            class="pg-pagination-button"
+                            aria-label={t("Previous page")}
+                            aria-disabled={!hasPrev() || Boolean(props.loading) ? "true" : undefined}
+                            disabled={!hasPrev() || Boolean(props.loading)}
+                            onClick={goPrev}
+                        >
+                            <PgIcon icon={isRtl.value ? "mdi-chevron-right" : "mdi-chevron-left"} size={18} />
+                        </button>
+                        <div class="pg-page-numbers">
+                            {pageList.value.map((entry, index) =>
+                                entry === "gap" ? (
+                                    <span key={`gap-${index}`} class="pg-page-ellipsis" aria-hidden="true">
+                                        …
+                                    </span>
+                                ) : (
+                                    <button
+                                        key={`page-${entry}`}
+                                        type="button"
+                                        class={["pg-page-number", entry === page.value ? "pg-page-number--active" : ""]
+                                            .filter(Boolean)
+                                            .join(" ")}
+                                        aria-label={`${t("Page")} ${entry}`}
+                                        aria-current={entry === page.value ? "page" : undefined}
+                                        disabled={Boolean(props.loading)}
+                                        onClick={() => goto(entry)}
+                                    >
+                                        {entry}
+                                    </button>
+                                ),
+                            )}
+                        </div>
+                        <button
+                            type="button"
+                            class="pg-pagination-button"
+                            aria-label={t("Next page")}
+                            aria-disabled={!hasNext() || Boolean(props.loading) ? "true" : undefined}
+                            disabled={!hasNext() || Boolean(props.loading)}
+                            onClick={goNext}
+                        >
+                            <PgIcon icon={isRtl.value ? "mdi-chevron-left" : "mdi-chevron-right"} size={18} />
+                        </button>
+                    </nav>
+                    {total.value > 0 && (
+                        <div class="pg-page-size">
+                            <span class="pg-sr-only">{t("Rows per page")}</span>
+                            <PgAutocomplete
+                                aria-label={t("Rows per page")}
+                                items={sizeChoices.value}
+                                itemTitle="label"
+                                itemValue="value"
+                                modelValue={size.value}
+                                onUpdate:modelValue={(value: number) => setSize(value)}
+                                searchable={false}
+                                clearable={false}
+                                size="sm"
+                                density="compact"
+                                hideDetails
+                            />
+                        </div>
+                    )}
+                </div>
             </div>
         );
     },
     {
         props: [
-            "totalDataLength",
-            "hasPrev",
-            "setNumberOfItemsPerPage",
-            "numberOfItemsPerPageChoices",
+            "page",
+            "currentPage",
+            "pageSize",
             "numberOfItemsPerPage",
+            "total",
+            "totalDataLength",
+            "numberOfPages",
+            "pageSizeOptions",
+            "numberOfItemsPerPageChoices",
+            "setNumberOfItemsPerPage",
+            "goToPage",
+            "next",
             "prev",
             "hasNext",
-            "loading",
-            "next",
-            "currentPage",
-            "numberOfPages",
-            "goToPage",
-        ],
-    },
-);
-
-const TableFooterDesktop = defineComponent(
-    (props: {
-        hasPrev: boolean;
-        setNumberOfItemsPerPage?: (numberOfItemsPerPage: number) => void;
-        numberOfItemsPerPageChoices?: { label: string; value: number }[];
-        numberOfItemsPerPage: number;
-
-        prev: () => void;
-        totalDataLength: number;
-
-        currentPage: number;
-        numberOfPages: number;
-        goToPage: (targetPageNumber: number) => void;
-        hasNext: boolean;
-        next: () => void;
-        loading: boolean;
-    }) => {
-        return () => (
-            <div class="pg-table-footer">
-                <TableFooterLeft
-                    totalDataLength={props.totalDataLength}
-                    loading={props.loading}
-                    hasNext={props.hasNext}
-                    hasPrev={props.hasPrev}
-                    next={props.next}
-                    prev={props.prev}
-                    currentPage={props.currentPage}
-                    goToPage={props.goToPage}
-                    numberOfPages={props.numberOfPages}
-                />
-                <TableFooterRight
-                    dataLength={props.totalDataLength}
-                    numberOfItemsPerPage={props.numberOfItemsPerPage}
-                    numberOfItemsPerPageChoices={props.numberOfItemsPerPageChoices}
-                    setNumberOfItemsPerPage={props.setNumberOfItemsPerPage}
-                />
-            </div>
-        );
-    },
-    {
-        props: [
             "hasPrev",
-            "setNumberOfItemsPerPage",
-            "numberOfItemsPerPageChoices",
-            "numberOfItemsPerPage",
-            "prev",
-            "totalDataLength",
-            "currentPage",
-            "numberOfPages",
-            "goToPage",
-            "hasNext",
-            "next",
             "loading",
-        ],
+        ] as any[],
+        emits: ["update:page", "update:pageSize"],
+        rerender: true,
     },
 );
 

@@ -1,6 +1,6 @@
 import { dc } from "@/utils/dc";
 import { computed } from "vue";
-import {PgButton, PgIcon} from "@pg/ui";
+import {PgAlert, PgButton, PgIcon} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
 import {DescriptionList, MetaPill, MonoRef, SlideOverDrawer} from "@pg/ui";
@@ -38,20 +38,8 @@ const digitsOnly = (value: string): string => value.replace(/[^\d]/g, "");
 
 const sectionTitleStyle = { fontSize: "14px", fontWeight: 600, color: "var(--pg-ink-primary)" } as const;
 
-const STATE_TONE_STYLES = {
-    info: {
-        background: "var(--pg-status-info-bg)",
-        border: "var(--pg-status-info-border)",
-    },
-    warning: {
-        background: "var(--pg-status-warning-bg)",
-        border: "var(--pg-status-warning-border)",
-    },
-    error: {
-        background: "var(--pg-status-danger-bg)",
-        border: "var(--pg-status-danger-border)",
-    },
-} as const;
+const alertToneFor = (tone: StateHelp["tone"]): "info" | "warning" | "danger" =>
+    tone === "error" ? "danger" : tone;
 
 export const CheckoutHelpDrawer = dc(
     (props: CheckoutHelpDrawerProps) => {
@@ -236,7 +224,6 @@ export const CheckoutHelpDrawer = dc(
             const hasGuide = !!guide.value;
             const hasTroubleshooting = troubleshooting.value.length > 0;
             const hasWorkingHours = !!workingHours.value;
-            const stateTone = stateHelp.value ? STATE_TONE_STYLES[stateHelp.value.tone] : null;
 
             return (
                 <SlideOverDrawer
@@ -256,30 +243,10 @@ export const CheckoutHelpDrawer = dc(
                             gap: "18px",
                         }}
                     >
-                        {stateHelp.value && stateTone && (
-                            <div
-                                style={{
-                                    display: "flex",
-                                    flexDirection: "column",
-                                    gap: "4px",
-                                    padding: "10px 12px",
-                                    borderRadius: "var(--pg-radius-sm)",
-                                    backgroundColor: stateTone.background,
-                                    border: `1px solid ${stateTone.border}`,
-                                }}
-                            >
-                                <ThemedText
-                                    type="defaultSemiBold"
-                                    style={{ fontSize: "14px", color: "var(--pg-ink-primary)" }}
-                                >
-                                    {stateHelp.value.title}
-                                </ThemedText>
-                                <ThemedText
-                                    style={{ fontSize: "13px", lineHeight: 1.7, color: "var(--pg-ink-secondary)" }}
-                                >
-                                    {stateHelp.value.body}
-                                </ThemedText>
-                            </div>
+                        {stateHelp.value && (
+                            <PgAlert tone={alertToneFor(stateHelp.value.tone)} title={stateHelp.value.title}>
+                                {stateHelp.value.body}
+                            </PgAlert>
                         )}
 
                         {!!referenceValue.value && (
@@ -576,6 +543,7 @@ export const CheckoutHelpDrawer = dc(
     },
     {
         props: ["open", "onClose", "summary", "selectedRail", "attemptStatus", "reference", "locale"],
+        rerender: true,
     },
 );
 

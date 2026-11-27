@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRoute, useRouter } from "vue-router";
-import {VAlert, PgAutocomplete, PgButton, PgSpinner, PgSwitch, PgTextField, PgTextarea} from "@pg/ui";
+import {PgAlert, PgAutocomplete, PgButton, PgSpinner, PgSwitch, PgTextField, PgTextarea, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -614,18 +614,18 @@ const AdjustmentsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Adjustments")} subtitle={t("Draft and review adjustments under maker-checker governance. Every adjustment requires independent finance approval before execution.")} badge={t("Four-Eyes Required")} badgeTone="warning">(
+            <PgStack gap="lg">
+                <PageHeader title={t("Adjustments")} subtitle={t("Draft and review adjustments under maker-checker governance. Every adjustment requires independent finance approval before execution.")} badge={t("Four-Eyes Required")} badgeTone="warning">
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</PgButton>
                             <PgButton color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("Propose")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("Every adjustment is a draft plus an approval request. Money moves only after a different finance checker approves it.")}
-                </VAlert>
+                </PgAlert>
 
                 {summary.value && (
                     <SummaryExportCard
@@ -714,7 +714,7 @@ const AdjustmentsPage = dc(() => {
                         />
                     )}
                 />
-            </ThemedView>
+            </PgStack>
 
             <SlideOverDrawer
                 modelValue={detailsOpen.value}
@@ -802,7 +802,7 @@ const AdjustmentsPage = dc(() => {
                 submitLabel={t("Export")}
                 onSubmit={() => void exportExcel()}
             >
-                <VAlert type="warning" variant="tonal">{t("The export contains adjustment amounts, approval states and dispute links. Handle it as confidential financial evidence.")}</VAlert>
+                <PgAlert tone="warning">{t("The export contains adjustment amounts, approval states and dispute links. Handle it as confidential financial evidence.")}</PgAlert>
                 <FormChecklist
                     checks={[...EXPORT_CHECKS]}
                     modelValue={exportChecklist.value}
@@ -824,9 +824,9 @@ const AdjustmentsPage = dc(() => {
                 submitLabel={t("Create draft")}
                 onSubmit={() => void submit()}
             >
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("The draft creates an approval request. The adjustment does not execute until a different finance checker approves it.")}
-                </VAlert>
+                </PgAlert>
                 <SectionFields title={t("Adjustment details")}>
                     <FormField label={t("Adjustment type")} required sensitiveMakerChecker>
                         <PgAutocomplete

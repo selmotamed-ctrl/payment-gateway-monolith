@@ -2,7 +2,7 @@ import { type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton} from "@pg/ui";
+import {PgAlert, PgButton} from "@pg/ui";
 import {MetaPill} from "@pg/ui";
 import {MoneyDisplay} from "@pg/ui";
 import {MonoRef} from "@pg/ui";
@@ -105,7 +105,7 @@ export const ApprovalSubmittedNotice = defineComponent({
         const openApprovals = () =>
             void router.push({ name: "Approvals", query: props.approvalRequestId ? { open: props.approvalRequestId } : {} });
         return (): VNodeChild => (
-            <VAlert type="info" variant="tonal" density="compact" {...{ role: "status" }}>
+            <PgAlert tone="info" density="compact" {...{ role: "status" }}>
                 <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px", justifyContent: "space-between" }}>
                     <span>{t("Submitted for approval. The change is not applied until an independent checker approves it.")}</span>
                     <span style={{ display: "inline-flex", gap: "6px" }}>
@@ -113,7 +113,7 @@ export const ApprovalSubmittedNotice = defineComponent({
                         {props.dismissible && <PgButton size="small" variant="text" onClick={() => emit("dismiss")}>{t("Dismiss")}</PgButton>}
                     </span>
                 </div>
-            </VAlert>
+            </PgAlert>
         );
     },
 });
@@ -217,7 +217,7 @@ export const MiniTable = defineComponent({
         });
         return (): VNodeChild => {
             return (props.rows.length === 0 ? <div style={{ padding: "14px 4px", fontSize: "12.5px", color: "var(--pg-ink-muted)" }}>{props.emptyLabel}</div> : (
-                <div style={{ overflowX: "auto", border: "1px solid var(--pg-border-subtle)", borderRadius: "var(--pg-radius-md)" }}>
+                <div style={{ overflowX: "auto" }}>
                     <table aria-label={props.ariaLabel || undefined} style={{ width: "100%", borderCollapse: "collapse" }}>
                         <thead>
                             <tr>

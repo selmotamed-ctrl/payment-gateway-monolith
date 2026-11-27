@@ -161,7 +161,7 @@ const TeamPage = dc(() => {
     };
 
     const header = () => (
-        <PageHeader title={t("Team progress")} subtitle={data.value ? `${t("Updated")} ${fmtDateTime(data.value.generatedAt)} · ${t("Content version")} ${data.value.contentVersion}` : ""} breadcrumbs={[{ label: t("My learning"), to: router.resolve({ name: "AdminAcademy" }).fullPath }, { label: t("Team progress") }]}>(
+        <PageHeader title={t("Team progress")} subtitle={data.value ? `${t("Updated")} ${fmtDateTime(data.value.generatedAt)} · ${t("Content version")} ${data.value.contentVersion}` : ""} breadcrumbs={[{ label: t("My learning"), to: router.resolve({ name: "AdminAcademy" }).fullPath }, { label: t("Team progress") }]}>
                 <>
                     <PgButton variant="outlined" size="small" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
                         {t("Refresh")}
@@ -176,7 +176,7 @@ const TeamPage = dc(() => {
                         {t("Revoke certificate")}
                     </PgButton>
                 </>
-            )</PageHeader>
+        </PageHeader>
     );
 
     /** Same silhouette as the loaded page (status strip + table card) so nothing jumps. */

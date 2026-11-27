@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRoute, useRouter } from "vue-router";
-import {VAlert, PgButton, PgCheckbox, PgExpansionPanel, PgExpansionPanelText, PgExpansionPanelTitle, PgExpansionPanels, PgIcon, PgAutocomplete, PgTextField, PgTextarea, PgTimeline, PgTimelineItem} from "@pg/ui";
+import {PgAlert, PgButton, PgCheckbox, PgExpansionPanel, PgExpansionPanels, PgIcon, PgAutocomplete, PgTextField, PgTextarea, PgTimeline, PgTimelineItem, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -727,9 +727,9 @@ const OperatorCaseDetailPage = dc(() => {
         const attempt = detail.value?.attempt;
         if (!attempt) {
             return (
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("This is a ")}{typeMeta.value.label}{t(" case. The case context, source link and evidence below are the resolution inputs; closing it does not change a payment attempt.")}
-                </VAlert>
+                </PgAlert>
             );
         }
         return null;
@@ -737,8 +737,8 @@ const OperatorCaseDetailPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={`${t("Operator Case")} ${caseRef.value}`} subtitle={t("Inspect the case, evidence, identifiers and maker-checker resolution path.")}>(
+            <PgStack gap="lg">
+                <PageHeader title={`${t("Operator Case")} ${caseRef.value}`} subtitle={t("Inspect the case, evidence, identifiers and maker-checker resolution path.")}>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <PgButton variant="text" prependIcon="mdi-arrow-left" onClick={() => router.push({ name: "OperatorCases" })}>
                                 {t("Back")}
@@ -776,7 +776,7 @@ const OperatorCaseDetailPage = dc(() => {
                                 </>
                             )}
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
@@ -854,24 +854,24 @@ const OperatorCaseDetailPage = dc(() => {
                         <MetricStrip items={stats.value} />
 
                         {isPendingChecker.value && (
-                            <VAlert type="info" variant="tonal">
+                            <PgAlert tone="info">
                                 {t("A resolution is waiting for a different checker. The attempt and the ledger have not been changed yet.")}
-                            </VAlert>
+                            </PgAlert>
                         )}
                         {isResolved.value && (
-                            <VAlert type="success" variant="tonal">
+                            <PgAlert tone="success">
                                 {t("This case is resolved. The resolution notes below record the approved outcome.")}
-                            </VAlert>
+                            </PgAlert>
                         )}
                         {!inquiry.value?.eligible && !isResolved.value && !isPendingChecker.value && (
-                            <VAlert type="warning" variant="tonal">
+                            <PgAlert tone="warning">
                                 {INQUIRY_REASON_HELP[inquiry.value?.reason ?? ""] ?? t("Gateway inquiry is not available")}
-                            </VAlert>
+                            </PgAlert>
                         )}
                         {sla.value.tone === "error" && !isResolved.value && (
-                            <VAlert type="error" variant="tonal">
+                            <PgAlert tone="danger">
                                 {t("The SLA deadline has passed. Prioritise this case and document the reason for the delay.")}
-                            </VAlert>
+                            </PgAlert>
                         )}
 
                         <SurfaceCard>
@@ -1013,11 +1013,7 @@ const OperatorCaseDetailPage = dc(() => {
                         </SurfaceCard>
 
                         <PgExpansionPanels multiple>
-                            <PgExpansionPanel value="step-logs">
-                                <PgExpansionPanelTitle>
-                                    {t("Gateway step logs")} ({(detail.value.attempt?.stepLogs ?? []).length})
-                                </PgExpansionPanelTitle>
-                                <PgExpansionPanelText>
+                            <PgExpansionPanel value="step-logs" title={`${t("Gateway step logs")} (${(detail.value.attempt?.stepLogs ?? []).length})`}>
                                     {(detail.value.attempt?.stepLogs ?? []).length === 0 ? (
                                         <EmptyState title={t("No step logs recorded")} icon="mdi-script-text-outline" />
                                     ) : (
@@ -1042,14 +1038,9 @@ const OperatorCaseDetailPage = dc(() => {
                                             </SurfaceCard>
                                         ))
                                     )}
-                                </PgExpansionPanelText>
                             </PgExpansionPanel>
 
-                            <PgExpansionPanel value="inbound-events">
-                                <PgExpansionPanelTitle>
-                                    {t("Inbound webhooks")} ({(detail.value.attempt?.inboundEvents ?? []).length})
-                                </PgExpansionPanelTitle>
-                                <PgExpansionPanelText>
+                            <PgExpansionPanel value="inbound-events" title={`${t("Inbound webhooks")} (${(detail.value.attempt?.inboundEvents ?? []).length})`}>
                                     {(detail.value.attempt?.inboundEvents ?? []).length === 0 ? (
                                         <EmptyState title={t("No inbound events recorded")} icon="mdi-webhook" />
                                     ) : (
@@ -1082,14 +1073,12 @@ const OperatorCaseDetailPage = dc(() => {
                                             </SurfaceCard>
                                         ))
                                     )}
-                                </PgExpansionPanelText>
                             </PgExpansionPanel>
 
-                            <PgExpansionPanel value="related">
-                                <PgExpansionPanelTitle>
-                                    {t("Adjustments and disputes")} ({(detail.value.attempt?.adjustments ?? []).length + (detail.value.attempt?.disputes ?? []).length})
-                                </PgExpansionPanelTitle>
-                                <PgExpansionPanelText>
+                            <PgExpansionPanel
+                                value="related"
+                                title={`${t("Adjustments and disputes")} (${(detail.value.attempt?.adjustments ?? []).length + (detail.value.attempt?.disputes ?? []).length})`}
+                            >
                                     {(detail.value.attempt?.adjustments ?? []).map((adjustment) => {
                                         const row = adjustment as Record<string, unknown>;
                                         return (
@@ -1109,14 +1098,9 @@ const OperatorCaseDetailPage = dc(() => {
                                     {(detail.value.attempt?.adjustments ?? []).length === 0 && (detail.value.attempt?.disputes ?? []).length === 0 && (
                                         <EmptyState title={t("No adjustments or disputes")} icon="mdi-scale-balance" />
                                     )}
-                                </PgExpansionPanelText>
                             </PgExpansionPanel>
 
-                            <PgExpansionPanel value="audit">
-                                <PgExpansionPanelTitle>
-                                    {t("Audit trail")} ({(detail.value.auditTrail ?? []).length})
-                                </PgExpansionPanelTitle>
-                                <PgExpansionPanelText>
+                            <PgExpansionPanel value="audit" title={`${t("Audit trail")} (${(detail.value.auditTrail ?? []).length})`}>
                                     {(detail.value.auditTrail ?? []).map((audit) => (
                                         <ThemedView
                                             key={audit.id}
@@ -1138,25 +1122,21 @@ const OperatorCaseDetailPage = dc(() => {
                                     {(detail.value.auditTrail ?? []).length === 0 && (
                                         <EmptyState title={t("No audit entries recorded")} icon="mdi-history" />
                                     )}
-                                </PgExpansionPanelText>
                             </PgExpansionPanel>
                         </PgExpansionPanels>
 
                         <PgExpansionPanels>
-                            <PgExpansionPanel value="technical-identifiers">
-                                <PgExpansionPanelTitle>{t("Technical identifiers")}</PgExpansionPanelTitle>
-                                <PgExpansionPanelText>
-                                    <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
-                                        {t("Raw database and audit identifiers. Start with the case context above; use these only when cross-referencing logs or support tickets.")}
-                                    </ThemedText>
-                                    <DescriptionList columns={2} items={identifierItems.value} />
-                                </PgExpansionPanelText>
+                            <PgExpansionPanel value="technical-identifiers" title={t("Technical identifiers")}>
+                                <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
+                                    {t("Raw database and audit identifiers. Start with the case context above; use these only when cross-referencing logs or support tickets.")}
+                                </ThemedText>
+                                <DescriptionList columns={2} items={identifierItems.value} />
                             </PgExpansionPanel>
                         </PgExpansionPanels>
 
                     </>
                 )}
-            </ThemedView>
+            </PgStack>
 
             <FormModal
                 modelValue={inquiryOpen.value}
@@ -1187,9 +1167,9 @@ const OperatorCaseDetailPage = dc(() => {
                 cancelLabel={t("Cancel")}
                 loading={actionLoading.value}
             >
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("This creates a Maker-Checker proposal. A different checker must approve it before the attempt or ledger changes.")}
-                </VAlert>
+                </PgAlert>
                 <FormField label={t("Resolution action")} required>
                     <PgAutocomplete
                         items={actionOptions.value}

@@ -11,7 +11,7 @@ import {StatusBadge} from "@pg/ui";
 import {MoneyDisplay} from "@pg/ui";
 import {EmptyState} from "@pg/ui";
 import {StateView} from "@pg/ui";
-import { LazyEChart as EChart } from "@/charts/EChart/lazy";
+import { PgChart as EChart } from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";

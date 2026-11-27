@@ -2,10 +2,9 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import {PgButton} from "@pg/ui";
+import {PgButton, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import {StatusBadge, formatHumanStatus} from "@pg/ui";
 import {MetricStrip, type MetricItem} from "@pg/ui";
@@ -454,8 +453,8 @@ const JobsOutboxPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("System Jobs & Outbox")} subtitle={t("Delivery health of the transactional outbox, the audit outbox, background jobs and notifications.")} badge={t("Operations")} badgeTone="info">(
+            <PgStack gap="lg">
+                <PageHeader title={t("System Jobs & Outbox")} subtitle={t("Delivery health of the transactional outbox, the audit outbox, background jobs and notifications.")} badge={t("Operations")} badgeTone="info">
                         <>
                             <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>
                                 {t("Refresh")}
@@ -464,7 +463,7 @@ const JobsOutboxPage = dc(() => {
                                 {t("Copy monitor summary")}
                             </PgButton>
                         </>
-                    )</PageHeader>
+                </PageHeader>
                 {summary.value && <MetricStrip items={metricItems.value} />}
                 <SegmentedTabs
                     modelValue={tab.value}
@@ -483,7 +482,7 @@ const JobsOutboxPage = dc(() => {
                     </ThemedText>
                 ) : null}
                 {tabView()}
-            </ThemedView>
+            </PgStack>
             <ReasonModal
                 modelValue={pending.value !== null}
                 onUpdate:modelValue={(open: boolean) => {

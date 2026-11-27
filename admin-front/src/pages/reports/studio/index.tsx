@@ -2,9 +2,9 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import {PgPage as ScreenContainer} from "@pg/ui";
+import {PgPage as ScreenContainer, PgStack} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
-import {VAlert, PgButton, PgBtnToggle, PgCol, PgFileUpload, PgRow, PgAutocomplete} from "@pg/ui";
+import {PgAlert, PgButton, PgBtnToggle, PgCol, PgFileUpload, PgRow, PgAutocomplete} from "@pg/ui";
 import {FormChecklist} from "@pg/ui";
 import {FormModal} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
@@ -750,23 +750,20 @@ const ReportsStudioPage = dc(() => {
     <SurfaceCard
       title={t("Step 3 — Verification Scorecard")}
       subtitle={t("Layers 1-5, diagnostics and the one-click AI repair prompt")}
-      v-slots={
-        report.aiRepairPrompt
-          ? {
-              headerActions: () => (
-                <PgButton size="small" variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyRepairPrompt()}>
-                  {t("Copy AI Repair Prompt")}
-                </PgButton>
-              ),
-            }
-          : undefined
-      }
+      v-slots={{
+        headerActions: () =>
+          report.aiRepairPrompt ? (
+            <PgButton size="small" variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyRepairPrompt()}>
+              {t("Copy AI Repair Prompt")}
+            </PgButton>
+          ) : null,
+      }}
     >
       <div class="d-flex flex-column ga-4">
         {verificationStale.value && (
-          <VAlert type="warning" variant="tonal">
+          <PgAlert tone="warning">
             {t("The spec or asset bundle changed after verification. Verify again before saving or publishing.")}
-          </VAlert>
+          </PgAlert>
         )}
         <div class="d-flex flex-wrap ga-2">
           {report.layers.map((layer) => {
@@ -815,11 +812,10 @@ const ReportsStudioPage = dc(() => {
       <SurfaceCard
         title={t("Step 4 — Authority Inference")}
         subtitle={t("Computed from the queried models and columns")}
-        v-slots={
-          canOverride.value
-            ? {
-                headerActions: () => (
-                  <div class="d-flex flex-wrap ga-2">
+        v-slots={{
+          headerActions: () =>
+            canOverride.value ? (
+              <div class="d-flex flex-wrap ga-2">
                     <PgButton
                       size="small"
                       variant="tonal"
@@ -841,11 +837,9 @@ const ReportsStudioPage = dc(() => {
                     >
                       {t("Clear override")}
                     </PgButton>
-                  </div>
-                ),
-              }
-            : undefined
-        }
+              </div>
+            ) : null,
+        }}
       >
         <div class="d-flex flex-column ga-3">
           <DescriptionList
@@ -860,13 +854,13 @@ const ReportsStudioPage = dc(() => {
             ]}
           />
           {inference.conflictDetails.map((conflict) => (
-            <VAlert key={conflict.code} type="warning" variant="tonal">
+            <PgAlert key={conflict.code} tone="warning">
               <div class="d-flex flex-wrap align-center ga-2">
                 <MonoRef value={conflict.code} />
                 <span>{conflict.message}</span>
               </div>
               <div class="text-caption mt-1">{conflict.resolutionHint}</div>
-            </VAlert>
+            </PgAlert>
           ))}
           {canOverride.value && !savedSpecId.value && (
             <div class="text-caption text-medium-emphasis">{t("Save the spec as verified first so the override can be attached")}</div>
@@ -878,8 +872,8 @@ const ReportsStudioPage = dc(() => {
 
   return () => (
     <ScreenContainer>
-      <ThemedView style={{ gap: "18px" }}>
-        <PageHeader title={t("Report Studio")} subtitle={t("Download the AI transcript, verify a spec, infer authorities and publish")} badge={isVerified.value ? "VERIFIED" : "DRAFT"} badgeLabel={isVerified.value ? t("Verified") : t("Draft")} badgeTone={isVerified.value ? "success" : "neutral"}>(
+    <PgStack gap="lg">
+        <PageHeader title={t("Report Studio")} subtitle={t("Download the AI transcript, verify a spec, infer authorities and publish")} badge={isVerified.value ? "VERIFIED" : "DRAFT"} badgeLabel={isVerified.value ? t("Verified") : t("Draft")} badgeTone={isVerified.value ? "success" : "neutral"}>
             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
               <PgButton variant="tonal" prependIcon="mdi-file-chart-outline" onClick={() => void router.push({ name: "ReportsCatalog" })}>
                 {t("Open Catalog")}
@@ -895,57 +889,51 @@ const ReportsStudioPage = dc(() => {
                 </PgButton>
               )}
             </ThemedView>
-          )</PageHeader>
+        </PageHeader>
 
         {route.query.from === "migration" && (
-          <VAlert type="warning" variant="tonal">
+          <PgAlert tone="warning">
             {t("This report needs migration. Copy the migration prompt from the migration page, paste the migrated JSON here, verify and save it as a new version.")}
-          </VAlert>
+          </PgAlert>
         )}
         {error.value && (
-          <VAlert type="error" variant="tonal" closable onClick:close={() => (error.value = null)}>
+          <PgAlert tone="danger" closable onClear={() => (error.value = null)}>
             {error.value}
-          </VAlert>
+          </PgAlert>
         )}
         {actionDiagnostics.value.length > 0 && (
           <ReportDiagnosticsPanel diagnostics={actionDiagnostics.value} title={t("Action diagnostics")} />
         )}
 
         <SurfaceCard title={t("Step 1 — AI Authoring Transcript")} subtitle={t("The transcript contains the live schema, optimization rules and bilingual contract")}>
-          <PgRow dense align="center">
-            <PgCol cols={12} md={5}>
-              <PgAutocomplete
-                modelValue={domains.value}
-                onUpdate:modelValue={(value: string[]) => (domains.value = value)}
-                label={t("Domains")}
-                items={DOMAINS}
-                multiple
-                chips
-              />
-            </PgCol>
-            <PgCol cols={12} md={7} class="d-flex flex-wrap ga-2">
+          <PgStack gap="md">
+            <PgAutocomplete
+              modelValue={domains.value}
+              onUpdate:modelValue={(value: string[]) => (domains.value = value)}
+              label={t("Domains")}
+              items={DOMAINS}
+              multiple
+            />
+            <div class="d-flex flex-wrap ga-2">
               <PgButton color="primary" loading={busy.value} prependIcon="mdi-download" onClick={() => void downloadTranscript("REPORT")}>
                 {t("Download Report AI Transcript")}
               </PgButton>
               <PgButton variant="tonal" loading={busy.value} prependIcon="mdi-download" onClick={() => void downloadTranscript("CHROME")}>
                 {t("Download Header/Footer AI Transcript")}
               </PgButton>
-            </PgCol>
-          </PgRow>
+            </div>
+          </PgStack>
         </SurfaceCard>
 
         <SurfaceCard
           title={t("Step 2 — Upload Spec and Optional Asset Bundle")}
           subtitle={t("Standalone JSON or JSON paired with an assets .zip")}
-          v-slots={
-            savedSpecCode.value
-              ? {
-                  headerActions: () => (
-                    <MetaPill prependIcon="mdi-code-json">{`${savedSpecCode.value}${savedSpecVersion.value ? ` v${savedSpecVersion.value}` : ""}`}</MetaPill>
-                  ),
-                }
-              : undefined
-          }
+          v-slots={{
+            headerActions: () =>
+              savedSpecCode.value ? (
+                <MetaPill prependIcon="mdi-code-json">{`${savedSpecCode.value}${savedSpecVersion.value ? ` v${savedSpecVersion.value}` : ""}`}</MetaPill>
+              ) : null,
+          }}
         >
           <div class="d-flex flex-column ga-3">
             <PgRow dense>
@@ -968,9 +956,9 @@ const ReportsStudioPage = dc(() => {
               </PgCol>
             </PgRow>
             {loadedNeedsAssets.value && !zipFile.value && (
-              <VAlert type="info" variant="tonal">
+              <PgAlert tone="info">
                 {t("This spec declares required assets. Re-attach its asset bundle (.zip) before verifying.")}
-              </VAlert>
+              </PgAlert>
             )}
             <JsonSpecEditor
               modelValue={specJson.value}
@@ -1161,7 +1149,7 @@ const ReportsStudioPage = dc(() => {
           errorMessage={overrideError.value}
           onSubmit={(payload: AuthorityOverridePayload) => void applyOverride(payload)}
         />
-      </ThemedView>
+      </PgStack>
         <FormModal
           modelValue={publishOpen.value}
           onUpdate:modelValue={(value: boolean) => { publishOpen.value = value; if (!value) publishRowTarget.value = null; }}

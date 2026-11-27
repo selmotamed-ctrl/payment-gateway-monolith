@@ -1,38 +1,77 @@
-import { computed } from "vue";
+import { computed, watch } from "vue";
+import { createKeyedFragment } from "@vue/runtime-vapor";
 import { ConfigProvider } from "vael-ui/vapor";
 import { dc } from "../lib/dc";
-import { useLocale } from "../lib/locale";
+import { setLocale, registerLocaleHost, syncDocumentLocale, useLocale } from "../lib/locale";
 import { providePgUiConfig, type PgUiConfig } from "../lib/config";
-import { resolvedTheme } from "../lib/theme";
+import { initTheme, isThemeMode, resolvedTheme, setThemeMode, useTheme } from "../lib/theme";
 import { PgToaster } from "../feedback/PgToast";
 
 /**
- * Single root provider for every portal. Supplies the host API/config services,
- * maps the 2026 palette onto vael-ui's theme and mounts the one toast stack.
+ * Single root provider for every portal.
+ *
+ * It supplies the host API/config services, keeps `<html lang|dir>` and
+ * `data-theme` synchronized, bridges the `--pg-*` palette onto vael-ui for the
+ * remaining vael-form inputs (strictly bridged, never used by page code) and
+ * mounts the one toast stack.
  */
 export const PgProvider = dc(
-    (props: { config?: PgUiConfig }, _expose, { slots }) => {
+    (props: { config?: PgUiConfig; initialTheme?: "system" | "light" | "dark"; initialLocale?: "en" | "ar" }, _expose, { slots }) => {
         providePgUiConfig(props.config ?? {});
+        registerLocaleHost(props.config?.i18n);
+        initTheme();
+        if (isThemeMode(props.initialTheme)) setThemeMode(props.initialTheme);
+        if (props.initialLocale) setLocale(props.initialLocale);
         const { current } = useLocale();
-        const theme = computed(() => ({
-            primary: resolvedTheme.value === "dark" ? "#f4f4f5" : "#0f172a",
-            danger: resolvedTheme.value === "dark" ? "#f87171" : "#dc2626",
-            success: resolvedTheme.value === "dark" ? "#4ade80" : "#16a34a",
-            warning: resolvedTheme.value === "dark" ? "#fbbf24" : "#d97706",
-            info: resolvedTheme.value === "dark" ? "#60a5fa" : "#2563eb",
-            radius: "8px",
-            fontSize: "13px",
-        }));
+        syncDocumentLocale(String(current.value));
+        watch(
+            () => String(current.value),
+            (next) => syncDocumentLocale(next),
+        );
+        const theme = useTheme();
+        const bridgeTheme = computed(() => {
+            const colors = theme.current.value.colors;
+            return {
+                primary: colors.primary,
+                danger: colors.error,
+                success: colors.success,
+                warning: colors.warning,
+                info: colors.info,
+                background: colors.background,
+                surface: colors.surface,
+                radius: "8px",
+                fontSize: "13px",
+                dark: resolvedTheme.value === "dark",
+            };
+        });
         return () => (
-            <ConfigProvider theme={theme.value} locale={current.value} size="md" loaderType="ring" indicator="glide">
+            <ConfigProvider
+                theme={bridgeTheme.value}
+                locale={String(current.value)}
+                size="md"
+                loaderType="ring"
+                indicator="glide"
+            >
                 <PgToaster />
-                {slots.default?.()}
+                {/*
+                 * Re-key the whole application tree on a locale change. Vapor's
+                 * fine-grained slots keep computed label arrays cached, so a
+                 * language switch would otherwise leave the navigation, app bar
+                 * and pages rendered in the previous language. A keyed fragment
+                 * disposes the subtree once and rebuilds it fully translated.
+                 */}
+                {createKeyedFragment(() => String(current.value), () => slots.default?.())}
             </ConfigProvider>
         );
     },
     {
-        props: { config: { type: Object as () => PgUiConfig, default: () => ({}) } },
+        props: {
+            config: { type: Object as () => PgUiConfig, default: () => ({}) },
+            initialTheme: { type: String, default: "" },
+            initialLocale: { type: String, default: "" },
+        },
         slots: ["default"],
+        inheritAttrs: false,
     },
 );
 

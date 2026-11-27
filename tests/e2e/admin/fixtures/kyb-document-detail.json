@@ -1,0 +1,119 @@
+{
+  "kybDocument": {
+    "id": "5864932b-c751-4cba-b6df-f197312847e0",
+    "createdAt": "2026-11-27T17:17:15.253Z",
+    "updatedAt": "2026-11-27T17:17:15.277Z",
+    "merchantId": "10be6c18-d37b-747e-8889-000000000187",
+    "joinRequestId": "10be6c18-d37b-747e-8889-000000000191",
+    "subjectType": "BENEFICIAL_OWNER",
+    "subjectId": "10be6c18-d37b-747e-8889-00000000019c",
+    "docType": "OWNER_ID",
+    "originalFileName": "document.pdf",
+    "sha256": "seed-owner-10be6c18-d37b-747e-8889-00000000019c00000000000000000",
+    "mime": "application/pdf",
+    "sizeBytes": 261,
+    "avStatus": "CLEAN",
+    "status": "UPLOADED",
+    "reviewedById": null,
+    "uploadedBy": {
+      "id": "10be6c18-d37b-747e-8889-000000000009",
+      "email": "test@example.test"
+    },
+    "reviewedBy": null,
+    "reviewedAt": null,
+    "expiresOn": "2027-11-27T00:00:00.000Z",
+    "rejectionReasonCode": null,
+    "reviewNotes": null,
+    "duplicateJustification": null,
+    "statusChangedAt": "2026-11-27T17:17:15.253Z",
+    "expiredAt": null,
+    "merchant": {
+      "id": "10be6c18-d37b-747e-8889-000000000187",
+      "legalName": "Test Merchant",
+      "tradeName": "Test Merchant",
+      "status": "SUSPENDED",
+      "kybStatus": "VERIFIED",
+      "riskTier": "STANDARD",
+      "businessCategory": "Real Estate",
+      "country": "LY",
+      "contactEmail": "test@example.test",
+      "contactPhone": "+218910000000"
+    },
+    "joinRequest": {
+      "id": "10be6c18-d37b-747e-8889-000000000191",
+      "status": "APPROVED",
+      "onboardingChannel": "SELF_SERVICE",
+      "proposedRiskTier": "STANDARD",
+      "slaDueAt": "2024-11-16T05:39:03.000Z",
+      "slaPausedAt": null,
+      "slaRemainingSeconds": null,
+      "assignedReviewer": {
+        "id": "10be6c18-d37b-747e-8889-00000000000f",
+        "email": "test@example.test"
+      }
+    },
+    "contentAvailable": false,
+    "merchantName": "Test Merchant",
+    "subjectName": "Test Merchant",
+    "subjectOwner": {
+      "id": "10be6c18-d37b-747e-8889-00000000019c",
+      "fullNameAr": "Test Merchant",
+      "fullNameEn": "Test Merchant",
+      "screeningStatus": "CLEAR",
+      "active": true
+    },
+    "expiryState": "VALID",
+    "daysUntilExpiry": 365,
+    "duplicateMatches": [],
+    "duplicateMerchantCount": 0,
+    "duplicateDocumentCount": 0,
+    "readiness": {
+      "ready": true,
+      "blockers": [],
+      "checklistComplete": true,
+      "requiredDocuments": [
+        "COMMERCIAL_REGISTRY",
+        "TAX_CERTIFICATE",
+        "BANK_LETTER",
+        "PROOF_OF_ADDRESS"
+      ],
+      "acceptedDocuments": [
+        "COMMERCIAL_REGISTRY",
+        "TAX_CERTIFICATE",
+        "BANK_LETTER",
+        "PROOF_OF_ADDRESS",
+        "ARTICLES_OF_ASSOCIATION",
+        "SIGNATORY_ID",
+        "SECTOR_LICENSE",
+        "OTHER",
+        "OWNER_ID"
+      ],
+      "missingDocuments": [],
+      "expiredDocuments": [],
+      "ownersTotal": 100,
+      "ownerThreshold": 25,
+      "ownersReady": true,
+      "screeningResult": "CLEAR",
+      "screeningBlocked": false,
+      "duplicateFlags": [],
+      "approvalPending": false,
+      "payoutBankReady": true
+    },
+    "canReview": false,
+    "canRequestReplacement": false,
+    "canRequestRevalidation": false,
+    "openJoinRequest": null,
+    "openRevalidations": [],
+    "auditTrail": [],
+    "reviewReasonCodes": [
+      "BLURRY_OR_UNREADABLE",
+      "EXPIRED_DOCUMENT",
+      "WRONG_DOCUMENT_TYPE",
+      "NAME_MISMATCH",
+      "INCOMPLETE_DOCUMENT",
+      "DUPLICATE_REUSE",
+      "REPLACEMENT_REQUESTED",
+      "OTHER"
+    ]
+  }
+}

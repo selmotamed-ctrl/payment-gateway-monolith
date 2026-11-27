@@ -2,6 +2,7 @@ import type { SeederContext } from "../context";
 import { metaOf } from "../context";
 import { addDays } from "../builders";
 import { ROLE_AUTHORITIES, ROLE_FLAGS, type AdminRole } from "../../../scripts/createAdminPlan";
+import { SYSTEM_AUTOMATION_EMAIL } from "../../../lib/systemAutomationUser";
 
 /**
  * The platform staff of the simulated operator: one row per seat, with the
@@ -74,14 +75,19 @@ export const generateAdminAndStaff = (ctx: SeederContext): void => {
 
   // The automation identity that drafts chargebacks and SUSPENSE refunds.
   // It mirrors `ensureSystemAutomationUser` (DISABLED, never maker/checker,
-  // canonical system email) with a database-assigned UUID id.
-  const systemId = ctx.nextId("user");
+  // canonical system email). The runtime may ALREADY have created the row at
+  // boot with a database-assigned UUID: in that case reuse it. Generating a new
+  // id for the same e-mail would let `createMany({ skipDuplicates })` drop the
+  // row and every approval naming the generated id would violate
+  // `approval_requests_maker_user_id_fkey`.
+  const existingSystem = ctx.refs.adminUsers.find((user) => user.email === SYSTEM_AUTOMATION_EMAIL);
+  const systemId = existingSystem?.id ?? ctx.nextId("user");
   ctx.dataset.users.push({
     id: systemId,
     createdAt: start,
     updatedAt: start,
     merchantId: null,
-    email: "system-drafter@payment-gateway.internal",
+    email: SYSTEM_AUTOMATION_EMAIL,
     phone: null,
     passwordHash: null,
     role: "OPERATOR",

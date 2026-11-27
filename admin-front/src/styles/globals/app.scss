@@ -512,16 +512,35 @@ html {
 .pg-drawer__brand-text {
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
+    gap: 1px;
     min-width: 0;
 }
 
 .pg-drawer__title {
-    font-size: 14px;
+    font-size: 13.5px;
     font-weight: 600;
     line-height: 1.2;
+    /* The brand is a single-line lockup: never let "Payment Gateway" break
+       between words when the drawer narrows (it previously needed 123.5px and
+       received 122.5px, so it wrapped by a hair). */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pg-drawer__meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
 }
 
 .pg-drawer__subtitle {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 10.5px;
     color: var(--pg-ink-muted);
 }
@@ -564,14 +583,14 @@ html {
 }
 
 .pg-nav__section:hover {
-    background: rgba(var(--v-theme-primary), 0.08);
+    background: rgb(var(--v-theme-primary) / 0.08);
     opacity: 0.9;
 }
 
 .pg-nav__section-wrap:focus-visible .pg-nav__section {
-    background: rgba(var(--v-theme-primary), 0.08);
-    box-shadow: 0 0 0 2px rgba(var(--v-theme-primary), 0.35);
-    opacity: 0.9;
+    background: var(--pg-bg-surface-hover);
+    box-shadow: none;
+    opacity: 1;
 }
 
 .pg-nav__section-title {
@@ -799,10 +818,8 @@ html[dir="rtl"] .pg-nav__section {
     outline-offset: 2px;
 }
 
-.pg-main:focus-visible {
-    outline: 3px solid rgb(var(--v-theme-primary));
-    outline-offset: -3px;
-}
+/* The main canvas is never an interactive control; route focus goes to the
+ * page heading and must not paint a viewport-wide frame. */
 
 .pg-snackbar-announcer {
     position: absolute;
@@ -861,4 +878,236 @@ html[dir="rtl"] .pg-nav__section {
     z-index: 1200;
     max-width: 760px;
     margin-inline: auto;
+}
+
+/* Merchant detail sections: one header row, arrows at the end, no nested card. */
+.merchant-section {
+  overflow: hidden;
+  background: var(--pg-bg-surface);
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-md);
+  box-shadow: var(--pg-shadow-xs);
+}
+.merchant-section__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--pg-ink-primary);
+  text-align: start;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.merchant-section__header:hover:not(:disabled) {
+  background: var(--pg-bg-surface-hover);
+}
+.merchant-section__header:focus-visible {
+  outline: 2px solid var(--pg-border-focus);
+  outline-offset: -2px;
+}
+.merchant-section__header:disabled {
+  cursor: default;
+}
+.merchant-section__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.merchant-section__title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.merchant-section__subtitle {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--pg-ink-muted);
+}
+.merchant-section__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+}
+.merchant-section__chevron {
+  color: var(--pg-ink-muted);
+}
+.merchant-section__body {
+  padding: 20px 16px;
+}
+.merchant-section__body--flush {
+  padding: 0;
+}
+
+/* === Dashboard: route health + approval queue ============================ */
+.pg-dash-card {
+  display: flex;
+  flex-direction: column;
+}
+.pg-dash-card > .pg-card__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+.pg-dash-card .pg-card-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 16px;
+}
+.pg-dash-card__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pg-dash-card__subtitle {
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0.6;
+}
+.pg-dash-card__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-block-start: auto;
+  padding-block-start: 12px;
+  border-top: 1px solid var(--pg-border-subtle);
+}
+.pg-dash-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  color: var(--pg-ink-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* Route health: one distribution bar + a three-row legend. */
+.pg-health {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pg-health__bar {
+  display: flex;
+  gap: 2px;
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--pg-bg-surface-subtle);
+}
+.pg-health__bar-seg {
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 999px;
+  background: var(--pg-status-neutral-dot);
+}
+.pg-health__bar-seg--success { background: var(--pg-status-success-dot); }
+.pg-health__bar-seg--warning { background: var(--pg-status-warning-dot); }
+.pg-health__bar-seg--danger { background: var(--pg-status-danger-dot); }
+
+.pg-health__legend {
+  display: flex;
+  flex-direction: column;
+}
+.pg-health__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto 36px;
+  align-items: center;
+  gap: 8px;
+  padding-block: 7px;
+  border-top: 1px solid var(--pg-border-subtle);
+}
+.pg-health__row:first-child {
+  padding-block-start: 0;
+  border-top: 0;
+}
+.pg-health__row:last-child { padding-block-end: 0; }
+.pg-health__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--pg-status-neutral-dot);
+}
+.pg-health__dot--success { background: var(--pg-status-success-dot); }
+.pg-health__dot--warning { background: var(--pg-status-warning-dot); }
+.pg-health__dot--danger { background: var(--pg-status-danger-dot); }
+.pg-health__label {
+  overflow: hidden;
+  color: var(--pg-ink-secondary);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pg-health__count {
+  color: var(--pg-ink-primary);
+  font-size: 13.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.pg-health__share {
+  color: var(--pg-ink-muted);
+  font-size: 11px;
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Approval queue: a mini list, not tinted sticky notes. */
+.pg-approval-list {
+  display: flex;
+  flex-direction: column;
+}
+.pg-approval-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 9px;
+  padding-block: 8px;
+  border-top: 1px solid var(--pg-border-subtle);
+}
+.pg-approval-row:first-child {
+  padding-block-start: 0;
+  border-top: 0;
+}
+.pg-approval-row:last-child { padding-block-end: 0; }
+.pg-approval-row__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pg-status-info-dot);
+}
+.pg-approval-row__dot--warning { background: var(--pg-status-warning-dot); }
+.pg-approval-row__dot--danger { background: var(--pg-status-danger-dot); }
+.pg-approval-row__domain {
+  overflow: hidden;
+  color: var(--pg-ink-secondary);
+  font-size: 12.5px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pg-approval-row__age {
+  color: var(--pg-ink-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.pg-approval-row__age--warning { color: var(--pg-status-warning-text); }
+.pg-approval-row__age--danger { color: var(--pg-status-danger-text); }
+.pg-approval-row__count {
+  min-width: 20px;
+  color: var(--pg-ink-primary);
+  font-size: 13.5px;
+  font-weight: 650;
+  text-align: end;
+  font-variant-numeric: tabular-nums;
 }

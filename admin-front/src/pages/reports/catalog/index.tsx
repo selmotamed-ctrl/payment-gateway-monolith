@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import {VAlert, PgButton, PgAutocomplete} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgStack} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import {FormChecklist} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
@@ -455,8 +455,8 @@ const ReportsCatalogPage = dc(() => {
 
   return () => (
     <ScreenContainer>
-      <ThemedView style={{ gap: "18px" }}>
-        <PageHeader title={t("Report Catalog")} subtitle={t("Run and export published backoffice and merchant reports")}>(
+    <PgStack gap="lg">
+        <PageHeader title={t("Report Catalog")} subtitle={t("Run and export published backoffice and merchant reports")}>
             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
               <PgButton variant="tonal" prependIcon="mdi-refresh" loading={chromeLoading.value} onClick={() => void refresh()}>
                 {t("Refresh")}
@@ -472,12 +472,12 @@ const ReportsCatalogPage = dc(() => {
                 </PgButton>
               )}
             </ThemedView>
-          )</PageHeader>
+        </PageHeader>
 
         {((health.value?.brokenReportSpecs ?? 0) > 0 ||
           (health.value?.brokenChromeSpecs ?? 0) > 0 ||
           (health.value?.reportsBlockedByChrome ?? 0) > 0) && (
-          <VAlert type="warning" variant="tonal">
+          <PgAlert tone="warning">
             <div class="d-flex flex-wrap align-center ga-3">
               <span>{t("Reports Needing Migration")}: {health.value?.brokenReportSpecs ?? 0}</span>
               <span>{t("Reports blocked by header/footer")}: {health.value?.reportsBlockedByChrome ?? 0}</span>
@@ -492,7 +492,7 @@ const ReportsCatalogPage = dc(() => {
                 </PgButton>
               )}
             </div>
-          </VAlert>
+          </PgAlert>
         )}
 
         {bundle.value && selected.value && (
@@ -728,7 +728,7 @@ const ReportsCatalogPage = dc(() => {
             onConfirmLocale={onLanguageConfirmed}
           />
         )}
-      </ThemedView>
+      </PgStack>
     </ScreenContainer>
   );
 });

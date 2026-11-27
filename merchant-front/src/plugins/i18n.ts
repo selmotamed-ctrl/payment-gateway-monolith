@@ -27,7 +27,7 @@ export const messages = {
 
 export const getLocaleName = (): "ar" | "en" => {
     const stored = localStorage.getItem("locale-name");
-    return stored === "en" ? "en" : "ar";
+    return stored === "ar" ? "ar" : "en";
 };
 
 export const i18n = createI18n({

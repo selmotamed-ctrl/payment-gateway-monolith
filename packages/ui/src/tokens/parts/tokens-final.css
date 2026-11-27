@@ -1,0 +1,18 @@
+/*
+ * Final semantic tokens.
+ *
+ * `components.css` is the legacy component layer and still declares a partial
+ * palette after `fintech-2026.css`. Its blue `--pg-border-focus` won the
+ * cascade, which is exactly the blue input glow the 2026 contract forbids.
+ * Restore the monochrome focus token here, after every other token layer, so
+ * all inputs use black in light mode and white in dark mode.
+ */
+:root {
+  --pg-border-focus: #0f172a;
+  --pg-on-danger: #ffffff;
+}
+
+[data-theme="dark"],
+.v-theme--dark {
+  --pg-border-focus: #e4e4e7;
+}

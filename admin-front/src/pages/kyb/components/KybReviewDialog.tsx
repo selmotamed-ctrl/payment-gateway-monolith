@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgAutocomplete, PgTextarea, PgTextField} from "@pg/ui";
+import {PgAlert, PgAutocomplete, PgTextarea, PgTextField} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import { api } from "@/state/api";
@@ -117,9 +117,9 @@ const KybReviewDialog = dc(
                             {props.document?.docType} · {props.document?.originalFileName || props.document?.id}
                         </ThemedText>
                         {duplicate.value && (
-                            <VAlert type="warning" variant="tonal">
+                            <PgAlert tone="warning">
                                 {t("This file hash is also present under another merchant. Acceptance requires a written justification.")}
-                            </VAlert>
+                            </PgAlert>
                         )}
                         <SegmentedTabs
                             modelValue={decision.value}

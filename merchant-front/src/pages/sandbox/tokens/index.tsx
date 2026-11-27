@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {SummaryExportCard} from "@pg/ui";
@@ -156,8 +156,8 @@ const SandboxTokensPage = dc(() => {
         <ScreenContainer>
             <PageHeader title={t("Sandbox API Keys & Webhooks")} subtitle={t("pg_test_ tokens reach only the sandbox core; pg_live_ tokens are refused.")} badge="SANDBOX" badgeTone="warning"><div class="d-flex flex-wrap ga-2"><PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => { refresh.value?.(); void loadSummary(); }}>{t("Refresh")}</PgButton><PgButton variant="tonal" prependIcon="mdi-webhook" loading={busy.value === "webhook"} onClick={() => void testWebhook()}>{t("Send test webhook")}</PgButton><PgButton color="primary" prependIcon="mdi-plus" onClick={() => { formError.value = ""; createOpen.value = true; }}>{t("Create pg_test_ token")}</PgButton></div></PageHeader>
             <SandboxBanner subtitle={t("Point your staging website or mobile app at the Sandbox API with a pg_test_ token.")} />
-            {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
-            {createdToken.value ? <VAlert type="warning" variant="tonal" class="mb-4"> {t("Copy this token now; it is shown once")}: <code>{createdToken.value}</code></VAlert> : null}
+            {error.value ? <PgAlert tone="danger" class="mb-4">{error.value}</PgAlert> : null}
+            {createdToken.value ? <PgAlert tone="warning" class="mb-4"> {t("Copy this token now; it is shown once")}: <code>{createdToken.value}</code></PgAlert> : null}
             <StateView loading={loading.value && !summary.value} minHeight="160px">
                 <div class="d-flex flex-column ga-4">
                     <SummaryExportCard title={t("Token health")} metrics={metrics.value} />

@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
-import {VAlert, PgButton} from "@pg/ui";
+import {PgAlert, PgButton, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {StatusBadge} from "@pg/ui";
@@ -456,8 +456,8 @@ const GatewayWizardPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Gateway Wizard")} subtitle={t("Eight steps from identity to a governed live release.")}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Gateway Wizard")} subtitle={t("Eight steps from identity to a governed live release.")}>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
                             {gatewayCode.value && <MonoRef value={gatewayCode.value} />}
                             {versionNumber.value !== null && (
@@ -470,7 +470,7 @@ const GatewayWizardPage = dc(() => {
                                 {dirty.value ? t("Unsaved changes") : `${t("Step")} ${step.value} ${t("of Steps")} ${STEPS.length}`}
                             </MetaPill>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
@@ -479,9 +479,9 @@ const GatewayWizardPage = dc(() => {
                 ) : (
                     <>
                         {versionState.value === "LIVE" && (
-                            <VAlert type="warning" variant="tonal">
+                            <PgAlert tone="warning">
                                 {t("You are editing the version that is currently LIVE. Review each change carefully before saving.")}
-                            </VAlert>
+                            </PgAlert>
                         )}
                         <SurfaceCard noPadding>
                             <StepBar
@@ -495,9 +495,9 @@ const GatewayWizardPage = dc(() => {
                         {renderStep()}
 
                         {saveError.value && (
-                            <VAlert type="error" variant="tonal" density="compact">
+                            <PgAlert tone="danger" density="compact">
                                 {saveError.value}
-                            </VAlert>
+                            </PgAlert>
                         )}
 
                         <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "12px" }}>
@@ -531,7 +531,7 @@ const GatewayWizardPage = dc(() => {
                         </ThemedView>
                     </>
                 )}
-            </ThemedView>
+            </PgStack>
         </ScreenContainer>
     );
 });

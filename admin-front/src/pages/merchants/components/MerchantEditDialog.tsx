@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
-import {VAlert, PgCheckbox, PgAutocomplete, PgTextField, PgTextarea} from "@pg/ui";
+import {PgAlert, PgCheckbox, PgAutocomplete, PgTextField, PgTextarea} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import { api } from "@/state/api";
@@ -251,9 +251,9 @@ const MerchantEditDialog = dc(
                             </div>
                         ) : (
                             <>
-                                <VAlert type="info" variant="tonal">
+                                <PgAlert tone="info">
                                     {t("Legal/tax/payout/risk/KYB/ceiling fields are sensitive. The current value stays active until an independent checker executes the change.")}
-                                </VAlert>
+                                </PgAlert>
                                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: "12px" }}>
                                     <FormField label={t("Legal name")} sensitiveMakerChecker>
                                         <PgTextField v-model={form.value.legalName} />

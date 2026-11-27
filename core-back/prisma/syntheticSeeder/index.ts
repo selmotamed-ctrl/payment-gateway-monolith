@@ -20,6 +20,8 @@ import { encryptPendingSecrets } from "./sync/encryptSecrets";
 import { writeReadModels } from "./sync/readModels";
 import { auditInMemory, postSeedAudit } from "./verify/postSeedAudit";
 import { findCompletedSeedRun, findOtherCompletedSeedRun, recordCompletedSeedRun } from "./seedRunRegistry";
+import { ensureSystemAutomationUser } from "../../engine/governance/GovernanceExecution";
+import { SYSTEM_AUTOMATION_EMAIL } from "../../lib/systemAutomationUser";
 
 /**
  * Multi-year synthetic operational data seeder.
@@ -59,7 +61,17 @@ export const runSyntheticSeeder = async (): Promise<void> => {
   const health = await assertSafeToSeedSyntheticData(client);
   console.log(`[synthetic-seeder] Fake Rails handshake OK (${health.transactionCount ?? 0} existing transactions)`);
 
+  // Resolve the non-human drafting principal BEFORE the references load. The
+  // running core creates this row (by e-mail, with a database-assigned UUID) as
+  // soon as it drafts a chargeback, report or ledger alert; the seeder must
+  // reuse that id, not generate a second one for the same unique e-mail.
+  const systemUserId = await ensureSystemAutomationUser(client as never);
+  console.log(`[synthetic-seeder] system automation principal ${systemUserId}`);
+
   const ctx = await createContext(client, config);
+  if (!ctx.refs.adminUsers.some((user) => user.email === SYSTEM_AUTOMATION_EMAIL)) {
+    ctx.refs.adminUsers.push({ id: systemUserId, email: SYSTEM_AUTOMATION_EMAIL, role: "OPERATOR" });
+  }
   if (ctx.refs.gateways.length === 0 || ctx.refs.rails.length === 0) {
     throw new Error("No seeded gateways/rails found. Run seedFakeRails.ts (and the blueprint seed) first.");
   }

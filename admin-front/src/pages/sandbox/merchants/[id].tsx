@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import {VAlert, PgButton} from "@pg/ui";
+import {PgAlert, PgButton} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
@@ -177,7 +177,7 @@ const AdminSandboxMerchantDetailPage = dc(() => {
         <ScreenContainer>
             <PageHeader title={detail.value?.merchant.tradeName ?? t("Sandbox Merchant")} subtitle={detail.value?.merchant.id ?? merchantId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Merchants"), to: "/sandbox/merchants" }, { label: detail.value?.merchant.tradeName ?? merchantId() }]}><div class="d-flex flex-wrap ga-2"><PgButton variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</PgButton><PgButton variant="tonal" prependIcon="mdi-content-copy" disabled={!detail.value} onClick={() => void copySandboxMerchantSummary()}>{t("Copy summary")}</PgButton><PgButton variant="tonal" prependIcon="mdi-play" loading={busy.value === "seed"} onClick={() => openSeed(false)}>{t("Seed demo")}</PgButton><PgButton variant="tonal" prependIcon="mdi-history" loading={busy.value === "history"} onClick={() => openSeed(true)}>{t("Seed history")}</PgButton><PgButton variant="tonal" prependIcon="mdi-storefront-outline" onClick={() => void router.push("/sandbox/merchants")}>{t("Back")}</PgButton></div></PageHeader>
             <SandboxBanner />
-            {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
+            {error.value ? <PgAlert tone="danger" class="mb-4">{error.value}</PgAlert> : null}
             <StateView loading={loading.value} minHeight="220px">
                 {detail.value ? <div class="d-flex flex-column ga-4">
                     <MetricStrip items={metrics.value} />

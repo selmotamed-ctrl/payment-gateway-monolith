@@ -4,7 +4,7 @@ import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import {VAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgTextField, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -478,19 +478,19 @@ const GatewaysPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Gateways")} subtitle={t("Gateway portfolio, version state, and live route health.")}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Gateways")} subtitle={t("Gateway portfolio, version state, and live route health.")}>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</PgButton>
                             <PgButton color="primary" variant="tonal" prependIcon="mdi-robot-outline" onClick={() => void router.push({ name: "GatewayAiImport" })}>{t("Smart AI Integration")}</PgButton>
                             <PgButton color="primary" variant="flat" prependIcon="mdi-plus" onClick={openCreate}>{t("New Gateway")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("A gateway version cannot go LIVE until its 12 go-live gates pass and a different checker approves it.")}
-                </VAlert>
+                </PgAlert>
 
                 {summary.value && (
                     <SummaryExportCard
@@ -570,7 +570,7 @@ const GatewaysPage = dc(() => {
                         />
                     )}
                 />
-            </ThemedView>
+            </PgStack>
 
             <GatewayHealthDrawer
                 gatewayId={healthGateway.value?.id ?? null}
@@ -606,9 +606,9 @@ const GatewaysPage = dc(() => {
                     ),
                 }}
             >
-                <VAlert type="warning" variant="tonal">
+                <PgAlert tone="warning">
                     {t("Rollback changes the live version immediately. Verify the target version and operational impact first.")}
-                </VAlert>
+                </PgAlert>
                 <SectionFields title={t("Rollback details")}>
                     <FormField label={t("Target version")} required sensitiveMakerChecker>
                         <PgAutocomplete
@@ -647,7 +647,7 @@ const GatewaysPage = dc(() => {
                 submitLabel={t("Export")}
                 onSubmit={() => void exportExcel()}
             >
-                <VAlert type="warning" variant="tonal">{t("The export contains gateway verification, version and route-health details. Handle it as confidential operational evidence.")}</VAlert>
+                <PgAlert tone="warning">{t("The export contains gateway verification, version and route-health details. Handle it as confidential operational evidence.")}</PgAlert>
                 <FormChecklist
                     checks={[...EXPORT_CHECKS]}
                     modelValue={exportChecklist.value}

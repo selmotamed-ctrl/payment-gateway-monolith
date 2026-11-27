@@ -1,5 +1,5 @@
 import { dc } from "@/utils/dc";
-import {VAlert, PgButton, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { computed, ref } from "vue";
 import { useRoute } from "vue-router";
@@ -57,22 +57,22 @@ const VerifyEmailPage = dc(() => {
         <AuthLayout>
             <SurfaceCard title={t("Verify your email")} subtitle={masked.value || email.value}>
                 <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                    {error.value && <VAlert type="error" variant="tonal" density="compact">{error.value}</VAlert>}
-                    {notice.value && <VAlert type="success" variant="tonal" density="compact">{notice.value}</VAlert>}
+                    {error.value && <PgAlert tone="danger" density="compact">{error.value}</PgAlert>}
+                    {notice.value && <PgAlert tone="success" density="compact">{notice.value}</PgAlert>}
                     {done.value ? (
                         <>
-                            <VAlert type="success" variant="tonal" density="compact">
+                            <PgAlert tone="success" density="compact">
                                 {t("Your email is verified. Sign in to continue.")}
-                            </VAlert>
-                            <PgButton block size="large" onClick={() => void router.push({ name: "Login" })}>
+                            </PgAlert>
+                            <PgButton block variant="primary" size="large" onClick={() => void router.push({ name: "Login" })}>
                                 {t("Continue to sign in")}
                             </PgButton>
                         </>
                     ) : (
                         <>
-                            <VAlert type="info" variant="tonal" density="compact">
+                            <PgAlert tone="info" density="compact">
                                 {t("Enter the six-digit code sent to your email address.")}
-                            </VAlert>
+                            </PgAlert>
                             <FormField label={t("Email")} required>
                                 <PgTextField
                                     aria-label={t("Email")}
@@ -93,7 +93,7 @@ const VerifyEmailPage = dc(() => {
                                     hideDetails
                                 />
                             </FormField>
-                            <PgButton block size="large" loading={loading.value} disabled={!canSubmit.value} onClick={() => void submit()}>
+                            <PgButton block variant="primary" size="large" loading={loading.value} disabled={!canSubmit.value} onClick={() => void submit()}>
                                 {t("Verify")}
                             </PgButton>
                             <PgButton variant="text" size="small" onClick={() => void resend()} loading={loading.value}>

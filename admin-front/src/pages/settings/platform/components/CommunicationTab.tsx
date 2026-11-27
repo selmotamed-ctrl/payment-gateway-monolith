@@ -1,6 +1,6 @@
 import { defineComponent } from "@/utils/dc";
 import { onMounted, ref, type PropType } from "vue";
-import {VAlert, PgButton, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgTextField} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -120,9 +120,9 @@ export const CommunicationTab = defineComponent({
                         </PgButton>
                     </div>
                     {channel.missingFields.length > 0 ? (
-                        <VAlert type="warning" variant="tonal" density="compact">
+                        <PgAlert tone="warning" density="compact">
                             {t("Missing")}: {channel.missingFields.join(", ")}
-                        </VAlert>
+                        </PgAlert>
                     ) : null}
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "8px", fontSize: "12px" }}>
                         <span>{t("Last test")}: {format(channel.lastTestAt)} ({channel.lastTestStatus ?? "—"})</span>
@@ -130,7 +130,7 @@ export const CommunicationTab = defineComponent({
                         <span>{t("Consecutive failures")}: {channel.consecutiveFailures ?? 0}</span>
                     </div>
                     {channel.lastTestError ? (
-                        <VAlert type="error" variant="tonal" density="compact">{channel.lastTestError}</VAlert>
+                        <PgAlert tone="danger" density="compact">{channel.lastTestError}</PgAlert>
                     ) : null}
                     <div style={{ display: "flex", gap: "8px", alignItems: "flex-start", flexWrap: "wrap" }}>{test()}</div>
                 </SurfaceCardText>
@@ -146,14 +146,14 @@ export const CommunicationTab = defineComponent({
                 ) : (
                     <>
                         {status.value.maintenance ? (
-                            <VAlert type="error" variant="tonal">
+                            <PgAlert tone="danger">
                                 <strong>{t("Merchant registration and sign-in are in maintenance")}. </strong>
                                 {status.value.maintenance.message}
-                            </VAlert>
+                            </PgAlert>
                         ) : (
-                            <VAlert type="success" variant="tonal">
+                            <PgAlert tone="success">
                                 {t("Email delivery is configured. Merchant registration and sign-in are available.")}
-                            </VAlert>
+                            </PgAlert>
                         )}
                         {channelCard(
                             t("Email"),

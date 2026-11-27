@@ -2,15 +2,15 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRouter } from "vue-router";
-import {PgButton, PgCheckbox, PgIcon, PgProgressBar, PgAutocomplete} from "@pg/ui";
+import {PgButton, PgCheckbox, PgIcon, PgProgressBar, PgAutocomplete, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
 import {ThemedText} from "@pg/ui";
 import {StateView} from "@pg/ui";
-import { LazyEChart as EChart } from "@/charts/EChart/lazy";
+import { PgChart as EChart, CHART_TEXT, CHART_GRID, CHART_INDIGO, CHART_EMERALD } from "@pg/ui";
 import {StatusBadge} from "@pg/ui";
-import {MetricStrip, type MetricItem} from "@pg/ui";
+import {MetricStrip, type MetricItem, formatHumanStatus} from "@pg/ui";
 import {SegmentedTabs} from "@pg/ui";
 import {EmptyState} from "@pg/ui";
 import {MonoRef} from "@pg/ui";
@@ -95,8 +95,6 @@ const PERIODS = [
     { title: "30 days", value: "30d" },
     { title: "90 days", value: "90d" },
 ];
-
-import { CHART_TEXT, CHART_GRID, CHART_INDIGO, CHART_EMERALD } from "@/charts/palette";
 
 const formatDuration = (seconds: number): string => {
     if (seconds < 60) return `${formatPlainNumber(seconds)}s`;
@@ -435,6 +433,24 @@ const DashboardPage = dc(() => {
     });
 
     const queueAgeing = computed(() => overview.value?.approvalQueueAgeing ?? []);
+    const routeHealthRows = computed(() => [
+        { key: "HEALTHY", label: t("Healthy"), count: overview.value?.routeHealth?.healthy ?? 0 },
+        { key: "DEGRADED", label: t("Degraded"), count: overview.value?.routeHealth?.degraded ?? 0 },
+        { key: "OPEN_BREAKER", label: t("Open breaker"), count: overview.value?.routeHealth?.openBreaker ?? 0 },
+    ]);
+    const routeHealthTotal = computed(() =>
+        routeHealthRows.value.reduce((total, row) => total + row.count, 0),
+    );
+    const routeHealthShare = (count: number): number =>
+        routeHealthTotal.value ? Math.round((count / routeHealthTotal.value) * 100) : 0;
+    const approvalTotal = computed(() =>
+        queueAgeing.value.reduce((total, entry) => total + entry.count, 0),
+    );
+    const approvalOldest = computed(() =>
+        queueAgeing.value.reduce((oldest, entry) => Math.max(oldest, entry.oldestHours), 0),
+    );
+    const queueTone = (oldestHours: number) =>
+        oldestHours >= 72 ? "danger" : oldestHours >= 24 ? "warning" : "info";
 
     const queueLinks = [
         { title: t("Approvals"), subtitle: `${formatPlainNumber(overview.value?.approvalPending ?? 0)} ${t("pending")}`, icon: "mdi-clipboard-check-outline", route: "Approvals" },
@@ -449,7 +465,7 @@ const DashboardPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
+            <PgStack gap="lg">
                 <PageHeader title={t("Dashboard")} subtitle={t("Live platform health, volume, and operational queues.")}>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             <SegmentedTabs
@@ -484,35 +500,37 @@ const DashboardPage = dc(() => {
                     <>
                         {showChecklists && (
                             <SurfaceCard>
-                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                     <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Snapshot export checklist")}</ThemedText>
-                                    {EXPORT_CHECKS.map((check) => (
-                                        <PgCheckbox
-                                            key={check.key}
-                                            modelValue={exportChecklist.value[check.key] === true}
-                                            onUpdate:modelValue={(value: unknown) => (exportChecklist.value = { ...exportChecklist.value, [check.key]: Boolean(value) })}
-                                            label={t(check.label)}
-                                            density="compact"
-                                            hideDetails
-                                        />
-                                    ))}
-                                    {!exportChecklistComplete.value && (
-                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all export checklist items before exporting")}</ThemedText>
-                                    )}
+                                    <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                        {EXPORT_CHECKS.map((check) => (
+                                            <PgCheckbox
+                                                key={check.key}
+                                                modelValue={exportChecklist.value[check.key] === true}
+                                                onUpdate:modelValue={(value: unknown) => (exportChecklist.value = { ...exportChecklist.value, [check.key]: Boolean(value) })}
+                                                label={t(check.label)}
+                                                density="compact"
+                                                hideDetails
+                                            />
+                                        ))}
+                                        {!exportChecklistComplete.value && (
+                                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all export checklist items before exporting")}</ThemedText>
+                                        )}
+                                    </div>
                                 </SurfaceCardText>
                             </SurfaceCard>
                         )}
 
                         <MetricStrip items={metricItems.value} loading={loading.value} />
 
-                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "18px" }}>
+                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))", gap: "18px" }}>
                             <SurfaceCard title={t("Attempts By State")} subtitle={t("Payment attempts created in the selected period")}>
                                 {loading.value ? (
                                     <PgProgressBar indeterminate color="primary" />
                                 ) : attemptRows.value.length === 0 ? (
                                     <EmptyState title={t("No Data Found")} description={t("No payment attempts were recorded for the selected period.")} />
                                 ) : (
-                                    <EChart option={attemptChartOption()} height="260px" />
+                                    <EChart option={attemptChartOption()} height={280} />
                                 )}
                             </SurfaceCard>
                             <SurfaceCard title={t("Volume")} subtitle={t("Attempt volume by state")}>
@@ -521,7 +539,7 @@ const DashboardPage = dc(() => {
                                 ) : attemptRows.value.length === 0 ? (
                                     <EmptyState title={t("No Data Found")} description={t("No payment attempts were recorded for the selected period.")} />
                                 ) : (
-                                    <EChart option={volumeChartOption()} height="260px" />
+                                    <EChart option={volumeChartOption()} height={280} />
                                 )}
                             </SurfaceCard>
                         </ThemedView>
@@ -559,55 +577,90 @@ const DashboardPage = dc(() => {
                             )}
                         </SurfaceCard>
 
-                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "18px" }}>
-                            <SurfaceCard style={{ flex: "1 1 340px" }}>
-                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                                    <ThemedView style={{ gap: "3px" }}>
-                                        <ThemedText type="defaultSemiBold">{t("Route health")}</ThemedText>
-                                        <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{t("Routes by health state")}</ThemedText>
-                                    </ThemedView>
-                                    {[
-                                        { key: "HEALTHY", label: t("Healthy"), count: overview.value?.routeHealth?.healthy ?? 0 },
-                                        { key: "DEGRADED", label: t("Degraded"), count: overview.value?.routeHealth?.degraded ?? 0 },
-                                        { key: "OPEN_BREAKER", label: t("Open breaker"), count: overview.value?.routeHealth?.openBreaker ?? 0 },
-                                    ].map((row) => (
-                                        <ThemedView key={row.key} style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", alignItems: "center" }}>
-                                            <StatusBadge status={row.key} label={row.label} toneOverride={routeTone(row.key)} showDot={false} />
-                                            <ThemedText style={{ fontSize: "15px", fontWeight: 700 }}>{formatPlainNumber(row.count)}</ThemedText>
+                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))", gap: "18px" }}>
+                            <SurfaceCard class="pg-dash-card">
+                                <SurfaceCardText class="pg-dash-card__body">
+                                    <ThemedView class="pg-dash-card__heading">
+                                        <ThemedView style={{ gap: "3px" }}>
+                                            <ThemedText type="defaultSemiBold">{t("Route health")}</ThemedText>
+                                            <ThemedText class="pg-dash-card__subtitle">{t("Routes by health state")}</ThemedText>
                                         </ThemedView>
-                                    ))}
-                                    <ThemedText style={{ fontSize: "11px", opacity: 0.7 }}>
-                                        {formatPlainNumber(overview.value?.routeHealth?.forced ?? 0)} {t("forced")} · {formatPlainNumber(overview.value?.routeHealth?.conflicts ?? 0)} {t("conflicts")}
-                                    </ThemedText>
-                                    <PgButton size="small" variant="text" prependIcon="mdi-arrow-right" onClick={() => void router.push({ name: "GatewayRoutes" })}>{t("Open routes")}</PgButton>
+                                    </ThemedView>
+
+                                    <div class="pg-health">
+                                        <div
+                                            class="pg-health__bar"
+                                            role="img"
+                                            aria-label={routeHealthRows.value.map((row) => `${row.label}: ${row.count}`).join(", ")}
+                                        >
+                                            {routeHealthRows.value.map((row) => (
+                                                <span
+                                                    key={row.key}
+                                                    class={`pg-health__bar-seg pg-health__bar-seg--${routeTone(row.key)}`}
+                                                    style={{ flexGrow: routeHealthTotal.value ? row.count : 0 }}
+                                                />
+                                            ))}
+                                        </div>
+                                        <div class="pg-health__legend">
+                                            {routeHealthRows.value.map((row) => (
+                                                <div key={row.key} class="pg-health__row">
+                                                    <span class={`pg-health__dot pg-health__dot--${routeTone(row.key)}`} aria-hidden="true" />
+                                                    <span class="pg-health__label">{row.label}</span>
+                                                    <span class="pg-health__count">{formatPlainNumber(row.count)}</span>
+                                                    <span class="pg-health__share">{routeHealthShare(row.count)}%</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div class="pg-dash-card__footer">
+                                        <span class="pg-dash-card__meta">
+                                            <span>{formatPlainNumber(routeHealthTotal.value)} {t("Routes")}</span>
+                                            <span>{formatPlainNumber(overview.value?.routeHealth?.forced ?? 0)} {t("forced")}</span>
+                                            <span>{formatPlainNumber(overview.value?.routeHealth?.conflicts ?? 0)} {t("conflicts")}</span>
+                                        </span>
+                                        <PgButton size="small" variant="text" appendIcon="mdi-arrow-right" onClick={() => void router.push({ name: "GatewayRoutes" })}>{t("Open routes")}</PgButton>
+                                    </div>
                                 </SurfaceCardText>
                             </SurfaceCard>
 
-                            <SurfaceCard style={{ flex: "1 1 340px" }}>
-                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                    <ThemedView style={{ gap: "3px" }}>
-                                        <ThemedText type="defaultSemiBold">{t("Approval queue by domain")}</ThemedText>
-                                        <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{t("Pending and draft requests by domain")}</ThemedText>
+                            <SurfaceCard class="pg-dash-card">
+                                <SurfaceCardText class="pg-dash-card__body">
+                                    <ThemedView class="pg-dash-card__heading">
+                                        <ThemedView style={{ gap: "3px" }}>
+                                            <ThemedText type="defaultSemiBold">{t("Approval queue by domain")}</ThemedText>
+                                            <ThemedText class="pg-dash-card__subtitle">{t("Pending and draft requests by domain")}</ThemedText>
+                                        </ThemedView>
                                     </ThemedView>
+
                                     {queueAgeing.value.length === 0 ? (
                                         <EmptyState title={t("No Data Found")} description={t("No approval queue entries were recorded for the selected period.")} />
                                     ) : (
-                                        queueAgeing.value.map((entry) => (
-                                            <ThemedView key={entry.domain} style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", alignItems: "center" }}>
-                                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "7px" }}>
-                                                    <StatusBadge status={entry.domain} label={entry.domain} toneOverride={entry.oldestHours >= 72 ? "danger" : entry.oldestHours >= 24 ? "warning" : "info"} showDot={false} />
-                                                    <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{formatHours(entry.oldestHours)}</ThemedText>
-                                                </ThemedView>
-                                                <ThemedText style={{ fontSize: "13px", fontWeight: 700 }}>{formatPlainNumber(entry.count)}</ThemedText>
-                                            </ThemedView>
-                                        ))
+                                        <div class="pg-approval-list" role="list">
+                                            {queueAgeing.value.map((entry) => (
+                                                <div key={entry.domain} class="pg-approval-row" role="listitem">
+                                                    <span class={`pg-approval-row__dot pg-approval-row__dot--${queueTone(entry.oldestHours)}`} aria-hidden="true" />
+                                                    <span class="pg-approval-row__domain">{formatHumanStatus(entry.domain)}</span>
+                                                    <span class={`pg-approval-row__age pg-approval-row__age--${queueTone(entry.oldestHours)}`}>
+                                                        {formatHours(entry.oldestHours)} {t("oldest")}
+                                                    </span>
+                                                    <span class="pg-approval-row__count">{formatPlainNumber(entry.count)}</span>
+                                                </div>
+                                            ))}
+                                        </div>
                                     )}
-                                    <PgButton size="small" variant="text" prependIcon="mdi-arrow-right" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</PgButton>
+
+                                    <div class="pg-dash-card__footer">
+                                        <span class="pg-dash-card__meta">
+                                            <span>{formatPlainNumber(approvalTotal.value)} {t("Pending")}</span>
+                                            <span>{t("Oldest")} {formatHours(approvalOldest.value)}</span>
+                                        </span>
+                                        <PgButton size="small" variant="text" appendIcon="mdi-arrow-right" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</PgButton>
+                                    </div>
                                 </SurfaceCardText>
                             </SurfaceCard>
                         </ThemedView>
-
-                        {canViewActivity.value && (
+                                    {canViewActivity.value && (
                             <SurfaceCard>
                                 <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                     <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
@@ -621,21 +674,23 @@ const DashboardPage = dc(() => {
                                         </ThemedView>
                                     </ThemedView>
                                     {showChecklists && (
-                                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                             <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Activity export checklist")}</ThemedText>
-                                            {ACTIVITY_EXPORT_CHECKS.map((check) => (
-                                                <PgCheckbox
-                                                    key={check.key}
-                                                    modelValue={activityExportChecklist.value[check.key] === true}
-                                                    onUpdate:modelValue={(value: unknown) => (activityExportChecklist.value = { ...activityExportChecklist.value, [check.key]: Boolean(value) })}
-                                                    label={t(check.label)}
-                                                    density="compact"
-                                                    hideDetails
-                                                />
-                                            ))}
-                                            {!activityExportChecklistComplete.value && (
-                                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all activity export checklist items before exporting")}</ThemedText>
-                                            )}
+                                            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                {ACTIVITY_EXPORT_CHECKS.map((check) => (
+                                                    <PgCheckbox
+                                                        key={check.key}
+                                                        modelValue={activityExportChecklist.value[check.key] === true}
+                                                        onUpdate:modelValue={(value: unknown) => (activityExportChecklist.value = { ...activityExportChecklist.value, [check.key]: Boolean(value) })}
+                                                        label={t(check.label)}
+                                                        density="compact"
+                                                        hideDetails
+                                                    />
+                                                ))}
+                                                {!activityExportChecklistComplete.value && (
+                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all activity export checklist items before exporting")}</ThemedText>
+                                                )}
+                                            </div>
                                         </ThemedView>
                                     )}
                                     {activityLoading.value ? (
@@ -697,7 +752,7 @@ const DashboardPage = dc(() => {
                         </SurfaceCard>
                     </>
                 )}
-            </ThemedView>
+            </PgStack>
         </ScreenContainer>
     );
 });

@@ -1,7 +1,7 @@
 import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgAutocomplete, PgTextField, PgStack} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
@@ -594,8 +594,8 @@ const SystemBackupsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Backup management")} subtitle={t("Monitor WAL archiving, storage target health, backups, and restore drills.")} badge={t("Disaster recovery")} badgeTone="info">(
+            <PgStack gap="lg">
+                <PageHeader title={t("Backup management")} subtitle={t("Monitor WAL archiving, storage target health, backups, and restore drills.")} badge={t("Disaster recovery")} badgeTone="info">
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             <PgButton
                                 variant="tonal"
@@ -637,7 +637,7 @@ const SystemBackupsPage = dc(() => {
                                 </PgButton>
                             )}
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
@@ -654,20 +654,20 @@ const SystemBackupsPage = dc(() => {
                         <MetricStrip items={metricItems.value} />
 
                         {!overview.value.configured && (
-                            <VAlert type="info" variant="tonal">
+                            <PgAlert tone="info">
                                 {t("Backup management is not configured for this environment.")}
-                            </VAlert>
+                            </PgAlert>
                         )}
                         {!overview.value.daemonReachable && (
-                            <VAlert type="error" variant="tonal">
+                            <PgAlert tone="danger">
                                 {t("The backup daemon is unreachable. Backup and drill actions are disabled until connectivity returns.")}
-                            </VAlert>
+                            </PgAlert>
                         )}
 
                         <ThemedView
                             style={{
                                 display: "grid",
-                                gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+                                gridTemplateColumns: "repeat(auto-fit, minmax(min(320px, 100%), 1fr))",
                                 gap: "18px",
                             }}
                         >
@@ -934,9 +934,9 @@ const SystemBackupsPage = dc(() => {
                                     </ThemedView>
 
                                     {latestDrill.value.errorMessage && (
-                                        <VAlert type="error" variant="tonal">
+                                        <PgAlert tone="danger">
                                             {latestDrill.value.errorMessage}
-                                        </VAlert>
+                                        </PgAlert>
                                     )}
                                 </ThemedView>
                             )}
@@ -952,7 +952,7 @@ const SystemBackupsPage = dc(() => {
                         />
                     </>
                 )}
-            </ThemedView>
+            </PgStack>
 
             <FormModal
                 modelValue={triggerOpen.value}
@@ -982,9 +982,9 @@ const SystemBackupsPage = dc(() => {
                         onUpdate:modelValue={(value: string) => (triggerForm.value.kind = value)}
                     />
                 </FormField>
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     {t("The backup runs asynchronously. Monitor the scheduled backups table for its result.")}
-                </VAlert>
+                </PgAlert>
                 <FormChecklist
                     checks={[...TRIGGER_CHECKS]}
                     modelValue={triggerChecklist.value}
@@ -1006,9 +1006,9 @@ const SystemBackupsPage = dc(() => {
                 loading={drillLoading.value}
                 onSubmit={() => void runDrill()}
             >
-                <VAlert type="warning" variant="tonal">
+                <PgAlert tone="warning">
                     {t("This launches an isolated scratch PostgreSQL instance, restores the latest backup, and verifies the three ledger invariants. It can take several minutes.")}
-                </VAlert>
+                </PgAlert>
                 <FormChecklist
                     checks={[...DRILL_CHECKS]}
                     modelValue={drillChecklist.value}

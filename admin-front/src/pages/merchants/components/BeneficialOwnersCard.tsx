@@ -1,14 +1,14 @@
 import { computed, ref, watch, type PropType, type VNodeChild } from "vue";
 import { defineComponent } from "@/utils/dc";
 import { useLocale } from "@/utils/vael-compat";
-import {VAlert, PgButton, PgCheckbox, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgCheckbox, PgAutocomplete, PgTextField} from "@pg/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import {TableRowActions} from "@pg/ui";
 import {FormModal} from "@pg/ui";
 import {FormField} from "@pg/ui";
 import {StatusBadge} from "@pg/ui";
-import {SurfaceCard, SurfaceCardText} from "@pg/ui";
+import CollapsibleSection, { type SectionCommand } from "@/components/CollapsibleSection";
 import { showSnackBar } from "@/utils/snackBar";
 import {
     OWNER_IDENTITY_TYPES,
@@ -38,6 +38,8 @@ export const BeneficialOwnersCard = defineComponent({
         initialOwners: { type: Array as PropType<MerchantOwnerRecord[]>, default: () => [] },
         canWrite: { type: Boolean, default: false },
         closed: { type: Boolean, default: false },
+        command: { type: Object as PropType<SectionCommand | null>, default: null },
+        alwaysOpen: { type: Boolean, default: false },
     },
     emits: ["changed"],
     setup(props, { emit }) {
@@ -123,15 +125,17 @@ export const BeneficialOwnersCard = defineComponent({
         const editable = computed(() => props.canWrite && !props.closed);
 
         return (): VNodeChild => (
-            <SurfaceCard>
-                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-                        <div>
-                            <div style={{ fontSize: "16px", fontWeight: 600 }}>{t("Beneficial owners")}</div>
-                            <div style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
-                                {`${t("Total active ownership")}: ${total.value.toFixed(2)}%`}
-                            </div>
-                        </div>
+            <CollapsibleSection
+                command={props.command}
+                alwaysOpen={props.alwaysOpen}
+                title={t("Beneficial owners")}
+                subtitle={`${t("Total active ownership")}: ${total.value.toFixed(2)}%`}
+                count={visible.value.length}
+                defaultOpen={false}
+                storageKey={`merchant:${props.merchantId}:beneficial-owners`}
+            >
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
                         <div style={{ display: "inline-flex", gap: "6px", flexWrap: "wrap" }}>
                             {inactiveCount.value > 0 && (
                                 <PgButton size="small" variant="text" onClick={() => (showInactive.value = !showInactive.value)}>
@@ -190,7 +194,6 @@ export const BeneficialOwnersCard = defineComponent({
                             },
                         ]}
                     />
-                </SurfaceCardText>
 
                 <FormModal
                     modelValue={formOpen.value}
@@ -203,9 +206,9 @@ export const BeneficialOwnersCard = defineComponent({
                     cancelLabel={t("Cancel")}
                     onSubmit={() => void save()}
                 >
-                    <VAlert type="info" variant="tonal" density="compact">
+                    <PgAlert tone="info" density="compact">
                         {t("The identity number is encrypted at rest, never shown again, and only its hash is used for duplicate detection. Changing identity details resets the screening status.")}
-                    </VAlert>
+                    </PgAlert>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
                         <FormField label={t("Full name (Arabic)")} required error={field("fullName")}>
                             <PgTextField modelValue={form.value.fullName} onUpdate:modelValue={(value: string) => (form.value.fullName = value)} hideDetails />
@@ -283,7 +286,8 @@ export const BeneficialOwnersCard = defineComponent({
                     </p>
                     {deactivating.value && <strong style={{ fontSize: "13px" }}>{deactivating.value.fullNameAr}</strong>}
                 </FormModal>
-            </SurfaceCard>
+                </div>
+            </CollapsibleSection>
         );
     },
 });

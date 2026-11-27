@@ -1,6 +1,6 @@
 import { defineVaporComponent } from "vue-jsx";
 import { DynamicFragment } from "@vue/runtime-vapor";
-import { computed, renderEffect } from "vue";
+import { renderEffect, shallowRef } from "vue";
 import type { DefineVaporSetupFnComponent } from "vue";
 
 export type DCExpose<T extends Record<string, any>> = (exposed?: {
@@ -30,12 +30,6 @@ type ComponentOptionsLike = {
 const invokeRender = (render: any): any => (typeof render === "function" ? render() : render);
 
 /**
- * A render function with a top-level reactive early return cannot be evaluated
- * once. Use a Vapor DynamicFragment + renderEffect for those components so the
- * branch is re-evaluated and the old DOM branch is replaced. Pure components
- * keep the normal fine-grained Vapor path.
- */
-/**
  * Vapor components normally rely on fine-grained updates. A render function with
  * a top-level reactive early return (e.g. `if (!open.value) return null`) cannot
  * be evaluated once, so those components opt into a DynamicFragment re-render.
@@ -48,10 +42,21 @@ const wrapRender = (render: any, force: boolean): (() => any) => {
     }
     return () => {
         const fragment = new DynamicFragment(0);
-        const block = computed(() => invokeRender(render));
+        const current = shallowRef<any>(undefined);
+        // Evaluate the render function inside its own effect so `currentInstance`
+        // is set while it builds the block. A `computed` would re-evaluate the
+        // render during dependency propagation (walkDirty), where no Vapor
+        // instance is active; the block it creates would then be detached from
+        // the component tree, losing `provide`/`inject` (and API config,
+        // router, i18n) for every child component.
         renderEffect(() => {
-            const current = block.value;
-            fragment.update(() => current);
+            current.value = invokeRender(render);
+        });
+        // Mounting is a separate effect: DOM insertion and child setup must not
+        // become dependencies of the render pass above.
+        renderEffect(() => {
+            const next = current.value;
+            fragment.update(() => next);
         });
         return fragment;
     };
@@ -60,6 +65,19 @@ const wrapRender = (render: any, force: boolean): (() => any) => {
 const renderSetup = (setup: any, props: any, ctx: any, dcMode: boolean, force: boolean): any => {
     const result = dcMode ? setup(props, ctx.expose, ctx) : setup(props, ctx);
     return typeof result === "function" ? wrapRender(result, force)() : result;
+};
+
+/**
+ * `props` MUST be forwarded to `defineVaporComponent`: the runtime resolves
+ * declared defaults (`copyable: true`, `clearable: true`, …) and removes the
+ * declared keys from the fallthrough attrs, so an object prop can never render
+ * as `primaryaction="[object Object]"` on a DOM node.
+ *
+ * `rerender` is the only helper-only option and must never reach the runtime.
+ */
+const componentOptions = (options: ComponentOptionsLike) => {
+    const { rerender: _rerender, setup: _setup, ...rest } = options;
+    return { inheritAttrs: true, ...rest } as any;
 };
 
 /**
@@ -77,17 +95,16 @@ export function defineComponent(
     options: ComponentOptionsLike = {},
 ): DefineVaporSetupFnComponent<any, any, any, any> {
     if (typeof setupOrOptions === "object" && setupOrOptions !== null) {
-        const { setup, rerender, ...rest } = setupOrOptions;
+        const { setup, rerender } = setupOrOptions;
         return defineVaporComponent(
             (props: any, ctx: any) => renderSetup(setup ?? (() => undefined), props, ctx, false, Boolean(rerender)),
-            { inheritAttrs: true, ...rest } as any,
+            componentOptions(setupOrOptions),
         ) as any;
     }
 
-    const { props: _props, rerender, ...rest } = options;
     return defineVaporComponent(
-        (props: any, ctx: any) => renderSetup(setupOrOptions, props, ctx, false, Boolean(rerender)),
-        { inheritAttrs: true, ...rest } as any,
+        (props: any, ctx: any) => renderSetup(setupOrOptions, props, ctx, false, Boolean(options.rerender)),
+        componentOptions(options),
     ) as any;
 }
 
@@ -100,16 +117,15 @@ export const dc: {
     (options: ComponentOptionsLike): any;
 } = ((setupOrOptions: DcSetup | ComponentOptionsLike, options: ComponentOptionsLike = {}) => {
     if (typeof setupOrOptions === "object" && setupOrOptions !== null) {
-        const { setup, rerender, ...rest } = setupOrOptions;
+        const { setup, rerender } = setupOrOptions;
         return defineVaporComponent(
             (props: any, ctx: any) => renderSetup(setup ?? (() => undefined), props, ctx, false, Boolean(rerender)),
-            { inheritAttrs: true, ...rest } as any,
+            componentOptions(setupOrOptions),
         ) as any;
     }
 
-    const { props: _props, rerender, ...rest } = options;
     return defineVaporComponent(
-        (props: any, ctx: any) => renderSetup(setupOrOptions, props, ctx, true, Boolean(rerender)),
-        { inheritAttrs: true, ...rest } as any,
+        (props: any, ctx: any) => renderSetup(setupOrOptions, props, ctx, true, Boolean(options.rerender)),
+        componentOptions(options),
     ) as any;
 }) as any;

@@ -1,5 +1,5 @@
 import { dc } from "@/utils/dc";
-import {VAlert, PgButton} from "@pg/ui";
+import {PgAlert, PgButton} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { ref } from "vue";
 import { useRoute } from "vue-router";
@@ -62,13 +62,13 @@ const GoogleFinishPage = dc(() => {
                 <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                     {error.value ? (
                         <>
-                            <VAlert type="error" variant="tonal" density="compact">{error.value}</VAlert>
+                            <PgAlert tone="danger" density="compact">{error.value}</PgAlert>
                             <PgButton onClick={() => void router.push({ name: "Login" })}>{t("Back to sign in")}</PgButton>
                         </>
                     ) : (
-                        <VAlert type="info" variant="tonal" density="compact">{t("Completing sign-in…")}</VAlert>
+                        <PgAlert tone="info" density="compact">{t("Completing sign-in…")}</PgAlert>
                     )}
-                    {!ticket && <VAlert type="error" variant="tonal" density="compact">{t("The sign-in link is invalid.")}</VAlert>}
+                    {!ticket && <PgAlert tone="danger" density="compact">{t("The sign-in link is invalid.")}</PgAlert>}
                 </div>
             </SurfaceCard>
         </AuthLayout>

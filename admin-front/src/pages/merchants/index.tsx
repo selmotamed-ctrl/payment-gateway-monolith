@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useTheme } from "@/utils/vuetify-compat";
-import {PgButton} from "@pg/ui";
+import {PgButton, PgStack} from "@pg/ui";
 import { useRouter } from "vue-router";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
@@ -33,7 +33,6 @@ import type { MerchantSummary } from "./types";
 import MerchantHelpPanel from "./components/MerchantHelpPanel";
 import MerchantActionDialog, { type MerchantActionMode } from "./components/MerchantActionDialog";
 
-import {SurfaceCard, SurfaceCardText} from "@pg/ui";
 import {SlideOverDrawer} from "@pg/ui";
 import {DescriptionList} from "@pg/ui";
 import {MonoRef} from "@pg/ui";
@@ -525,8 +524,8 @@ const MerchantsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Merchants")} subtitle={t("Search the merchant portfolio, inspect KYB and risk posture, and propose governed changes.")} badge={summary.value ? `${summary.value.kybPending} ${t("KYB pending")}` : t("KYB review")} badgeTone={summary.value && summary.value.kybPending > 0 ? "warning" : "info"}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Merchants")} subtitle={t("Search the merchant portfolio, inspect KYB and risk posture, and propose governed changes.")} badge={summary.value ? `${summary.value.kybPending} ${t("KYB pending")}` : t("KYB review")} badgeTone={summary.value && summary.value.kybPending > 0 ? "warning" : "info"}>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                             <StatusBadge status="info" label={`${total.value} ${t("merchants")}`} toneOverride="info" showDot={false} />
                             <StatusBadge status="suspended" label={`${suspendedCount.value} ${t("suspended")}`} toneOverride={suspendedCount.value ? "danger" : "neutral"} showDot={false} />
@@ -534,7 +533,7 @@ const MerchantsPage = dc(() => {
                             <PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton>
                             <PgButton variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</PgButton>
                         </ThemedView>
-                    )</PageHeader>
+                </PageHeader>
 
                 {summary.value && (
                     <SummaryExportCard
@@ -555,13 +554,7 @@ const MerchantsPage = dc(() => {
                     </SummaryExportCard>
                 )}
 
-                {areHelpPanelsVisible() && (
-                    <SurfaceCard>
-                        <SurfaceCardText>
-                            <MerchantHelpPanel />
-                        </SurfaceCardText>
-                    </SurfaceCard>
-                )}
+                {areHelpPanelsVisible() && <MerchantHelpPanel />}
                 <ApiTable<MerchantSummary>
                     title={t("Merchants")}
                     url={urlsMap.merchantsList}
@@ -615,7 +608,7 @@ const MerchantsPage = dc(() => {
                         />
                     )}
                 />
-            </ThemedView>
+            </PgStack>
             <SlideOverDrawer
                 modelValue={inspectionOpen.value}
                 onUpdate:modelValue={(value: boolean) => (inspectionOpen.value = value)}

@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import {VAlert, PgButton, PgDivider, PgExpansionPanel, PgExpansionPanelText, PgExpansionPanelTitle, PgExpansionPanels, PgFileUpload, PgIcon, PgAutocomplete, PgTextField} from "@pg/ui";
+import {PgAlert, PgButton, PgDivider, PgExpansionPanel, PgExpansionPanels, PgFileUpload, PgIcon, PgAutocomplete, PgTextField, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
@@ -682,8 +682,11 @@ const GatewayAiImportPage = dc(() => {
                     ) : (
                         <PgExpansionPanels multiple>
                             {vectors.map((vector, index) => (
-                                <PgExpansionPanel key={`${vector.name}-${index}`} value={index}>
-                                    <PgExpansionPanelTitle>
+                                <PgExpansionPanel
+                                    key={`${vector.name}-${index}`}
+                                    value={index}
+                                    v-slots={{
+                                        title: () => (
                                         <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                             <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>
                                                 {vector.name}
@@ -704,13 +707,14 @@ const GatewayAiImportPage = dc(() => {
                                                 </MetaPill>
                                             )}
                                         </div>
-                                    </PgExpansionPanelTitle>
-                                    <PgExpansionPanelText>
+                                        ),
+                                    }}
+                                >
                                         <div style={{ display: "flex", flexDirection: "column", gap: "12px", paddingTop: "6px" }}>
                                             {renderKeyValues(t("Extractions"), vector.extractions)}
                                             {renderRequests(vector.requests)}
                                             {(vector.errors ?? []).length > 0 && (
-                                                <VAlert type="error" variant="tonal" density="compact">
+                                                <PgAlert tone="danger" density="compact">
                                                     <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                                         {(vector.errors ?? []).map((issue, errorIndex) => (
                                                             <ThemedText key={`${issue.code}-${errorIndex}`} style={{ fontSize: "12px" }}>
@@ -719,10 +723,9 @@ const GatewayAiImportPage = dc(() => {
                                                             </ThemedText>
                                                         ))}
                                                     </div>
-                                                </VAlert>
+                                                </PgAlert>
                                             )}
                                         </div>
-                                    </PgExpansionPanelText>
                                 </PgExpansionPanel>
                             ))}
                         </PgExpansionPanels>
@@ -786,7 +789,7 @@ const GatewayAiImportPage = dc(() => {
             return null;
         }
         return (
-            <VAlert type="warning" variant="tonal" prominent>
+            <PgAlert tone="warning">
                 <ThemedView style={{ gap: "10px" }}>
                     <ThemedText type="defaultSemiBold">{t("AI repair prompt available")}</ThemedText>
                     <ThemedText style={{ fontSize: "13px" }}>
@@ -798,7 +801,7 @@ const GatewayAiImportPage = dc(() => {
                         </PgButton>
                     </ThemedView>
                 </ThemedView>
-            </VAlert>
+            </PgAlert>
         );
     };
 
@@ -881,9 +884,9 @@ const GatewayAiImportPage = dc(() => {
                     )}
 
                     {specError.value && (
-                        <VAlert type="error" variant="tonal" density="compact">
+                        <PgAlert tone="danger" density="compact">
                             {specError.value}
-                        </VAlert>
+                        </PgAlert>
                     )}
 
                     {verifyLoading.value && <StateView loading={true} minHeight="180px" />}
@@ -912,7 +915,7 @@ const GatewayAiImportPage = dc(() => {
                     {renderSummary(report.value)}
 
                     {report.value.collision?.gatewayExists && (
-                        <VAlert type="warning" variant="tonal" prominent>
+                        <PgAlert tone="warning">
                             <ThemedView style={{ gap: "4px" }}>
                                 <ThemedText type="defaultSemiBold">{t("Gateway code already exists")}</ThemedText>
                                 <ThemedText style={{ fontSize: "13px" }}>
@@ -920,7 +923,7 @@ const GatewayAiImportPage = dc(() => {
                                     {t("Existing versions")}: {report.value.collision.versionCount}
                                 </ThemedText>
                             </ThemedView>
-                        </VAlert>
+                        </PgAlert>
                     )}
 
                     {renderRepairPrompt(report.value.aiRepairPrompt, t("Copy AI Repair Prompt"))}
@@ -1121,12 +1124,12 @@ const GatewayAiImportPage = dc(() => {
                     </div>
 
                     {result.nextStep && (
-                        <VAlert type="info" variant="tonal">
+                        <PgAlert tone="info">
                             <ThemedView style={{ gap: "4px" }}>
                                 <ThemedText type="defaultSemiBold">{t("Next Step")}</ThemedText>
                                 <ThemedText style={{ fontSize: "13px" }}>{result.nextStep}</ThemedText>
                             </ThemedView>
-                        </VAlert>
+                        </PgAlert>
                     )}
 
                     <div style={{ display: "flex", flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
@@ -1170,9 +1173,9 @@ const GatewayAiImportPage = dc(() => {
                 >
                     <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                         {report.value.collision?.gatewayExists && (
-                            <VAlert type="warning" variant="tonal" density="compact">
+                            <PgAlert tone="warning" density="compact">
                                 {t("Gateway code already exists. Importing as a new version is recommended.")}
-                            </VAlert>
+                            </PgAlert>
                         )}
 
                         <div style={{ maxWidth: "360px" }}>
@@ -1192,9 +1195,9 @@ const GatewayAiImportPage = dc(() => {
                 {renderCredentials(report.value)}
 
                 {missingRequiredCredentials.value.length > 0 && (
-                    <VAlert type="warning" variant="tonal">
+                    <PgAlert tone="warning">
                         {t("Enter all required secrets before creating the draft")}: {missingRequiredCredentials.value.join(", ")}
-                    </VAlert>
+                    </PgAlert>
                 )}
 
                 <FormChecklist
@@ -1208,18 +1211,18 @@ const GatewayAiImportPage = dc(() => {
                 />
 
                 {!report.value.valid && (
-                    <VAlert type="error" variant="tonal">
+                    <PgAlert tone="danger">
                         {t("This spec has validation errors. Fix it and verify again before importing.")}
-                    </VAlert>
+                    </PgAlert>
                 )}
 
                 {importError.value && (
-                    <VAlert type="error" variant="tonal" prominent>
+                    <PgAlert tone="danger">
                         <ThemedView style={{ gap: "8px" }}>
                             <ThemedText type="defaultSemiBold">{t("Import failed")}</ThemedText>
                             <ThemedText style={{ fontSize: "13px" }}>{importError.value}</ThemedText>
                         </ThemedView>
-                    </VAlert>
+                    </PgAlert>
                 )}
 
                 {renderRepairPrompt(importRepairPrompt.value, t("Copy AI Repair Prompt"))}
@@ -1235,8 +1238,8 @@ const GatewayAiImportPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Smart AI Integration")} subtitle={t("Verify an AI-generated gateway specification before binding live secrets.")}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Smart AI Integration")} subtitle={t("Verify an AI-generated gateway specification before binding live secrets.")}>
                         <div class="d-flex flex-wrap ga-2">
                             <PgButton variant="text" prependIcon="mdi-restart" onClick={() => void startOver()}>
                                 {t("Start over")}
@@ -1249,16 +1252,16 @@ const GatewayAiImportPage = dc(() => {
                                 {t("Back to Gateways")}
                             </PgButton>
                         </div>
-                    )</PageHeader>
+                </PageHeader>
 
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                     <ThemedView style={{ gap: "4px" }}>
                         <ThemedText type="defaultSemiBold">{t("Bring your own AI")}</ThemedText>
                         <ThemedText style={{ fontSize: "13px" }}>
                             {t("Download the AI kit, generate a spec outside the platform, then upload and verify it here. No AI service is called by the platform.")}
                         </ThemedText>
                     </ThemedView>
-                </VAlert>
+                </PgAlert>
 
                 <SegmentedTabs
                     modelValue={String(step.value)}
@@ -1315,7 +1318,7 @@ const GatewayAiImportPage = dc(() => {
                         )}
                     </div>
                 </div>
-            </ThemedView>
+            </PgStack>
         </ScreenContainer>
     );
 });

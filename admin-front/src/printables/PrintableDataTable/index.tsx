@@ -1,5 +1,4 @@
 import { Table } from "@pg/ui";
-import {} from "@pg/ui";
 import { PrintableThemedView } from "../PrintableThemedView";
 import { ThemedText } from "@pg/ui";
 import { PgTableFooter as TableFooterComponent, PgTableHeader as TableHeaderComponent } from "@pg/ui";

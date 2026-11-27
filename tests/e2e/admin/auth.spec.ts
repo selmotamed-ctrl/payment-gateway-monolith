@@ -42,7 +42,7 @@ test("admin login surfaces a validation error and stays on the login page", asyn
   await page.getByLabel("Email or phone").fill("admin@pgtest.lan");
   await page.getByLabel("Password", { exact: true }).fill("wrong");
   await page.getByRole("button", { name: "Login", exact: true }).click();
-  await expect(page.locator(".v-alert")).toBeVisible();
+  await expect(page.locator(".pg-alert")).toBeVisible();
   await expect(page).toHaveURL(/\/login/);
   const stored = await page.evaluate(() => localStorage.getItem("PAYMENT_GATEWAY:ADMIN:USER"));
   expect(stored).toBeNull();

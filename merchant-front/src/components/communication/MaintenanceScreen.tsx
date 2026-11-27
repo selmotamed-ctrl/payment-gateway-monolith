@@ -1,6 +1,6 @@
 import { defineComponent } from "@/utils/dc";
 import { type PropType } from "vue";
-import {VAlert, PgButton} from "@pg/ui";
+import {PgAlert, PgButton} from "@pg/ui";
 import { useLocale } from "@/utils/vael-compat";
 import { RouterLink } from "vue-router/experimental/vapor";
 import {SurfaceCard} from "@pg/ui";
@@ -23,9 +23,9 @@ export const MaintenanceScreen = defineComponent({
         return () => (
             <SurfaceCard title={t("Platform under maintenance")} subtitle={t("Merchant registration and sign-in are temporarily unavailable")}>
                 <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                    <VAlert type="warning" variant="tonal" density="compact">
+                    <PgAlert tone="warning" density="compact">
                         {props.maintenance?.message ?? t("Email delivery is not configured. Please try again later.")}
-                    </VAlert>
+                    </PgAlert>
                     <ThemedText style={{ fontSize: "13px", opacity: 0.75 }}>
                         {t("The platform administrator has been notified. Email delivery must be configured before registration or sign-in can continue.")}
                     </ThemedText>

@@ -12,21 +12,56 @@ const TONE_ICON: Record<string, string> = {
     danger: "mdi-alert-circle-outline",
 };
 
+const ASSERTIVE_TONES = new Set(["danger", "warning"]);
+
 const ToastCard = dc(
-    (props: { toast: ToastItem }, _expose, { emit }) => {
+    (props: { toast: ToastItem }, _expose) => {
         const { t } = useLocale();
-        const progress = computed(() =>
-            props.toast.durationMs <= 0 ? 0 : Math.max(0, (props.toast.remainingMs / props.toast.durationMs) * 100),
-        );
+        const assertive = computed(() => ASSERTIVE_TONES.has(props.toast.tone));
+        let hovering = false;
+        let focused = false;
+
+        const pause = () => pauseToast(props.toast.id);
+        const resumeWhenIdle = () => {
+            if (!hovering && !focused) resumeToast(props.toast.id);
+        };
+
+        /**
+         * The countdown is a CSS animation so it moves every frame without a
+         * timer. Pausing freezes the animation; resuming starts it at the exact
+         * elapsed offset with only the remaining duration left.
+         */
+        const timerStyle = () => {
+            if (props.toast.durationMs <= 0) return undefined;
+            const elapsed = Math.max(0, props.toast.durationMs - props.toast.remainingMs);
+            return {
+                animationDuration: `${Math.max(0, props.toast.remainingMs)}ms`,
+                animationDelay: `${-elapsed}ms`,
+            };
+        };
+
         return () => (
             <div
                 class={["pg-toast", `pg-toast--${props.toast.tone}`]}
-                role={props.toast.tone === "danger" ? "alert" : "status"}
-                aria-live={props.toast.tone === "danger" ? "assertive" : "polite"}
-                onMouseenter={() => pauseToast(props.toast.id)}
-                onMouseleave={() => resumeToast(props.toast.id)}
-                onFocusin={() => pauseToast(props.toast.id)}
-                onFocusout={() => resumeToast(props.toast.id)}
+                role={assertive.value ? "alert" : "status"}
+                aria-live={assertive.value ? "assertive" : "polite"}
+                aria-atomic="true"
+                onMouseenter={() => {
+                    hovering = true;
+                    pause();
+                }}
+                onMouseleave={() => {
+                    hovering = false;
+                    resumeWhenIdle();
+                }}
+                onFocusin={() => {
+                    focused = true;
+                    pause();
+                }}
+                onFocusout={() => {
+                    focused = false;
+                    resumeWhenIdle();
+                }}
             >
                 <span class="pg-toast__icon" aria-hidden="true">
                     <PgIcon icon={TONE_ICON[props.toast.tone] ?? TONE_ICON.info} size={18} />
@@ -59,8 +94,10 @@ const ToastCard = dc(
                 </div>
                 {props.toast.durationMs > 0 && (
                     <span
-                        class={["pg-toast__timer", props.toast.paused ? "pg-toast__timer--paused" : ""]}
-                        style={{ transform: `scaleX(${progress.value / 100})` }}
+                        class={["pg-toast__timer", props.toast.paused ? "pg-toast__timer--paused" : ""]
+                            .filter(Boolean)
+                            .join(" ")}
+                        style={timerStyle()}
                         aria-hidden="true"
                     />
                 )}

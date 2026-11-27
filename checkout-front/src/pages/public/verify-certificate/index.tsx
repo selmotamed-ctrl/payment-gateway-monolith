@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { onMounted, ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute } from "vue-router";
-import {VAlert, PgButton, PgIcon, PgSpinner} from "@pg/ui";
+import {PgAlert, PgButton, PgIcon, PgSpinner} from "@pg/ui";
 import CheckoutLayout from "@/layouts/checkout";
 import {SurfaceCard, SurfaceCardText} from "@pg/ui";
 import { api } from "@/state/api";
@@ -60,7 +60,7 @@ const VerifyCertificatePage = dc(() => {
                         </div>
                     ) : error.value ? (
                         <>
-                            <VAlert type="error" variant="tonal">{error.value}</VAlert>
+                            <PgAlert tone="danger">{error.value}</PgAlert>
                             <div style={{ display: "flex", justifyContent: "center" }}>
                                 <PgButton variant="tonal" onClick={() => window.location.reload()}>{t("Try again")}</PgButton>
                             </div>
@@ -87,14 +87,14 @@ const VerifyCertificatePage = dc(() => {
                                 </div>
                             </div>
                             {certificate.value.status === "expired" && (
-                                <VAlert type="warning" variant="tonal">
+                                <PgAlert tone="warning">
                                     {t("This certificate has expired. The holder must recertify to renew it.")}
-                                </VAlert>
+                                </PgAlert>
                             )}
                             {certificate.value.status === "revoked" && (
-                                <VAlert type="error" variant="tonal">
+                                <PgAlert tone="danger">
                                     {t("This certificate was revoked by the issuer and is not valid. Contact the Academy administrator for details.")}
-                                </VAlert>
+                                </PgAlert>
                             )}
                             <dl class="certificate-verify__facts">
                                 <div><dt>{t("Holder")}</dt><dd>{certificate.value.holderName}</dd></div>

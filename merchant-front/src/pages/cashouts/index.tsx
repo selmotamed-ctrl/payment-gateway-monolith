@@ -1,10 +1,9 @@
 import { dc } from "@/utils/dc";
 import { ref } from "vue";
 import { useLocale } from "@/utils/vael-compat";
-import {PgAutocomplete, PgButton, PgTextField} from "@pg/ui";
+import {PgAutocomplete, PgButton, PgTextField, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
-import {ThemedView} from "@pg/ui";
 import {StateView} from "@pg/ui";
 import { DataTable } from "@/tables/DataTable";
 import type { TableHeader } from "@pg/ui";
@@ -192,8 +191,8 @@ ${t("IBAN (optional)")}: ${iban.value}` : ""}`,
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Cash-Outs")} subtitle={t("Settlement withdrawals and payout status.")}>(
+            <PgStack gap="lg">
+                <PageHeader title={t("Cash-Outs")} subtitle={t("Settlement withdrawals and payout status.")}>
                         <PgButton
                             variant="tonal"
                             onClick={() => {
@@ -211,7 +210,7 @@ ${t("IBAN (optional)")}: ${iban.value}` : ""}`,
                         >
                             {t("Request Cash-Out")}
                         </PgButton>
-                    )</PageHeader>
+                </PageHeader>
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
@@ -228,7 +227,7 @@ ${t("IBAN (optional)")}: ${iban.value}` : ""}`,
                         setSearchValue={(value) => (search.value = value)}
                     />
                 )}
-            </ThemedView>
+            </PgStack>
 
             <FormModal
                 modelValue={dialogOpen.value}

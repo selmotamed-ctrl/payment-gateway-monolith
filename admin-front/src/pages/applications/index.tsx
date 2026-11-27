@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "@/utils/vael-compat";
-import {PgButton} from "@pg/ui";
+import {PgButton, PgStack} from "@pg/ui";
 import { areChecklistsVisible } from "@/constants/env";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {PageHeader} from "@pg/ui";
@@ -791,7 +791,7 @@ const ApplicationsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
+            <PgStack gap="lg">
                 <PageHeader title={t("Applications")} subtitle={t("Merchant applications, their payment links and POS terminals: allowlists, tokens and containment.")} badge={t("Commerce")} badgeTone="info"><PgButton variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</PgButton></PageHeader>
 
                 {notice.value && <ApprovalSubmittedNotice approvalRequestId={notice.value.approvalRequestId} onDismiss={() => (notice.value = null)} />}
@@ -842,7 +842,7 @@ const ApplicationsPage = dc(() => {
                         listKey: "posTerminals",
                         headers: posHeaders.value,
                     })}
-            </ThemedView>
+            </PgStack>
 
             <ApplicationDetailDrawer
                 applicationId={openApplicationId.value}

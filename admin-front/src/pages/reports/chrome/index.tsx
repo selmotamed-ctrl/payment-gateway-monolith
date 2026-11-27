@@ -2,7 +2,7 @@ import { dc } from "@/utils/dc";
 import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "@/utils/vael-compat";
 import { useRoute, useRouter } from "vue-router";
-import {VAlert, PgButton, PgCol, PgFileUpload, PgRow, PgSwitch} from "@pg/ui";
+import {PgAlert, PgButton, PgCol, PgFileUpload, PgRow, PgSwitch, PgStack} from "@pg/ui";
 import {PgPage as ScreenContainer} from "@pg/ui";
 import {ThemedView} from "@pg/ui";
 import {ApiTable} from "@pg/ui";
@@ -553,7 +553,7 @@ const ReportsChromePage = dc(() => {
         ariaLabel={t("Preview language")}
         tabs={row.supportedLocales.map((locale) => ({ value: locale, label: localeLabel(locale) }))}
       />
-      {previewError.value && <VAlert type="error" variant="tonal">{previewError.value}</VAlert>}
+      {previewError.value && <PgAlert tone="danger">{previewError.value}</PgAlert>}
       {previewLoading.value ? (
         <div class="text-caption text-medium-emphasis">{t("Loading assets…")}</div>
       ) : (
@@ -582,8 +582,8 @@ const ReportsChromePage = dc(() => {
 
   return () => (
     <ScreenContainer>
-      <ThemedView style={{ gap: "18px" }}>
-        <PageHeader title={t("Report Headers & Footers")} subtitle={t("Upload reusable bilingual chrome specs and assign the global default")}>(
+    <PgStack gap="lg">
+        <PageHeader title={t("Report Headers & Footers")} subtitle={t("Upload reusable bilingual chrome specs and assign the global default")}>
             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
               <PgButton variant="tonal" prependIcon="mdi-refresh" loading={busy.value} onClick={refresh}>
                 {t("Refresh")}
@@ -600,12 +600,12 @@ const ReportsChromePage = dc(() => {
                 </PgButton>
               )}
             </ThemedView>
-          )</PageHeader>
+        </PageHeader>
 
         {error.value && (
-          <VAlert type="error" variant="tonal" closable onClick:close={() => (error.value = null)}>
+          <PgAlert tone="danger" closable onClear={() => (error.value = null)}>
             {error.value}
-          </VAlert>
+          </PgAlert>
         )}
         {diagnostics.value.length > 0 && (
           <ReportDiagnosticsPanel diagnostics={diagnostics.value} title={t("Action diagnostics")} />
@@ -618,7 +618,7 @@ const ReportsChromePage = dc(() => {
         </SurfaceCard>
 
         {migrationOpen.value && editingRow.value && (
-          <VAlert type="warning" variant="tonal">
+          <PgAlert tone="warning">
             <div class="d-flex flex-column ga-2">
               <span>{t("Migrate and restore default")}: {editingRow.value.code} v{editingRow.value.version}</span>
               <div class="d-flex flex-wrap ga-2">
@@ -630,21 +630,18 @@ const ReportsChromePage = dc(() => {
                 </PgButton>
               </div>
             </div>
-          </VAlert>
+          </PgAlert>
         )}
 
         <SurfaceCard
             title={t("Upload Chrome Spec")}
             subtitle={t("JSON + optional logo/seal .zip bundle")}
-            v-slots={
-              editingRow.value
-                ? {
-                    headerActions: () => (
-                      <MetaPill prependIcon="mdi-pencil-outline">{`${editingRow.value?.code} v${editingRow.value?.version}`}</MetaPill>
-                    ),
-                  }
-                : undefined
-            }
+            v-slots={{
+              headerActions: () =>
+                editingRow.value ? (
+                  <MetaPill prependIcon="mdi-pencil-outline">{`${editingRow.value?.code} v${editingRow.value?.version}`}</MetaPill>
+                ) : null,
+            }}
           >
             <div class="d-flex flex-column ga-3">
               <PgRow dense>
@@ -667,9 +664,9 @@ const ReportsChromePage = dc(() => {
                 </PgCol>
               </PgRow>
               {editingNeedsZip.value && (
-                <VAlert type="info" variant="tonal">
+                <PgAlert tone="info">
                   {t("This header/footer uses assets. Re-attach its logo/seal bundle (.zip); saving creates a new version and assets are not carried over.")}
-                </VAlert>
+                </PgAlert>
               )}
               <JsonSpecEditor
                 modelValue={specJson.value}
@@ -745,7 +742,7 @@ const ReportsChromePage = dc(() => {
         >
           {previewRow.value && renderPreview(previewRow.value)}
         </SlideOverDrawer>
-      </ThemedView>
+      </PgStack>
       <FormModal
         modelValue={defaultOpen.value}
         onUpdate:modelValue={(value: boolean) => { defaultOpen.value = value; if (!value) defaultTarget.value = null; }}
