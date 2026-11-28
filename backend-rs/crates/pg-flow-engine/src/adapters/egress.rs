@@ -537,7 +537,8 @@ impl EgressPort for BoundEgress {
             .as_str()
             .parse()
             .map_err(|_| EgressError::blocked("The gateway request method is invalid"))?;
-        let mut gateway = GatewayRequest::new(method, request.url.clone())
+        let request_url = request.url.clone();
+        let mut gateway = GatewayRequest::new(method, request_url.clone())
             .with_side_effect(map_side_effect(request.side_effect))
             .with_retry_policy(map_retry_policy(request.retry_policy))
             .with_point_of_no_return(request.point_of_no_return)
@@ -569,17 +570,11 @@ impl EgressPort for BoundEgress {
                 headers: BTreeMap::new(),
                 raw_text,
                 data,
-                url: request_url_placeholder(&self.attempt_id),
+                url: request_url,
             }),
             Err(error) => Err(map_error(error)),
         }
     }
-}
-
-fn request_url_placeholder(attempt_id: &str) -> String {
-    // The answer of a non-2xx gateway response is mapped from the error, which does not carry the
-    // URL. The engine only logs it; the attempt id keeps the value traceable.
-    format!("attempt://{attempt_id}")
 }
 
 fn map_body(

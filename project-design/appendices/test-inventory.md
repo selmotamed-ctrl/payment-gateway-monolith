@@ -266,7 +266,7 @@
 | `core-back/test/synthetic-seeder-realism.test.ts` | 504 | 45 |
 | `core-back/test/synthetic-seeder.test.ts` | 203 | 12 |
 | `core-back/test/ui-authorities.test.ts` | 35 | 3 |
-| `core-back/test/worker-runtime-health.test.ts` | 153 | 8 |
+| `core-back/test/worker-runtime-health.test.ts` | 185 | 11 |
 | `admin-back/test/academy-progress.test.ts` | 240 | 13 |
 | `admin-back/test/admin-surface.test.ts` | 1756 | 89 |
 | `admin-back/test/admin-ui-completion.test.ts` | 455 | 29 |
@@ -472,4 +472,4 @@
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
 - Total files: **466**
-- Total literal test declarations: **4566**
+- Total literal test declarations: **4569**

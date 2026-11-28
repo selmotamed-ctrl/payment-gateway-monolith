@@ -321,6 +321,8 @@
 | `core-back/lib/env/index.ts` | `TRUST_PROXY` |
 | `core-back/lib/env/index.ts` | `LOG_LEVEL` |
 | `core-back/lib/env/index.ts` | `WORKER_ENABLED` |
+| `core-back/lib/env/index.ts` | `WORKER_DISABLED` |
+| `core-back/lib/env/index.ts` | `WORKER_BACKGROUND_JOBS_DRAINED_EXTERNALLY` |
 | `core-back/lib/env/index.ts` | `WORKER_POLL_INTERVAL_MS` |
 | `core-back/lib/env/index.ts` | `WORKER_BATCH_SIZE` |
 | `core-back/lib/env/index.ts` | `WORKER_CONCURRENCY` |

@@ -609,6 +609,38 @@ async fn cleanup(pool: &PgPool, fixture: &Fixture) {
 }
 
 #[tokio::test]
+async fn dynamic_detail_routes_dispatch_through_the_shell() {
+    let Some(state) = test_state().await else {
+        return;
+    };
+    let id = Uuid::new_v4();
+    for path in [
+        format!("/internal/admin/aml/cases/{id}"),
+        format!("/internal/admin/aml/cases/{id}/evidence"),
+        format!("/internal/admin/aml/screenings/{id}"),
+        format!("/internal/admin/aml/rules/{id}"),
+        format!("/internal/admin/aml/report-schemas/{id}"),
+        format!("/internal/admin/aml/reports/{id}"),
+        format!("/internal/admin/aml/reports/{id}/payload"),
+    ] {
+        let response = crate::app::dispatch(
+            state.clone(),
+            request(&path),
+            ntex::web::types::Payload(ntex::http::Payload::None),
+        )
+        .await;
+        // The route is mounted (not the 501 fallback) and the staff session requirement runs.
+        assert_eq!(
+            response.status(),
+            ntex::http::StatusCode::UNAUTHORIZED,
+            "{path} must reach its handler"
+        );
+        let value = body(response).await;
+        assert_eq!(value["code"], json!("AUTH_REQUIRED"), "{path}");
+    }
+}
+
+#[tokio::test]
 async fn cases_list_filters_pagination_confidentiality_and_detail() {
     let Some(state) = test_state().await else {
         return;
@@ -833,6 +865,22 @@ async fn cases_list_filters_pagination_confidentiality_and_detail() {
     );
     assert_eq!(missing.status, 404);
     assert_eq!(missing.code, "AML_EVIDENCE_NOT_FOUND");
+
+    // The fixture object is QUARANTINE_REJECTED: the download gate refuses it (423) before any
+    // blob read. The denial is appended to the storage access log, like the TS readAuthorized.
+    let quarantined = error(
+        case_evidence_content_impl(
+            &state,
+            &request(&format!(
+                "/internal/admin/aml/cases/{}/evidence/{}/content",
+                fixture.case_open, fixture.evidence
+            )),
+            Some(&actor),
+        )
+        .await,
+    );
+    assert_eq!(quarantined.status, 423);
+    assert_eq!(quarantined.code, "STORAGE_OBJECT_QUARANTINED");
 
     cleanup(&state.pools.main, &fixture).await;
 }

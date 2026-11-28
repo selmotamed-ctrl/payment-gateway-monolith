@@ -2,10 +2,11 @@
 
 Rust/ntex port of the payment-gateway backend. The plan is `design/14-rust-port/porting_to_ntex_rust.md`.
 
-**Status: foundation + P1 pilot.** The object-storage daemon is complete; the core and edge binaries
-are health/config scaffolds and every unported route answers `501 NOT_IMPLEMENTED_ROUTE`. The domain,
-report, compliance and deploy crates are being ported in parallel. See `IMPLEMENTATION_TRACKER.md`,
-`PARITY.md` and `DEVIATIONS.md`.
+**Status: 2026-11-28 milestone.** The object-storage, Fake Rails and backup daemons and all three
+edges are complete. `core-rs` mounts 315 routes (all reads except nine GETs); the write/money HTTP
+surface, the remaining workers and seeds/CLIs still answer `501 NOT_IMPLEMENTED_ROUTE`. The ledger,
+flow and egress libraries are complete with DB/egress/ledger adapters; `pgctl` covers D0-D5 as
+libraries/plans. See `IMPLEMENTATION_TRACKER.md`, `PARITY.md` and `DEVIATIONS.md`.
 
 ## Layout
 
@@ -13,13 +14,14 @@ report, compliance and deploy crates are being ported in parallel. See `IMPLEMEN
 crates/
   pg-config pg-types pg-crypto pg-http pg-mtls pg-db pg-redis pg-objstore pg-upstream pg-edge
   pg-domain-auth pg-domain-flow pg-domain-ledger pg-domain-gov pg-domain-comms pg-domain-recon
-  pg-domain-academy pg-egress pg-workers pg-report-engine pg-compliance pg-office pg-search
+  pg-domain-academy pg-egress pg-ledger pg-flow-engine pg-workers pg-report-engine pg-compliance
+  pg-office pg-search
   pg-deploy-config pg-deploy-plan
 bins/
   core-rs admin-edge merchant-edge checkout-edge fake-rails-rs backup-daemon-rs
   wal-fetch object-storage-daemon-rs pgctl
-tests/  golden-vectors/ (to fill in P0-T06)
-tools/  (codegen, golden vectors, parity — to fill in P0)
+tests/  golden-vectors/ (148 TS-generated cases; route/error/env inventories)
+tools/  codegen, golden vectors, route inventory, parity harness
 db/     (migrations after P10)
 ```
 
@@ -69,10 +71,13 @@ OBJECT_STORAGE_ROOT_DIR=/srv/objects cargo run -p object-storage-daemon-rs -- fs
 
 ## Deploy engine (`pgctl`)
 
-`pgctl` is the Rust replacement for `deploy/` (chapter 7). Status: **D0 complete; D1/D2 and D3-T03
-implemented behind dry-run defaults; D5 storage provision plans complete (PostgreSQL, PgBouncer,
-Redis, audit/log, ClamAV); D3-T02 (SO_REUSEPORT handoff), D4 (PKI), D5 execution (package
-installation/SSH convergence) and D6 (lab/stress) are not implemented yet.**
+`pgctl` is the Rust replacement for `deploy/` (chapter 7). Status: **D0-D5 complete as libraries and
+deterministic plans.** Config import/validate/schema, planning, signed releases, the SSH runner with
+host pinning, service install, mixed TS/Rust plans, route table and worker hand-off, rollback/watch,
+the ECDSA PKI (issue/renew/revoke/verify) and the PostgreSQL/PgBouncer/Redis/audit/log/ClamAV
+provision plans are implemented. Provisioner execution (`provision apply`, package installation/SSH
+convergence), D3-T02 (SO_REUSEPORT hand-off), D5-T06 HA, D5-T07 observability and D6 lab/stress are
+not implemented yet; the plans are `--execute`-refused.
 
 ```bash
 # Desired state

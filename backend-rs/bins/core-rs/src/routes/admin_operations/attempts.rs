@@ -214,7 +214,6 @@ fn list_spec(support: bool) -> ListSpec {
         .with_in("gatewayId", "gatewayId")
         .with_in("merchantId", "merchantId")
         .with_in("applicationId", "applicationId")
-        .with_equals("currency", "currency")
         .with_range(RangeFilter::new(
             "amount",
             "requestedAmount",
@@ -318,6 +317,16 @@ async fn list(
             predicate = format!("({predicate} OR a.id = ${placeholder}::uuid)");
         }
         extra.sql = predicate;
+    }
+    if let Some(currency) = query_string(request, "currency") {
+        let start = built.binds.len() + extra.binds.len() + 1;
+        let predicate = format!("a.currency = upper(${start}::text)");
+        extra.sql = if extra.sql.is_empty() {
+            predicate
+        } else {
+            format!("{} AND {}", extra.sql, predicate)
+        };
+        extra.binds.push(ExtraBind::Text(currency));
     }
 
     let projection = format!(

@@ -619,3 +619,44 @@ build-environment or internal-representation choices.
   attempt snapshot. The multipart boundary is owned by the egress adapter, and `initiate` returns
   `SUCCEEDED` while persisting `AWAITING_CUSTOMER` as TS does.
 - Item / approval: n/a — same observable lifecycle, more durable resume data.
+
+## DEV-076 P4 read routes reject malformed ids with 404/400 instead of Prisma 500
+- Date / task: 2026-11-28 / P4-T02..T08
+- TS source: the Express handlers pass path params straight to Prisma; a non-UUID id raises
+  P2023 and the generic error handler returns `500 SERVER_ERROR`.
+- What Rust does: `require_uuid_param`/`validate` parse the id first and return the route's typed
+  `404` (or `400 INVALID_BODY` where the module documents it), so a malformed id is not a server
+  error. Deterministic tie-breakers are added where Prisma leaves order unspecified; read routes
+  use `pools.main` until the P3 replica router is wired; object-storage health/asset reads fall back
+  to the documented TS `UnavailableBlobStore` shape when no daemon client is configured. Exports
+  append the same `audit_log`/`audit_outbox` rows as TS. Report-engine transcript and a few
+  authoring artefacts are deferred with explicit 501s.
+- Item / approval: n/a — same successful responses, no 500 for caller input.
+
+## DEV-077 Flow adapters use worker_cursors and keep egress statuses as responses
+- Date / task: 2026-11-28 / P5-T05
+- TS source: `engine/runtime/attemptRepository.ts`, `slotStore.ts`, `ApiConsumer.ts`.
+- What Rust does: the per-step cursor is stored in `worker_cursors` under
+  `flow-cursor:{attemptId}:{phase}` (no new table). Merchant-direct zero commission returns
+  `409 MERCHANT_DIRECT_ZERO_COMMISSION` instead of claiming a journal (TS returns `null`);
+  `SUSPENSE_SETTLEMENT` always debits `GATEWAY_CLEARING` because `ScenarioPosting` has no
+  ownership mode. Slot failures are wrapped by the engine as `409 SLOT_RESERVATION_FAILED` with the
+  TS `PAYMENT_LINK_SLOT_UNAVAILABLE` message (the TS store has no `LINK_BUSY` code). Non-2xx
+  egress answers are returned as `EgressResponse` for the status rules; transport errors keep the
+  `retryable`/`money_uncertain` flags. Writes have `*_on(&mut PgConnection)` forms so slot commit,
+  ledger posting and status write join one transaction.
+- Item / approval: n/a — same lifecycle; adapter-level transaction ownership documented.
+
+## DEV-078 Remaining workers use a fixed Tripoli offset and an injected notice cipher
+- Date / task: 2026-11-28 / P6-T07
+- TS source: `engine/workers/{JournalPartitionWorker,JoinRequestExpiryWorker,ExpiryHousekeepingWorker,StatementScheduleWorker,ConsistencyAuditWorker,RetentionWorker}.ts`, `lib/cron.ts`.
+- What Rust does: the 5-field cron uses a fixed UTC+2 Tripoli offset (only `Africa/Tripoli` and `UTC`
+  are accepted; another zone is refused, not silently mis-evaluated) because `chrono-tz` is not in
+  this crate. EMAIL/SMS notices are queued through an injected `NoticeAddressCipher`; without a
+  cipher the in-app notice still queues and the external rows are skipped with a warning rather
+  than queued undeliverable. Retention also deletes `dispute_attachments` before disputes (the
+  table post-dates the TS worker with `ON DELETE RESTRICT`); dependent deletes are bounded by the
+  attempt batch; ledger tables are never purged. The workers take an explicit config struct and do
+  not read env vars (the binary config layer owns `WORKER_*`, `RETENTION_DRY_RUN`,
+  `CONSISTENCY_AUDIT_REPAIR`).
+- Item / approval: n/a — same schedules and data effects; explicit configuration boundary.

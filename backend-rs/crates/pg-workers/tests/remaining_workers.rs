@@ -372,7 +372,7 @@ async fn join_request_expiry_expires_only_past_deadline_requests_with_one_audit_
         &pool,
         &[
             (
-                "DELETE FROM notifications WHERE recipient_user_id = $1",
+                "DELETE FROM notifications WHERE recipient_user_id = ANY($1)",
                 vec![user_id],
             ),
             (
@@ -486,7 +486,10 @@ async fn cleanup_link_fixture(pool: &PgPool, fixture: &LinkFixture, link_id: Uui
                 "DELETE FROM applications WHERE id = ANY($1)",
                 vec![fixture.application_id],
             ),
-            ("DELETE FROM wallets WHERE id = ANY($1)", vec![fixture.wallet_id]),
+            (
+                "DELETE FROM wallets WHERE id = ANY($1)",
+                vec![fixture.wallet_id],
+            ),
             (
                 "DELETE FROM gl_shard_checkpoints WHERE gl_account_id = ANY($1)",
                 vec![fixture.gl_account_id],

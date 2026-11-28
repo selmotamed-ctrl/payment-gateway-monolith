@@ -14,6 +14,8 @@ code:
   - backend-rs/crates/pg-mtls
   - backend-rs/crates/pg-db
   - backend-rs/crates/pg-objstore
+  - backend-rs/crates/pg-ledger
+  - backend-rs/crates/pg-flow-engine
   - backend-rs/crates/pg-workers
   - backend-rs/crates/pg-domain-auth
   - backend-rs/crates/pg-domain-flow
@@ -74,11 +76,17 @@ tests:
   - backend-rs/crates/pg-types/tests/golden_json_order.rs
   - backend-rs/crates/pg-types/tests/golden_dates.rs
   - backend-rs/crates/pg-objstore/tests/golden_pgos1.rs
+  - backend-rs/bins/core-rs/tests/
+  - backend-rs/crates/pg-ledger/tests/live_pg.rs
+  - backend-rs/crates/pg-flow-engine/tests/**
+  - backend-rs/crates/pg-workers/tests/**
 gaps:
-  - Track P is at P0/P1: the object-storage daemon is complete; core and the edges are health/config scaffolds, and every unported route answers 501. No domain route, worker, migration, seed or business CLI is live.
-  - Domain/edge/report/deploy crates are pure logic with 1,070 passing unit/golden tests; they are not wired into request handlers or SQL repositories yet.
-  - TS baselines BL-1..BL-9 have not been recorded, the parity harness (P0-T10) and the two-machine/object-storage labs have not run, and `cargo deny`/`cargo sqlx prepare` are not yet part of CI.
-  - The TS core still has no uniform per-worker disable switch (`WORKER_DISABLED`, P0-T03); Rust supports it.
+  - Track P is partial: 315 of the 323 unique core routes are mounted (all reads except nine GETs); the write surface (223 POST/28 PATCH/24 PUT/12 DELETE), the money HTTP routes and the remaining workers are not ported, so unported routes still answer 501.
+  - The P5 libraries exist but `productionRuntime`/`app.rs` are not wired to the flow adapters, so confirm/cancel/refund do not serve traffic yet; the money path is library-complete, route-incomplete.
+  - Nine GETs remain (access-token/application/wallet summaries, wallet statement/audit, gateway AI transcript, report-engine transcript, merchant Google callback, POS SSE stream); the two transcripts need the P8 authoring builders and the other two are P5/P7 streams.
+  - P6 has twelve of the TS workers; Deadline, KYB scan/expiry, regulatory reports, audit anchor, commission netting, notification/webhook fan-out, shard scaler/invariant and the object-storage maintenance worker remain.
+  - P9 seeds/migrations/business CLIs and P10 cutover are not started; parity replay/shadow diffing and the two-machine/object-storage labs have not run; `cargo deny`/`cargo sqlx prepare` are not CI gates.
+  - D5 provisioner execution is refused until D1 converges; D5-T06 HA, D5-T07 observability, D6 and the deploy stress/lab runs remain.
   - Urgent compatible fixes identified by the plan are open, notably S-DB-02 (app role can delete audit_log rows by setting `pgw.audit_retention`) and S-SEC-02 (`requireMerchantScope` unused and fail-open).
 ---
 
@@ -86,40 +94,51 @@ gaps:
 
 ## 1. Status
 
-**Partial (started 2026-11-28).** The plan is the document set in `design/14-rust-port/`; start with
-`porting_to_ntex_rust.md`. `backend-rs/IMPLEMENTATION_TRACKER.md` is the live work log; `PARITY.md` and
-`DEVIATIONS.md` record what is byte-compatible and what deliberately differs.
+**Partial (started 2026-11-28, working tree on branch `rust`).** The plan is the document set in
+`design/14-rust-port/`; start with `porting_to_ntex_rust.md`. `backend-rs/IMPLEMENTATION_TRACKER.md`
+is the live work log; `PARITY.md` and `DEVIATIONS.md` record what is byte-compatible and what
+deliberately differs.
 
-Implemented so far:
+Current Rust tree (verified 2026-11-28): **2,731 tests in 130 test binaries pass**, `cargo clippy
+--workspace --all-targets -- -D warnings` is clean, all nine release binaries build, and the three
+`backend-rs/tools` `--check` gates pass.
 
-- Rust 1.100.1 workspace (`backend-rs/`) with the chapter 3 crate/binary layout, pinned dependencies, `deny.toml`,
-  release profile, root `rs:check|test|build` scripts and a CI `rust` job.
-- `pg-config` (dotenv, systemd credentials, object-storage daemon config), `pg-types` (Money4, decimal.js
-  serialisation, JsDate, JS key order, ids, cursor), `pg-crypto` (vault AES-256-GCM/HKDF, CryptoEngine
-  canonicalisation with UTF-16 sort, Standard Webhooks, FNV-1a UTF-16, redaction), `pg-http` (error envelope,
-  request id, security headers, body limits, health, zod-shaped issues, deny-by-default route policies, fixed-window
-  limiter catalogue), `pg-mtls` (rustls 1.3 server/client configs, CN/SAN extraction, channel table), `pg-db`
-  (`sslmode=no-verify` normalisation, pool knobs, SQLSTATE map, advisory-lock leader election and session probe,
-  Prisma metadata), `pg-objstore` (atomic FS store, remote mTLS client, `pgos1` envelope, MIME/executable sniffing,
-  namespace policies, storage keys, GC/retention) and `pg-workers` (interval/jitter/singleton/panic isolation/health).
-- The **P1 object-storage daemon** is complete: all six `/v1/*` routes, `fsck`, ntex/rustls mTLS with peer CN/SAN
-  authorization, bounded bodies and the TS error bodies. This is the pilot for the ntex 4.11 mTLS model (P0-T07).
-- Health/config scaffolds for `core-rs`, the three edges, fake rails and the backup daemon; unported routes answer
-  `501 NOT_IMPLEMENTED_ROUTE` so the parity harness can classify them.
-- Domain and adapter crates implemented as pure, tested libraries: `pg-domain-{auth,flow,ledger,gov,comms,recon,academy}`
-  (sessions/JWT/MFA/throttle, statuses/transitions/guards/visible rails/slots, ledger templates/shards/fold/repair/commission,
-  approvals/maker-checker/AML states, communication templates/tipping-off/SMS, CSV/date/statement parsing, exam/certificate/lab
-  scoring), `pg-upstream` (least-in-flight pool/retry/path/headers), `pg-egress` (SSRF/allowlist/pinned resolution, auth
-  methods, token cache, webhook retry), `pg-redis` (invalidation/realtime envelopes, Lua velocity, bounded auth state,
-  caches/revocation), `pg-edge` (trusted proxies, cookie/CSRF, multipart/SSE/upload guards), `pg-report-engine`
-  (spec/normalise/limits/hash/decimal/compatibility/verifier), `pg-compliance` (filing gate, safe XSD subset, periods,
-  incidents), `pg-office`, `pg-search`, and `pg-deploy-{config,plan}` with the `pgctl` and `wal-fetch` binaries.
-- P0 tooling is complete: Prisma codegen (123 models / 131 enums / metadata / report catalog), route/error/env inventory
-  (611 core + 544 edge routes, 605 error groups, 8 env schemas) and 148 TypeScript-generated golden cases across FNV,
-  vault, webhooks, CryptoEngine canonicalisation, decimal.js/Money4, JS key order/dates and `pgos1`. All eight Rust
-  golden suites pass, including decrypting TS vault payloads and `pgos1` streams.
-- Verification on this tree: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
-  `cargo test --workspace` (1,070 passed), the three tool `--check` gates and the root scripts.
+- **P0 complete.** Workspace/CI/scripts; route inventory (611 core + 544 edge routes, 605 error
+  groups, 8 env schemas) and its `--check`; Prisma codegen (123 models / 131 enums / metadata /
+  report catalog); 148 TypeScript-generated golden vectors across FNV, vault, webhooks,
+  CryptoEngine canonicalisation, decimal.js/Money4, JS key order/dates and `pgos1`; baselines
+  BL-1/BL-2; mimalloc; `WORKER_DISABLED` in the TS core; real mTLS proven with the internal CA.
+- **P1 object-storage daemon complete.** All six `/v1/*` routes, `fsck`, ntex/rustls mTLS with peer
+  CN/SAN authorization, bounded bodies and TS error bodies.
+- **P2 edges complete.** `checkout-edge` 19/19 routes (179 tests), `merchant-edge` 107/107 (153
+  tests), `admin-edge` 419/419 + sandbox catch-all (102 tests): mTLS pools, contract translation,
+  uploads/limits, sandbox mirror, SSE and raw inbound compression.
+- **P4 read surface complete except nine GETs.** `core-rs` mounts **315 routes**: all merchant,
+  checkout, admin commerce/merchant-360/ledger/operations/AML/system/gateways/academy/report-engine/
+  search and the 37 sandbox GETs, with `routes-policy.json` generated from the table and
+  `bin/core-rs/tests/inventory_parity.rs` proving every mounted route exists in the TypeScript
+  inventory with the right TS file. **Nine GETs remain**: `access-tokens/summary`,
+  `applications/summary`, `wallets/summary`, `wallets/:id/statement`, `wallets/:id/audit-events`,
+  `gateways/ai-transcript`, `report-engine/transcript` (two generated transcripts), the merchant
+  Google OAuth callback (P7) and the POS SSE stream (P5).
+- **P5 money-path libraries complete.** `pg-ledger` (posting, account cache, shard sequences,
+  cash-out locks, reads, repair; 36 unit + 15 live tests), `pg-flow-engine` (transform library, six
+  step kinds, rail loop, materialisation, DB/egress/ledger adapters; 157 tests), `pg-egress` (SSRF/
+  pinned DNS, 10 auth methods, token cache, multipart, mTLS; 102 tests). The HTTP money routes
+  (confirm/cancel/refund) and worker wiring are still P7.
+- **P6 partially complete.** Runtime plus twelve workers: OutboxRelay, InboundInbox, ExpirySweeper,
+  Poll, LedgerCheckpoint, PlatformMonitor, JournalPartition, JoinRequestExpiry,
+  ExpiryHousekeeping, StatementSchedule, ConsistencyAudit and Retention (132 worker tests).
+- **P9 daemons complete.** Fake Rails (20 rails, SQLite/WAL, portal/SSE/control; 86 tests) and the
+  backup daemon (mTLS control/WAL, queue/idempotency/catalog/PGBKv2, pg-native full/delta/WAL,
+  restore drills; 197 tests + live PostgreSQL 18 PITR). Seeds and business CLIs remain.
+- **D0-D5 complete as libraries.** `pgctl` config/plan/release/SSH/install/route table/workers push/
+  rollback/watch, PKI (113 tests incl. 42 PKI), storage provisioners as deterministic plans (87
+  tests). Provisioner execution, D5-T06/T07 and the deploy labs remain.
+
+Verification on this tree: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D
+warnings`, `cargo test --workspace`, `cargo build --release --workspace`, the three tool `--check`
+gates and `git diff --check`.
 
 ## 2. Program
 

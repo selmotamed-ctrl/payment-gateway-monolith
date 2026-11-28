@@ -401,23 +401,56 @@ async fn write_audit(
         .ok_or_else(ApiError::server_error)?;
     let actor_id = Uuid::parse_str(user_id).map_err(|_| ApiError::server_error())?;
     let now = Utc::now().naive_utc();
+    let id = new_v7();
+    // `writeAudit` inserts the compatibility row and, when a dedicated audit database is
+    // configured, the same row into `audit_outbox` in one transaction for the shipper.
+    let mut transaction = state
+        .pools
+        .main
+        .begin()
+        .await
+        .map_err(crate::routes::common::database_error)?;
     sqlx::query(
         "INSERT INTO audit_log \
          (id, created_at, updated_at, actor_id, role, action, entity_type, entity_id, before_json, after_json, approval_request_id) \
          VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9, NULL)",
     )
-    .bind(new_v7())
+    .bind(id)
     .bind(now)
     .bind(actor_id)
     .bind(role)
     .bind(action)
     .bind(entity_type)
     .bind(entity_id)
-    .bind(before)
-    .bind(after)
-    .execute(&state.pools.main)
+    .bind(&before)
+    .bind(&after)
+    .execute(&mut *transaction)
     .await
     .map_err(crate::routes::common::database_error)?;
+    if state.pools.audit.is_some() {
+        sqlx::query(
+            "INSERT INTO audit_outbox \
+             (id, actor_id, actor_email, role, action, entity_type, entity_id, merchant_id, approval_request_id, \
+              request_id, client_ip, user_agent, before_json, after_json, created_at) \
+             VALUES ($1, $2, NULL, $3, $4, $5, $6, NULL, NULL, NULL, NULL, NULL, $7, $8, $9)",
+        )
+        .bind(id)
+        .bind(actor_id)
+        .bind(role)
+        .bind(action)
+        .bind(entity_type)
+        .bind(entity_id)
+        .bind(&before)
+        .bind(&after)
+        .bind(now)
+        .execute(&mut *transaction)
+        .await
+        .map_err(crate::routes::common::database_error)?;
+    }
+    transaction
+        .commit()
+        .await
+        .map_err(crate::routes::common::database_error)?;
     Ok(())
 }
 

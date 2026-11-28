@@ -2657,7 +2657,7 @@ The loop is not a distributed lock by itself. Cross-node safety comes from `FOR 
 - storage engine -> outbox relay and, only for a dedicated audit store, the audit shipper;
 - background-job handlers -> reconciliation and adjustment/dispute execution.
 
-`core-back/index.ts:259` starts the runtime when `WORKER_ENABLED` is true. `assertBackgroundJobQueueDrainable` refuses to boot if workers or background jobs are disabled, because statement upload and dispute intake answer `202` and would otherwise strand work (`productionRuntime.ts:121`). `WORKER_ENABLED` and `WORKER_BACKGROUND_JOBS_ENABLED` therefore default to true and cannot be safely disabled in the current API configuration.
+`core-back/index.ts:259` starts the runtime when `WORKER_ENABLED` is true. `assertBackgroundJobQueueDrainable` refuses to boot if workers or background jobs are disabled, because statement upload and dispute intake answer `202` and would otherwise strand work (`productionRuntime.ts:121`). `WORKER_ENABLED` and `WORKER_BACKGROUND_JOBS_ENABLED` therefore default to true. Two hand-over controls exist (P0-T03): `WORKER_DISABLED` is a comma-separated list of worker class names that are filtered out before `start()` (they do not run and are absent from `/health.workers`), and `WORKER_BACKGROUND_JOBS_DRAINED_EXTERNALLY=true` relaxes the boot guard when another runtime (the Rust worker runtime during Track P) drains `background_jobs`.
 
 ### 3.3 Worker inventory
 
@@ -2900,7 +2900,9 @@ Source: `design/11-automation/background_automation_and_workers_plan.md`. Every 
 
 | Key | Default | Purpose |
 | :--- | :--- | :--- |
-| `WORKER_ENABLED` | `true` | Starts the runtime; false is rejected at boot because queue-only routes exist. |
+| `WORKER_ENABLED` | `true` | Starts the runtime; false is rejected at boot unless `WORKER_BACKGROUND_JOBS_DRAINED_EXTERNALLY=true`. |
+| `WORKER_DISABLED` | empty | Comma-separated worker class names filtered out of the runtime and `/health.workers`. |
+| `WORKER_BACKGROUND_JOBS_DRAINED_EXTERNALLY` | `false` | Allows a boot with no local worker/background-job drain when another runtime owns the queue. |
 | `WORKER_POLL_INTERVAL_MS`, `WORKER_BATCH_SIZE` | 5000, 50 | Base cadence and batch for most workers. |
 | `WORKER_CONCURRENCY`, `WORKER_MAX_ATTEMPTS` | 4, 3 | Concurrency is validated but unused; max attempts is passed to the inbound worker. |
 | `WORKER_RESCREEN_INTERVAL_MS` | 86,400,000 | Periodic screening interval. |

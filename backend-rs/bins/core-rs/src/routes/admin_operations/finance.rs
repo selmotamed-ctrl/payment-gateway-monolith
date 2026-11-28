@@ -727,7 +727,7 @@ async fn wallet_balance(state: &AppState, wallet_id: &str) -> Result<Value, ApiE
          LEFT JOIN gl_account_shards s ON s.gl_account_id = ga.id
          WHERE w.id = $1 GROUP BY ga.account_type",
     )
-    .bind(wallet_id)
+    .bind(super::support::uuid_bind(wallet_id))
     .fetch_optional(&state.pools.main)
     .await
     .map_err(super::support::database_error)?;

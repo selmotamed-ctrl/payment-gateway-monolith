@@ -4864,7 +4864,7 @@ The loop is not a distributed lock by itself. Cross-node safety comes from `FOR 
 - storage engine -> outbox relay and, only for a dedicated audit store, the audit shipper;
 - background-job handlers -> reconciliation and adjustment/dispute execution.
 
-`core-back/index.ts:259` starts the runtime when `WORKER_ENABLED` is true. `assertBackgroundJobQueueDrainable` refuses to boot if workers or background jobs are disabled, because statement upload and dispute intake answer `202` and would otherwise strand work (`productionRuntime.ts:121`). `WORKER_ENABLED` and `WORKER_BACKGROUND_JOBS_ENABLED` therefore default to true and cannot be safely disabled in the current API configuration.
+`core-back/index.ts:259` starts the runtime when `WORKER_ENABLED` is true. `assertBackgroundJobQueueDrainable` refuses to boot if workers or background jobs are disabled, because statement upload and dispute intake answer `202` and would otherwise strand work (`productionRuntime.ts:121`). `WORKER_ENABLED` and `WORKER_BACKGROUND_JOBS_ENABLED` therefore default to true. Two hand-over controls exist (P0-T03): `WORKER_DISABLED` is a comma-separated list of worker class names that are filtered out before `start()` (they do not run and are absent from `/health.workers`), and `WORKER_BACKGROUND_JOBS_DRAINED_EXTERNALLY=true` relaxes the boot guard when another runtime (the Rust worker runtime during Track P) drains `background_jobs`.
 
 ### 3.3 Worker inventory
 
@@ -5107,7 +5107,9 @@ Source: `design/11-automation/background_automation_and_workers_plan.md`. Every 
 
 | Key | Default | Purpose |
 | :--- | :--- | :--- |
-| `WORKER_ENABLED` | `true` | Starts the runtime; false is rejected at boot because queue-only routes exist. |
+| `WORKER_ENABLED` | `true` | Starts the runtime; false is rejected at boot unless `WORKER_BACKGROUND_JOBS_DRAINED_EXTERNALLY=true`. |
+| `WORKER_DISABLED` | empty | Comma-separated worker class names filtered out of the runtime and `/health.workers`. |
+| `WORKER_BACKGROUND_JOBS_DRAINED_EXTERNALLY` | `false` | Allows a boot with no local worker/background-job drain when another runtime owns the queue. |
 | `WORKER_POLL_INTERVAL_MS`, `WORKER_BATCH_SIZE` | 5000, 50 | Base cadence and batch for most workers. |
 | `WORKER_CONCURRENCY`, `WORKER_MAX_ATTEMPTS` | 4, 3 | Concurrency is validated but unused; max attempts is passed to the inbound worker. |
 | `WORKER_RESCREEN_INTERVAL_MS` | 86,400,000 | Periodic screening interval. |
@@ -20496,40 +20498,51 @@ Real-PostgreSQL tests with a small archive: repair from archive plus live equals
 
 ## 1. Status
 
-**Partial (started 2026-11-28).** The plan is the document set in `design/14-rust-port/`; start with
-`porting_to_ntex_rust.md`. `backend-rs/IMPLEMENTATION_TRACKER.md` is the live work log; `PARITY.md` and
-`DEVIATIONS.md` record what is byte-compatible and what deliberately differs.
+**Partial (started 2026-11-28, working tree on branch `rust`).** The plan is the document set in
+`design/14-rust-port/`; start with `porting_to_ntex_rust.md`. `backend-rs/IMPLEMENTATION_TRACKER.md`
+is the live work log; `PARITY.md` and `DEVIATIONS.md` record what is byte-compatible and what
+deliberately differs.
 
-Implemented so far:
+Current Rust tree (verified 2026-11-28): **2,731 tests in 130 test binaries pass**, `cargo clippy
+--workspace --all-targets -- -D warnings` is clean, all nine release binaries build, and the three
+`backend-rs/tools` `--check` gates pass.
 
-- Rust 1.100.1 workspace (`backend-rs/`) with the chapter 3 crate/binary layout, pinned dependencies, `deny.toml`,
-  release profile, root `rs:check|test|build` scripts and a CI `rust` job.
-- `pg-config` (dotenv, systemd credentials, object-storage daemon config), `pg-types` (Money4, decimal.js
-  serialisation, JsDate, JS key order, ids, cursor), `pg-crypto` (vault AES-256-GCM/HKDF, CryptoEngine
-  canonicalisation with UTF-16 sort, Standard Webhooks, FNV-1a UTF-16, redaction), `pg-http` (error envelope,
-  request id, security headers, body limits, health, zod-shaped issues, deny-by-default route policies, fixed-window
-  limiter catalogue), `pg-mtls` (rustls 1.3 server/client configs, CN/SAN extraction, channel table), `pg-db`
-  (`sslmode=no-verify` normalisation, pool knobs, SQLSTATE map, advisory-lock leader election and session probe,
-  Prisma metadata), `pg-objstore` (atomic FS store, remote mTLS client, `pgos1` envelope, MIME/executable sniffing,
-  namespace policies, storage keys, GC/retention) and `pg-workers` (interval/jitter/singleton/panic isolation/health).
-- The **P1 object-storage daemon** is complete: all six `/v1/*` routes, `fsck`, ntex/rustls mTLS with peer CN/SAN
-  authorization, bounded bodies and the TS error bodies. This is the pilot for the ntex 4.11 mTLS model (P0-T07).
-- Health/config scaffolds for `core-rs`, the three edges, fake rails and the backup daemon; unported routes answer
-  `501 NOT_IMPLEMENTED_ROUTE` so the parity harness can classify them.
-- Domain and adapter crates implemented as pure, tested libraries: `pg-domain-{auth,flow,ledger,gov,comms,recon,academy}`
-  (sessions/JWT/MFA/throttle, statuses/transitions/guards/visible rails/slots, ledger templates/shards/fold/repair/commission,
-  approvals/maker-checker/AML states, communication templates/tipping-off/SMS, CSV/date/statement parsing, exam/certificate/lab
-  scoring), `pg-upstream` (least-in-flight pool/retry/path/headers), `pg-egress` (SSRF/allowlist/pinned resolution, auth
-  methods, token cache, webhook retry), `pg-redis` (invalidation/realtime envelopes, Lua velocity, bounded auth state,
-  caches/revocation), `pg-edge` (trusted proxies, cookie/CSRF, multipart/SSE/upload guards), `pg-report-engine`
-  (spec/normalise/limits/hash/decimal/compatibility/verifier), `pg-compliance` (filing gate, safe XSD subset, periods,
-  incidents), `pg-office`, `pg-search`, and `pg-deploy-{config,plan}` with the `pgctl` and `wal-fetch` binaries.
-- P0 tooling is complete: Prisma codegen (123 models / 131 enums / metadata / report catalog), route/error/env inventory
-  (611 core + 544 edge routes, 605 error groups, 8 env schemas) and 148 TypeScript-generated golden cases across FNV,
-  vault, webhooks, CryptoEngine canonicalisation, decimal.js/Money4, JS key order/dates and `pgos1`. All eight Rust
-  golden suites pass, including decrypting TS vault payloads and `pgos1` streams.
-- Verification on this tree: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
-  `cargo test --workspace` (1,070 passed), the three tool `--check` gates and the root scripts.
+- **P0 complete.** Workspace/CI/scripts; route inventory (611 core + 544 edge routes, 605 error
+  groups, 8 env schemas) and its `--check`; Prisma codegen (123 models / 131 enums / metadata /
+  report catalog); 148 TypeScript-generated golden vectors across FNV, vault, webhooks,
+  CryptoEngine canonicalisation, decimal.js/Money4, JS key order/dates and `pgos1`; baselines
+  BL-1/BL-2; mimalloc; `WORKER_DISABLED` in the TS core; real mTLS proven with the internal CA.
+- **P1 object-storage daemon complete.** All six `/v1/*` routes, `fsck`, ntex/rustls mTLS with peer
+  CN/SAN authorization, bounded bodies and TS error bodies.
+- **P2 edges complete.** `checkout-edge` 19/19 routes (179 tests), `merchant-edge` 107/107 (153
+  tests), `admin-edge` 419/419 + sandbox catch-all (102 tests): mTLS pools, contract translation,
+  uploads/limits, sandbox mirror, SSE and raw inbound compression.
+- **P4 read surface complete except nine GETs.** `core-rs` mounts **315 routes**: all merchant,
+  checkout, admin commerce/merchant-360/ledger/operations/AML/system/gateways/academy/report-engine/
+  search and the 37 sandbox GETs, with `routes-policy.json` generated from the table and
+  `bin/core-rs/tests/inventory_parity.rs` proving every mounted route exists in the TypeScript
+  inventory with the right TS file. **Nine GETs remain**: `access-tokens/summary`,
+  `applications/summary`, `wallets/summary`, `wallets/:id/statement`, `wallets/:id/audit-events`,
+  `gateways/ai-transcript`, `report-engine/transcript` (two generated transcripts), the merchant
+  Google OAuth callback (P7) and the POS SSE stream (P5).
+- **P5 money-path libraries complete.** `pg-ledger` (posting, account cache, shard sequences,
+  cash-out locks, reads, repair; 36 unit + 15 live tests), `pg-flow-engine` (transform library, six
+  step kinds, rail loop, materialisation, DB/egress/ledger adapters; 157 tests), `pg-egress` (SSRF/
+  pinned DNS, 10 auth methods, token cache, multipart, mTLS; 102 tests). The HTTP money routes
+  (confirm/cancel/refund) and worker wiring are still P7.
+- **P6 partially complete.** Runtime plus twelve workers: OutboxRelay, InboundInbox, ExpirySweeper,
+  Poll, LedgerCheckpoint, PlatformMonitor, JournalPartition, JoinRequestExpiry,
+  ExpiryHousekeeping, StatementSchedule, ConsistencyAudit and Retention (132 worker tests).
+- **P9 daemons complete.** Fake Rails (20 rails, SQLite/WAL, portal/SSE/control; 86 tests) and the
+  backup daemon (mTLS control/WAL, queue/idempotency/catalog/PGBKv2, pg-native full/delta/WAL,
+  restore drills; 197 tests + live PostgreSQL 18 PITR). Seeds and business CLIs remain.
+- **D0-D5 complete as libraries.** `pgctl` config/plan/release/SSH/install/route table/workers push/
+  rollback/watch, PKI (113 tests incl. 42 PKI), storage provisioners as deterministic plans (87
+  tests). Provisioner execution, D5-T06/T07 and the deploy labs remain.
+
+Verification on this tree: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D
+warnings`, `cargo test --workspace`, `cargo build --release --workspace`, the three tool `--check`
+gates and `git diff --check`.
 
 ## 2. Program
 
