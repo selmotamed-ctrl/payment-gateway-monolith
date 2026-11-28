@@ -80,7 +80,7 @@ layout classes that existed before the migration.
 | `PgSearchInput` | Toolbar search with magnifier, clear, debounced `search`, ⌘K hint. |
 | `PgAutocomplete` / `VSelect` / `VAutocomplete` / `VCombobox` | WAI-ARIA combobox: single/multi, chips, `creatable`, keyboard navigation, viewport-aware panel, no native `<select>`. |
 | `PgApiAutocomplete` | Async/debounced server search using `PgUiConfig.api`. |
-| `PgDateInput` / `PgDateRangeInput` / `VDateInput` | Typed `YYYY-MM-DD`, calendar grid, month jump, min/max, today, clear, range presets (`Today`, 7/30 days, this/last month, YTD). |
+| `PgDateInput` / `PgDateRangeInput` / `VDateInput` | Typed `YYYY-MM-DD`, calendar grid, month jump, min/max, today, clear, range presets (`Today`, 7/30 days, this/last month, YTD). `sheet` (`"auto"` default, `true`/`"always"`, `false`/`"never"`): on phones (`PG_SHEET_MEDIA_QUERY`: ≤640 px, or a coarse pointer ≤520 px tall) the panel becomes a bottom sheet with a scrim, swipe-down grab handle, 44 px day cells, horizontal preset chips, Start/End endpoint selector (range) and full-width actions; the single input turns read-only with `inputmode="none"` so no virtual keyboard covers the calendar. Desktop popover unchanged. |
 | `PgCheckbox` / `VCheckbox` | 2026 animated check, indeterminate, `variant="card"` safeguard row. |
 | `PgChoice` | Accessible radio/checkbox card used by exams, labs and safeguard lists. The native control lives inside the package. |
 | `PgSwitch`, `PgRadioGroup`, `PgRadio` | Tactile switch and radio group. |

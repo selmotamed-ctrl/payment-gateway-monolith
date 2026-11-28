@@ -1,4 +1,4 @@
-import { onBeforeUnmount, watch, type Ref } from "vue";
+import { onBeforeUnmount, ref, watch, type Ref } from "vue";
 
 export const isBrowser = typeof window !== "undefined" && typeof document !== "undefined";
 
@@ -154,4 +154,96 @@ export const routeHref = (to: any, resolve?: (to: any) => string): string => {
     } catch {
         return "";
     }
+};
+
+/**
+ * Viewports where floating pickers become bottom sheets: phones in portrait,
+ * and short touch screens (phones in landscape) where a popover cannot fit.
+ */
+export const PG_SHEET_MEDIA_QUERY =
+    "(max-width: 640px), (pointer: coarse) and (max-height: 520px)";
+
+/** Reactive `matchMedia` result; always `false` outside the browser. */
+export const useMediaQuery = (query: string): Ref<boolean> => {
+    const matches = ref(false);
+    if (!isBrowser || typeof window.matchMedia !== "function") return matches;
+    const media = window.matchMedia(query);
+    matches.value = media.matches;
+    const onChange = (event: MediaQueryListEvent) => {
+        matches.value = event.matches;
+    };
+    if (typeof media.addEventListener === "function") media.addEventListener("change", onChange);
+    else media.addListener?.(onChange);
+    onBeforeUnmount(() => {
+        if (typeof media.removeEventListener === "function") media.removeEventListener("change", onChange);
+        else media.removeListener?.(onChange);
+    });
+    return matches;
+};
+
+/** Resolves a `sheet` prop (`"auto"` | `true` | `false`) against the viewport. */
+export const useSheetMode = (prop: () => unknown): Ref<boolean> => {
+    const compact = useMediaQuery(PG_SHEET_MEDIA_QUERY);
+    const mode = ref(false);
+    watch(
+        [prop, compact],
+        ([value, isCompact]) => {
+            mode.value =
+                value === true || value === "always"
+                    ? true
+                    : value === false || value === "never"
+                      ? false
+                      : Boolean(isCompact);
+        },
+        { immediate: true },
+    );
+    return mode;
+};
+
+/**
+ * Swipe-down-to-dismiss for a bottom sheet. Bind the returned handlers to the
+ * sheet's grab area; the panel follows the finger and closes past `threshold`.
+ */
+export const createSheetDrag = (
+    panel: Ref<HTMLElement | null>,
+    close: () => void,
+    threshold = 72,
+) => {
+    let startY = 0;
+    let delta = 0;
+    let dragging = false;
+    const reset = () => {
+        const element = panel.value;
+        if (!element) return;
+        element.style.transition = "";
+        element.style.transform = "";
+    };
+    return {
+        onTouchstart: (event: TouchEvent) => {
+            const touch = event.touches[0];
+            if (!touch) return;
+            dragging = true;
+            startY = touch.clientY;
+            delta = 0;
+            if (panel.value) panel.value.style.transition = "none";
+        },
+        onTouchmove: (event: TouchEvent) => {
+            if (!dragging) return;
+            const touch = event.touches[0];
+            if (!touch) return;
+            delta = Math.max(0, touch.clientY - startY);
+            if (panel.value) panel.value.style.transform = delta ? `translateY(${delta}px)` : "";
+        },
+        onTouchend: () => {
+            if (!dragging) return;
+            dragging = false;
+            const shouldClose = delta > threshold;
+            reset();
+            if (shouldClose) close();
+        },
+        onTouchcancel: () => {
+            dragging = false;
+            reset();
+        },
+    };
 };

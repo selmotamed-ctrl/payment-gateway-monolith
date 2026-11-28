@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -94,12 +94,13 @@ const DateHarness = dc(
                 <span class="out">{JSON.stringify(value.value)}</span>
                 <PgDateInput
                     modelValue={value.value}
+                    sheet={props.sheet}
                     onUpdate:modelValue={(next: any) => (value.value = next)}
                 />
             </div>
         );
     },
-    { props: { initial: { type: null, default: null } } },
+    { props: { initial: { type: null, default: null }, sheet: { type: [Boolean, String], default: "auto" } } },
 );
 
 const RangeHarness = dc(
@@ -110,12 +111,13 @@ const RangeHarness = dc(
                 <span class="out">{JSON.stringify(value.value)}</span>
                 <PgDateRangeInput
                     modelValue={value.value}
+                    sheet={props.sheet}
                     onUpdate:modelValue={(next: any) => (value.value = next)}
                 />
             </div>
         );
     },
-    { props: { initial: { type: null, default: null } } },
+    { props: { initial: { type: null, default: null }, sheet: { type: [Boolean, String], default: "auto" } } },
 );
 
 /** Legacy `multiple="range"` contract: `modelValue` is a `Date[]`. */
@@ -730,5 +732,128 @@ describe("TableFilters", () => {
         await nextFrame();
         expect(field.querySelectorAll(".pg-ac-option").length).toBe(1);
         unmount();
+    });
+});
+
+describe("Date pickers — mobile bottom sheet", () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        document.body.style.overflow = "";
+    });
+
+    it("keeps the desktop popover when the viewport is wide", async () => {
+        const { el, unmount } = mount(DateHarness, { initial: "2026-11-10" });
+        (el.querySelector("[data-pg-date]") as HTMLElement).click();
+        await nextFrame();
+        const panel = el.querySelector("[data-pg-date-panel]") as HTMLElement;
+        expect(panel.classList.contains("pg-date-sheet")).toBe(false);
+        expect(el.querySelector("[data-pg-date-scrim]")).toBeNull();
+        expect(panel.getAttribute("aria-modal")).toBe("false");
+        unmount();
+    });
+
+    it("switches to a sheet automatically on a phone-sized viewport", async () => {
+        vi.stubGlobal(
+            "matchMedia",
+            (query: string) =>
+                ({
+                    matches: query.includes("max-width: 640px"),
+                    media: query,
+                    addEventListener: () => undefined,
+                    removeEventListener: () => undefined,
+                }) as unknown as MediaQueryList,
+        );
+        const { el, unmount } = mount(DateHarness, { initial: "2026-11-10" });
+        (el.querySelector("[data-pg-date]") as HTMLElement).click();
+        await nextFrame();
+        expect(
+            el.querySelector("[data-pg-date-panel]")?.classList.contains("pg-date-sheet"),
+        ).toBe(true);
+        unmount();
+    });
+
+    it("PgDateInput sheet: no virtual keyboard, scroll lock, header, commit closes", async () => {
+        const { el, unmount } = mount(DateHarness, { initial: "2026-11-10", sheet: "always" });
+        const input = el.querySelector(".pg-date-input") as HTMLInputElement;
+        expect(input.readOnly).toBe(true);
+        expect(input.getAttribute("inputmode")).toBe("none");
+
+        (el.querySelector("[data-pg-date]") as HTMLElement).click();
+        await nextFrame();
+        const panel = el.querySelector("[data-pg-date-panel]") as HTMLElement;
+        expect(panel.classList.contains("pg-date-sheet")).toBe(true);
+        expect(panel.getAttribute("aria-modal")).toBe("true");
+        expect(el.querySelector("[data-pg-date-scrim]")).not.toBeNull();
+        expect(panel.querySelector(".pg-date-sheet__value")?.textContent).toBe("2026-11-10");
+        expect(document.body.style.overflow).toBe("hidden");
+
+        (el.querySelector('[data-iso="2026-11-20"]') as HTMLElement).click();
+        await nextFrame();
+        expect(readOut(el)).toBe("2026-11-20");
+        expect(el.querySelector("[data-pg-date-panel]")).toBeNull();
+        expect(el.querySelector("[data-pg-date-scrim]")).toBeNull();
+        expect(document.body.style.overflow).toBe("");
+        unmount();
+    });
+
+    it("PgDateInput sheet closes from the close button and the scrim without committing", async () => {
+        const { el, unmount } = mount(DateHarness, { initial: "2026-11-10", sheet: "always" });
+        (el.querySelector("[data-pg-date]") as HTMLElement).click();
+        await nextFrame();
+        (el.querySelector(".pg-date-sheet__close") as HTMLElement).click();
+        await nextFrame();
+        expect(el.querySelector("[data-pg-date-panel]")).toBeNull();
+
+        (el.querySelector("[data-pg-date]") as HTMLElement).click();
+        await nextFrame();
+        const scrim = el.querySelector("[data-pg-date-scrim]") as HTMLElement;
+        scrim.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+        await nextFrame();
+        // The scrim swallows the pointerdown so the tap never reaches the page below.
+        expect(el.querySelector("[data-pg-date-panel]")).not.toBeNull();
+        scrim.click();
+        await nextFrame();
+        expect(el.querySelector("[data-pg-date-panel]")).toBeNull();
+        expect(readOut(el)).toBe("2026-11-10");
+        unmount();
+    });
+
+    it("PgDateRangeInput sheet: start/end endpoints drive picking and Apply commits", async () => {
+        const { el, unmount } = mount(RangeHarness, {
+            initial: { start: "2026-11-01", end: "2026-11-05" },
+            sheet: "always",
+        });
+        (el.querySelector("[data-pg-date-range]") as HTMLElement).click();
+        await nextFrame();
+        const panel = el.querySelector("[data-pg-date-range-panel]") as HTMLElement;
+        expect(panel.classList.contains("pg-date-sheet")).toBe(true);
+        const startBtn = () => el.querySelector('[data-pg-date-endpoint="start"]') as HTMLElement;
+        const endBtn = () => el.querySelector('[data-pg-date-endpoint="end"]') as HTMLButtonElement;
+        expect(startBtn().getAttribute("aria-pressed")).toBe("true");
+        expect(startBtn().textContent).toContain("2026-11-01");
+        expect(endBtn().textContent).toContain("2026-11-05");
+
+        // Re-target only the end date: the start is kept.
+        endBtn().click();
+        await nextFrame();
+        expect(endBtn().getAttribute("aria-pressed")).toBe("true");
+        (el.querySelector('[data-pg-date-month="0"] [data-iso="2026-11-12"]') as HTMLElement).click();
+        await nextFrame();
+        expect(readOut(el)).toEqual({ start: "2026-11-01", end: "2026-11-12" });
+        expect(el.querySelector("[data-pg-date-range-panel]")).not.toBeNull();
+
+        const apply = [...el.querySelectorAll(".pg-date-range__actions .pg-btn")].find((node) =>
+            node.textContent?.includes("Apply"),
+        ) as HTMLElement;
+        apply.click();
+        await nextFrame();
+        expect(el.querySelector("[data-pg-date-range-panel]")).toBeNull();
+        unmount();
+    });
+
+    it("scopes every sheet rule to .pg-date-sheet and keeps 44px day targets", () => {
+        expect(advancedCss).toMatch(/\.pg-date-sheet \.pg-cal-day \{[\s\S]*?height: 44px/);
+        expect(advancedCss).toMatch(/env\(safe-area-inset-bottom/);
+        expect(advancedCss).toMatch(/\.pg-date-sheet \.pg-date-range__presets \{[\s\S]*?flex-direction: row/);
     });
 });

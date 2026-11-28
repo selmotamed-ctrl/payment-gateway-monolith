@@ -6,7 +6,14 @@ import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from "vue";
 import { dc } from "../lib/dc";
 import { controlSize } from "../lib/options";
 import { runRules, visibleError } from "../lib/rules";
-import { isBrowser, useClickOutside, useEscape } from "../lib/dom";
+import {
+    createSheetDrag,
+    isBrowser,
+    lockBodyScroll,
+    useClickOutside,
+    useEscape,
+    useSheetMode,
+} from "../lib/dom";
 import { useLocale } from "../lib/locale";
 import { PgFieldShell } from "./PgFieldShell";
 import { PgIcon } from "../actions/PgIcon";
@@ -401,6 +408,63 @@ const PgCalendar = dc(
     },
 );
 
+/* --------------------------------------------------------------- sheet head */
+
+type SheetHeadProps = {
+    title: string;
+    value: string;
+    close: () => void;
+    drag: ReturnType<typeof createSheetDrag>;
+};
+
+/**
+ * Mobile bottom-sheet header: grab handle (swipe down to dismiss), title, the
+ * current value and a 40px close button.
+ */
+const PgDateSheetHead = dc(
+    (props: SheetHeadProps) => {
+        const { t } = useLocale();
+        return () => (
+            <div
+                class="pg-date-sheet__head"
+                data-pg-date-sheet-head
+                onTouchstart={(event: TouchEvent) => props.drag?.onTouchstart(event)}
+                onTouchmove={(event: TouchEvent) => props.drag?.onTouchmove(event)}
+                onTouchend={() => props.drag?.onTouchend()}
+                onTouchcancel={() => props.drag?.onTouchcancel()}
+            >
+                <span class="pg-date-sheet__grip" aria-hidden="true" />
+                <div class="pg-date-sheet__titlebar">
+                    <div class="pg-date-sheet__titles">
+                        <span class="pg-date-sheet__title">{props.title}</span>
+                        {props.value && (
+                            <span class="pg-date-sheet__value" dir="ltr">
+                                {props.value}
+                            </span>
+                        )}
+                    </div>
+                    <button
+                        type="button"
+                        class="pg-date-sheet__close"
+                        aria-label={t("Close")}
+                        onClick={() => props.close?.()}
+                    >
+                        <PgIcon icon="mdi-close" size={20} />
+                    </button>
+                </div>
+            </div>
+        );
+    },
+    {
+        props: {
+            title: { type: String, default: "" },
+            value: { type: String, default: "" },
+            close: { type: Function, default: undefined },
+            drag: { type: Object, default: undefined },
+        },
+    },
+);
+
 /* ----------------------------------------------------------------- date input */
 
 export const PgDateInput = dc(
@@ -420,6 +484,8 @@ export const PgDateInput = dc(
         const hoverIso = ref("");
         const panelStyle = ref<Record<string, string>>({});
         const localError = ref("");
+        const scrimRef = ref<HTMLElement | null>(null);
+        const sheet = useSheetMode(() => props.sheet);
 
         const rangeMode = computed(
             () => props.multiple === "range" || props.multiple === true || props.range === true,
@@ -488,6 +554,10 @@ export const PgDateInput = dc(
 
         const updatePosition = () => {
             if (!isBrowser) return;
+            if (sheet.value) {
+                panelStyle.value = { position: "fixed", zIndex: "var(--pg-z-popover)" };
+                return;
+            }
             const element = triggerRef.value;
             if (!element) return;
             const rect = element.getBoundingClientRect();
@@ -645,9 +715,28 @@ export const PgDateInput = dc(
                 window.removeEventListener("scroll", updatePosition, true);
             }
         });
-        useClickOutside([triggerRef, panelRef], () => closePanel(), open);
+
+        // Bottom sheet: lock page scroll while open, re-place on viewport changes.
+        let releaseScroll: (() => void) | null = null;
+        watch(
+            () => open.value && sheet.value,
+            (locked) => {
+                if (locked) releaseScroll ??= lockBodyScroll();
+                else {
+                    releaseScroll?.();
+                    releaseScroll = null;
+                }
+            },
+        );
+        watch(sheet, () => {
+            if (open.value) updatePosition();
+        });
+        const sheetDrag = createSheetDrag(panelRef, () => closePanel());
+        useClickOutside([triggerRef, panelRef, scrimRef], () => closePanel(), open);
         useEscape(() => closePanel(true), open);
         onBeforeUnmount(() => {
+            releaseScroll?.();
+            releaseScroll = null;
             if (!isBrowser) return;
             window.removeEventListener("resize", updatePosition);
             window.removeEventListener("scroll", updatePosition, true);
@@ -726,7 +815,7 @@ export const PgDateInput = dc(
                         id={fieldId}
                         class="pg-control-native pg-mono pg-date-input"
                         type="text"
-                        inputmode="numeric"
+                        inputmode={sheet.value ? "none" : "numeric"}
                         dir="ltr"
                         autocomplete="off"
                         placeholder={
@@ -735,7 +824,7 @@ export const PgDateInput = dc(
                         }
                         value={draft.value}
                         disabled={props.disabled}
-                        readonly={props.readonly}
+                        readonly={props.readonly || sheet.value}
                         aria-label={attrs["aria-label"] ?? props["aria-label"] ?? props.label ?? t("Date")}
                         aria-invalid={error.value ? "true" : undefined}
                         aria-expanded={open.value ? "true" : "false"}
@@ -773,17 +862,48 @@ export const PgDateInput = dc(
                 </div>
 
                 {branch(
+                    () => open.value && sheet.value,
+                    () => (
+                        <div
+                            ref={scrimRef}
+                            class="pg-date-sheet-scrim"
+                            data-pg-date-scrim
+                            aria-hidden="true"
+                            onClick={() => closePanel()}
+                        />
+                    ),
+                )}
+
+                {branch(
                     () => open.value,
                     () => (
                         <div
                             ref={panelRef}
-                            class="pg-popover-panel pg-date-panel"
+                            class={[
+                                "pg-popover-panel",
+                                "pg-date-panel",
+                                sheet.value ? "pg-date-sheet" : "",
+                            ]
+                                .filter(Boolean)
+                                .join(" ")}
                             data-pg-date-panel
+                            data-pg-date-sheet={sheet.value ? "" : undefined}
                             role="dialog"
-                            aria-modal="false"
+                            aria-modal={sheet.value ? "true" : "false"}
                             aria-label={t("Choose date")}
                             style={panelStyle.value}
                         >
+                            {sheet.value && (
+                                <PgDateSheetHead
+                                    title={
+                                        props.label ||
+                                        (rangeMode.value ? t("Choose date range") : t("Choose date"))
+                                    }
+                                    value={draft.value}
+                                    close={() => closePanel()}
+                                    drag={sheetDrag}
+                                />
+                            )}
                             <PgCalendar
                                 view={viewDate.value}
                                 selected={selectedIso.value}
@@ -853,6 +973,8 @@ export const PgDateInput = dc(
             rules: { type: Array as () => Array<(value: any) => any>, default: () => [] },
             hideDetails: { type: Boolean, default: false },
             id: { type: String, default: "" },
+            /** `"auto"` (bottom sheet on phones), `true`/`"always"` or `false`/`"never"`. */
+            sheet: { type: [Boolean, String], default: "auto" },
         },
         emits: ["update:modelValue", "change", "clear"],
         inheritAttrs: true,
@@ -893,6 +1015,8 @@ export const PgDateRangeInput = dc(
         const hoverIso = ref("");
         const panelStyle = ref<Record<string, string>>({});
         const localError = ref("");
+        const scrimRef = ref<HTMLElement | null>(null);
+        const sheet = useSheetMode(() => props.sheet);
 
         const size = computed(() =>
             controlSize({ ...props, density: props.density ?? attrs.density }),
@@ -940,6 +1064,10 @@ export const PgDateRangeInput = dc(
 
         const updatePosition = () => {
             if (!isBrowser) return;
+            if (sheet.value) {
+                panelStyle.value = { position: "fixed", zIndex: "var(--pg-z-popover)" };
+                return;
+            }
             const element = triggerRef.value;
             if (!element) return;
             const rect = element.getBoundingClientRect();
@@ -1053,7 +1181,24 @@ export const PgDateRangeInput = dc(
                 window.removeEventListener("scroll", updatePosition, true);
             }
         });
-        useClickOutside([triggerRef, panelRef], () => closePanel(), open);
+
+        // Bottom sheet: lock page scroll while open, re-place on viewport changes.
+        let releaseScroll: (() => void) | null = null;
+        watch(
+            () => open.value && sheet.value,
+            (locked) => {
+                if (locked) releaseScroll ??= lockBodyScroll();
+                else {
+                    releaseScroll?.();
+                    releaseScroll = null;
+                }
+            },
+        );
+        watch(sheet, () => {
+            if (open.value) updatePosition();
+        });
+        const sheetDrag = createSheetDrag(panelRef, () => closePanel());
+        useClickOutside([triggerRef, panelRef, scrimRef], () => closePanel(), open);
         useEscape(
             () => {
                 draft.value = committed.value;
@@ -1063,6 +1208,8 @@ export const PgDateRangeInput = dc(
             open,
         );
         onBeforeUnmount(() => {
+            releaseScroll?.();
+            releaseScroll = null;
             if (!isBrowser) return;
             window.removeEventListener("resize", updatePosition);
             window.removeEventListener("scroll", updatePosition, true);
@@ -1159,17 +1306,100 @@ export const PgDateRangeInput = dc(
                 </div>
 
                 {branch(
+                    () => open.value && sheet.value,
+                    () => (
+                        <div
+                            ref={scrimRef}
+                            class="pg-date-sheet-scrim"
+                            data-pg-date-scrim
+                            aria-hidden="true"
+                            onClick={() => closePanel()}
+                        />
+                    ),
+                )}
+
+                {branch(
                     () => open.value,
                     () => (
                         <div
                             ref={panelRef}
-                            class="pg-popover-panel pg-date-range-panel"
+                            class={[
+                                "pg-popover-panel",
+                                "pg-date-range-panel",
+                                sheet.value ? "pg-date-sheet" : "",
+                            ]
+                                .filter(Boolean)
+                                .join(" ")}
                             data-pg-date-range-panel
+                            data-pg-date-sheet={sheet.value ? "" : undefined}
                             role="dialog"
-                            aria-modal="false"
+                            aria-modal={sheet.value ? "true" : "false"}
                             aria-label={t("Choose date range")}
                             style={panelStyle.value}
                         >
+                            {sheet.value && (
+                                <div class="pg-date-sheet__top">
+                                    <PgDateSheetHead
+                                        title={props.label || t("Choose date range")}
+                                        value=""
+                                        close={cancel}
+                                        drag={sheetDrag}
+                                    />
+                                    <div
+                                        class="pg-date-sheet__endpoints"
+                                        role="group"
+                                        aria-label={t("Date range")}
+                                    >
+                                        <button
+                                            type="button"
+                                            class={[
+                                                "pg-date-sheet__endpoint",
+                                                picking.value === "start"
+                                                    ? "pg-date-sheet__endpoint--active"
+                                                    : "",
+                                            ]
+                                                .filter(Boolean)
+                                                .join(" ")}
+                                            data-pg-date-endpoint="start"
+                                            aria-pressed={picking.value === "start" ? "true" : "false"}
+                                            onClick={() => {
+                                                picking.value = "start";
+                                                hoverIso.value = "";
+                                            }}
+                                        >
+                                            <span class="pg-date-sheet__endpoint-label">{t("Start")}</span>
+                                            <span class="pg-date-sheet__endpoint-value" dir="ltr">
+                                                {draft.value.start || "YYYY-MM-DD"}
+                                            </span>
+                                        </button>
+                                        <span class="pg-date-sheet__arrow" aria-hidden="true">
+                                            <PgIcon icon="mdi-arrow-right" size={16} />
+                                        </span>
+                                        <button
+                                            type="button"
+                                            class={[
+                                                "pg-date-sheet__endpoint",
+                                                picking.value === "end"
+                                                    ? "pg-date-sheet__endpoint--active"
+                                                    : "",
+                                            ]
+                                                .filter(Boolean)
+                                                .join(" ")}
+                                            data-pg-date-endpoint="end"
+                                            aria-pressed={picking.value === "end" ? "true" : "false"}
+                                            disabled={!draft.value.start}
+                                            onClick={() => {
+                                                if (draft.value.start) picking.value = "end";
+                                            }}
+                                        >
+                                            <span class="pg-date-sheet__endpoint-label">{t("End")}</span>
+                                            <span class="pg-date-sheet__endpoint-value" dir="ltr">
+                                                {draft.value.end || (draft.value.start ? "—" : "YYYY-MM-DD")}
+                                            </span>
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                             <div class="pg-date-range__presets" role="listbox" aria-label={t("Presets")}>
                                 {presets.value.map((preset) => {
                                     const value = presetValue(preset);
@@ -1295,6 +1525,8 @@ export const PgDateRangeInput = dc(
             rules: { type: Array as () => Array<(value: any) => any>, default: () => [] },
             hideDetails: { type: Boolean, default: false },
             id: { type: String, default: "" },
+            /** `"auto"` (bottom sheet on phones), `true`/`"always"` or `false`/`"never"`. */
+            sheet: { type: [Boolean, String], default: "auto" },
         },
         emits: ["update:modelValue", "change", "apply", "clear"],
         inheritAttrs: true,

@@ -6,7 +6,7 @@ Generated from: `admin-ui.system`, `admin-ui.routes`, `admin-ui.tables`, `admin-
 
 ## Admin UI System
 
-> Status: `partial` · Last verified: 2026-11-27
+> Status: `partial` · Last verified: 2026-11-28
 
 > **Historical note.** Sections 1-18 below describe the pre-2026-11-27 vael-ui compatibility shim and the
 > components that used it. They are retained for history. Section 19 is the current architecture: every
@@ -686,6 +686,35 @@ the TypeScript AST and fails when a `dc`/`defineComponent` setup ref is snapshot
 from `join-requests/[id].tsx` makes it fail with `join-requests/[id].tsx:138 snapshots entry = detail.value! without
 { rerender: true }`. `tests/e2e/admin/detail-pages.spec.ts` loads both reported pages against a mocked API and asserts
 the real sections render and the not-found fallbacks are absent.
+
+### 19.11 Mobile bottom-sheet date pickers — 2026-11-28
+
+`PgDateInput` and `PgDateRangeInput` (and therefore `PgTextField type="date"`, `TableFilters` date/daterange
+filters and the report input forms) open as a bottom sheet on phones instead of the fixed-position popover. On a
+360–430 px screen the old range popover was 152 px presets + 304 px month + padding, wider than the viewport, and the
+single picker's 34 px cells were below touch-target size while the numeric keyboard covered the calendar.
+
+- **Trigger:** the `sheet` prop (`"auto"` default, `true`/`"always"`, `false`/`"never"`) resolves through
+  `useSheetMode` against `PG_SHEET_MEDIA_QUERY` = `(max-width: 640px), (pointer: coarse) and (max-height: 520px)`
+  (`packages/ui/src/lib/dom.ts`). Desktop rendering, metrics and DOM are unchanged when the query does not match.
+- **Sheet:** the panel gets `.pg-date-sheet`, anchors to the bottom edge (max 560 px wide, `100dvh - 16px` tall,
+  safe-area padding), `aria-modal="true"`, locks body scroll with the shared `lockBodyScroll`, and renders a
+  `[data-pg-date-scrim]` backdrop. The scrim is part of the click-outside set and closes on `click`, so a tap on the
+  backdrop never falls through to the page beneath. The header (`PgDateSheetHead`) has a grab handle with
+  swipe-down-to-dismiss (`createSheetDrag`, 72 px threshold), the field label as title, the current value and a 40 px
+  close button.
+- **Calendar:** full-width 7-column grid, 44 px day cells, 44 px month navigation, 52 px month/year tiles, and a
+  continuous range band (no column gap).
+- **PgDateInput:** the text input becomes read-only with `inputmode="none"` in sheet mode so no virtual keyboard opens;
+  Today/Clear are full-width 44 px buttons; legacy `multiple="range"` presets become a horizontal chip row.
+- **PgDateRangeInput:** a Start/End endpoint selector shows both dates and which one the next tap sets (tapping End
+  keeps the start and re-targets only the end); presets are a horizontally scrolling chip row; one month is shown; the
+  Clear/Cancel/Apply footer is sticky with a full-width primary Apply.
+
+All sheet CSS lives in `packages/ui/src/tokens/parts/inputs-advanced.css` under `.pg-date-sheet`, with
+`prefers-reduced-motion` and RTL (arrow flip) handled. Tests: `packages/ui/test/inputs-advanced.test.tsx`
+"Date pickers — mobile bottom sheet" (desktop unchanged, automatic switch from `matchMedia`, keyboard suppression,
+scroll lock, scrim close without click-through, endpoint retargeting, Apply, CSS contract).
 
 ## Admin Route and Page Catalog
 
