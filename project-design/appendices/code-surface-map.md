@@ -66,4 +66,5 @@
 | `future.smart-ai-voucher` | `missing` | `core-back/engine/specImporter/**`<br>`core-back/api/internal/admin.ts`<br>`admin-front/src/pages/gateways/ai-import/index.tsx` |
 | `future.deferred` | `deferred` | `core-back/lib/listQuery.ts`<br>`core-back/lib/storageEngine/ledgerPosterFactory.ts`<br>`core-back/lib/storageEngine/outboxWorkers.ts`<br>`core-back/engine/apiConsumer/fakeRailsAllowlist.ts`<br>`core-back/api/internal/merchant.ts`<br>`deploy/lib/pkiManager.ts`<br>`deploy/backup-daemon/src/**`<br>`fake-rails-back/engine/webhooks/WebhookDispatcher.ts`<br>`core-back/prisma/syntheticSeeder/**` |
 | `future.ledger-archive` | `missing` | — |
+| `future.rust-ntex-port` | `missing` | — |
 | `companion.offline` | `partial` | `companion-app/**`<br>`design/06-ui/pg_companion_offline_android_app.md` |

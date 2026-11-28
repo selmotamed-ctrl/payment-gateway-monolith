@@ -69,6 +69,7 @@ Historical `design/**` files are source lineage only; this document and the part
 - [Smart AI Spec Importer and Voucher Half (Future)](#futuresmart-ai-voucher) — `missing`
 - [Deferred and Partial Features](#futuredeferred) — `deferred`
 - [Ledger Archive and Shard Repair Anchors (Future)](#futureledger-archive) — `missing`
+- [Backend Port to Rust on ntex (Future)](#futurerust-ntex-port) — `missing`
 - [Offline Android Companion](#companionoffline) — `partial`
 
 ---
@@ -20484,6 +20485,54 @@ These are what makes either source safe:
 ## 4. Verification when implemented
 
 Real-PostgreSQL tests with a small archive: repair from archive plus live equals the pre-archive repair result; the anchor mode equals it when the checkpoint was proven; a tampered archive (manifest mismatch) is detected; a default-mode repair refuses when the archive is unreadable; the restore drill and deploy gate pass on a shard with an archived prefix.
+
+---
+
+<a id="futurerust-ntex-port"></a>
+
+> **Part ID:** `future.rust-ntex-port` · **Status:** `missing` · **Last verified:** 2026-11-28 · **Verified against:** `c48a1c9+working-tree`
+
+# Backend Port to Rust on ntex (Future)
+
+## 1. Status
+
+Planned (revision 2, 2026-11-28), not started. The plan is the document set in `design/14-rust-port/`; start with
+`porting_to_ntex_rust.md`. This part is the canonical tracking entry and describes no current behaviour.
+
+## 2. Program
+
+Four tracks:
+
+- **P — port at parity**: every server (`core-back` Live/Sandbox, the three edges, fake rails, backup and
+  object-storage daemons) and every backend tool (migrations, seeds, synthetic seeder, admin bootstrap, ledger and
+  audit utilities, WAL fetch) reimplemented in Rust on ntex 4 / Tokio with byte-identical contracts against the
+  unchanged database, migrated route by route (edge route tables with shadow diffing) and worker by worker (shared
+  advisory-lock leader election).
+- **D — deploy engine v2 (`pgctl`)**: Rust replacement of `deploy/` with declarative TOML config (importer for the
+  282-key `deploy.env`), pinned SSH host keys, rcgen PKI with ECDSA and rotation, encrypted secrets store delivered as
+  systemd credentials, nftables, systemd units with zero-downtime SO_REUSEPORT restarts, versioned releases and
+  automatic rollback, PGDG PostgreSQL 18, verified TLS for PostgreSQL/PgBouncer/Redis, optional Patroni HA and
+  observability stack, plus ports of the test-matrix lab, deploy stress and local/Codespaces launchers.
+- **S — compatible hardening** applied to TS and Rust together during coexistence (schema-version boot gate, audit
+  delete bypass fix, least-privilege roles, MFA re-check, fail-closed merchant scope, PAN guard, storage TLS, index
+  and constraint work, migration linter, metrics).
+- **E — evolution** after parity: timestamptz, PII blind indexes and vault v2, RLS and per-service roles, partitioned
+  queues and archives, DB-level ledger integrity, configuration registry, runtime worker control, feature flags,
+  policy-as-data, regionalisation, approvals v2, rails v2, event platform, async inbound callbacks, SSE resume,
+  asymmetric sessions, API tokens v2.
+
+## 3. Targets
+
+≥ 4,500 postings/s and ≤ 1 ms CPU per posting (TS: ~900/s at 6–7 ms, GAP-065), ≥ 2,000 checkout initiate TPS at
+p95 < 35 ms, edge overhead ≤ 0.3 ms p50, RSS ≤ 35% of TS, 72 h soak and chaos with zero ledger drift, 100% route
+parity.
+
+## 4. Out of scope
+
+Frontends, the documentation tooling, the frontend content pipeline (only its output path changes), the voucher
+system and server-side PDF rendering.
+
+When implementation starts, update this part per phase; move it out of `09-future-and-unimplemented/` at P10-T10.
 
 ---
 
