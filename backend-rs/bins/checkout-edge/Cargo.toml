@@ -1,0 +1,41 @@
+[package]
+name = "checkout-edge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "checkout_edge"
+path = "src/lib.rs"
+
+[[bin]]
+name = "checkout-edge"
+path = "src/main.rs"
+
+[dev-dependencies]
+tempfile.workspace = true
+rcgen.workspace = true
+
+[dependencies]
+ntex.workspace = true
+tokio.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+pg-config.workspace = true
+pg-http.workspace = true
+pg-mtls.workspace = true
+pg-edge.workspace = true
+pg-upstream.workspace = true
+url.workspace = true
+reqwest.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+async-trait.workspace = true
+ipnet.workspace = true
+brotli.workspace = true
+mimalloc.workspace = true

@@ -29,6 +29,7 @@ Read the canonical design before changing behavior:
 | `checkout-front/` | Vue 3.6 Vapor + `@pg/ui` + TSX hosted payer checkout. |
 | `fake-rails-back/`, `fake-rails-front/` | Optional Fake Payment Rails emulator and tester portal (Vue 3.6 Vapor + `@pg/ui`). |
 | `deploy/` | Multi-host deploy engine, PKI, firewall, storage provisioners, templates and `pg-backup-daemon`. |
+| `backend-rs/` | Rust/ntex port (foundation + object-storage daemon live; see `backend-rs/IMPLEMENTATION_TRACKER.md`). |
 | `tests/` | Playwright and Vitest suites, including mocked UI, exhaustive surface and live-stack journeys. |
 | `companion-app/` | Offline Android Guide + Academy companion (Capacitor/Vue), generated content bundle and signed APK build. |
 | `packages/ui/` | Shared 2026 Fintech Vapor design system (`@pg/ui`): tokens, primitives, table family, tests and the UI governance audit. |

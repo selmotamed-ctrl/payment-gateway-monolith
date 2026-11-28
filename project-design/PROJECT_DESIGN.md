@@ -69,7 +69,7 @@ Historical `design/**` files are source lineage only; this document and the part
 - [Smart AI Spec Importer and Voucher Half (Future)](#futuresmart-ai-voucher) — `missing`
 - [Deferred and Partial Features](#futuredeferred) — `deferred`
 - [Ledger Archive and Shard Repair Anchors (Future)](#futureledger-archive) — `missing`
-- [Backend Port to Rust on ntex (Future)](#futurerust-ntex-port) — `missing`
+- [Backend Port to Rust on ntex (Future)](#futurerust-ntex-port) — `partial`
 - [Offline Android Companion](#companionoffline) — `partial`
 
 ---
@@ -20490,14 +20490,46 @@ Real-PostgreSQL tests with a small archive: repair from archive plus live equals
 
 <a id="futurerust-ntex-port"></a>
 
-> **Part ID:** `future.rust-ntex-port` · **Status:** `missing` · **Last verified:** 2026-11-28 · **Verified against:** `c48a1c9+working-tree`
+> **Part ID:** `future.rust-ntex-port` · **Status:** `partial` · **Last verified:** 2026-11-28 · **Verified against:** `c48a1c9+working-tree`
 
 # Backend Port to Rust on ntex (Future)
 
 ## 1. Status
 
-Planned (revision 2, 2026-11-28), not started. The plan is the document set in `design/14-rust-port/`; start with
-`porting_to_ntex_rust.md`. This part is the canonical tracking entry and describes no current behaviour.
+**Partial (started 2026-11-28).** The plan is the document set in `design/14-rust-port/`; start with
+`porting_to_ntex_rust.md`. `backend-rs/IMPLEMENTATION_TRACKER.md` is the live work log; `PARITY.md` and
+`DEVIATIONS.md` record what is byte-compatible and what deliberately differs.
+
+Implemented so far:
+
+- Rust 1.100.1 workspace (`backend-rs/`) with the chapter 3 crate/binary layout, pinned dependencies, `deny.toml`,
+  release profile, root `rs:check|test|build` scripts and a CI `rust` job.
+- `pg-config` (dotenv, systemd credentials, object-storage daemon config), `pg-types` (Money4, decimal.js
+  serialisation, JsDate, JS key order, ids, cursor), `pg-crypto` (vault AES-256-GCM/HKDF, CryptoEngine
+  canonicalisation with UTF-16 sort, Standard Webhooks, FNV-1a UTF-16, redaction), `pg-http` (error envelope,
+  request id, security headers, body limits, health, zod-shaped issues, deny-by-default route policies, fixed-window
+  limiter catalogue), `pg-mtls` (rustls 1.3 server/client configs, CN/SAN extraction, channel table), `pg-db`
+  (`sslmode=no-verify` normalisation, pool knobs, SQLSTATE map, advisory-lock leader election and session probe,
+  Prisma metadata), `pg-objstore` (atomic FS store, remote mTLS client, `pgos1` envelope, MIME/executable sniffing,
+  namespace policies, storage keys, GC/retention) and `pg-workers` (interval/jitter/singleton/panic isolation/health).
+- The **P1 object-storage daemon** is complete: all six `/v1/*` routes, `fsck`, ntex/rustls mTLS with peer CN/SAN
+  authorization, bounded bodies and the TS error bodies. This is the pilot for the ntex 4.11 mTLS model (P0-T07).
+- Health/config scaffolds for `core-rs`, the three edges, fake rails and the backup daemon; unported routes answer
+  `501 NOT_IMPLEMENTED_ROUTE` so the parity harness can classify them.
+- Domain and adapter crates implemented as pure, tested libraries: `pg-domain-{auth,flow,ledger,gov,comms,recon,academy}`
+  (sessions/JWT/MFA/throttle, statuses/transitions/guards/visible rails/slots, ledger templates/shards/fold/repair/commission,
+  approvals/maker-checker/AML states, communication templates/tipping-off/SMS, CSV/date/statement parsing, exam/certificate/lab
+  scoring), `pg-upstream` (least-in-flight pool/retry/path/headers), `pg-egress` (SSRF/allowlist/pinned resolution, auth
+  methods, token cache, webhook retry), `pg-redis` (invalidation/realtime envelopes, Lua velocity, bounded auth state,
+  caches/revocation), `pg-edge` (trusted proxies, cookie/CSRF, multipart/SSE/upload guards), `pg-report-engine`
+  (spec/normalise/limits/hash/decimal/compatibility/verifier), `pg-compliance` (filing gate, safe XSD subset, periods,
+  incidents), `pg-office`, `pg-search`, and `pg-deploy-{config,plan}` with the `pgctl` and `wal-fetch` binaries.
+- P0 tooling is complete: Prisma codegen (123 models / 131 enums / metadata / report catalog), route/error/env inventory
+  (611 core + 544 edge routes, 605 error groups, 8 env schemas) and 148 TypeScript-generated golden cases across FNV,
+  vault, webhooks, CryptoEngine canonicalisation, decimal.js/Money4, JS key order/dates and `pgos1`. All eight Rust
+  golden suites pass, including decrypting TS vault payloads and `pgos1` streams.
+- Verification on this tree: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+  `cargo test --workspace` (1,070 passed), the three tool `--check` gates and the root scripts.
 
 ## 2. Program
 

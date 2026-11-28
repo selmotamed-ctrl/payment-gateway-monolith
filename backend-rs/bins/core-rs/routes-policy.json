@@ -1,0 +1,5694 @@
+[
+  {
+    "method": "GET",
+    "path": "/health",
+    "channel": "internal",
+    "authn": "none",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/index.ts:111"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/health",
+    "channel": "admin",
+    "authn": "none",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:245"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/health",
+    "channel": "merchant",
+    "authn": "none",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:87"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/checkout/health",
+    "channel": "checkout",
+    "authn": "none",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/checkout.ts:42"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/auth/me",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:1104"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/wallets",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:2031"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/wallets/:id",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:2085"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/wallets/:id/balance",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:2096"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/wallets/:id/statements",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:2120"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/wallets/:id/statements/:month/export",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:2148"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/stats/overview",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "payment:read",
+      "link:write",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:3918"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/options/:kind",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "merchant:read",
+      "merchant:write",
+      "link:read",
+      "payment:read",
+      "link:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:1403"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/applications",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:2201"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/applications/:id",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:2261"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/links",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "link:read",
+      "link:write",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:2525"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/links/:id",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "link:read",
+      "link:write",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:2579"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/links/:id/attempts",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "link:read",
+      "link:write",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:2607"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/payments",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "payment:read",
+      "link:write",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:2627"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/disputes",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "payment:read",
+      "dispute:respond",
+      "link:write",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:2667"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/disputes/:id",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "payment:read",
+      "dispute:respond",
+      "link:write",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:2693"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/disputes/:id/attachments",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "payment:read",
+      "dispute:respond",
+      "link:write",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:2771"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/disputes/:id/attachments/:attachmentId/content",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "payment:read",
+      "dispute:respond",
+      "link:write",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:2852"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/external/links/:key",
+    "channel": "merchant",
+    "authn": "session_or_api_token",
+    "authorities": [
+      "link:read",
+      "link:write",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:4124"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/external/payments/:reference",
+    "channel": "merchant",
+    "authn": "session_or_api_token",
+    "authorities": [
+      "payment:read",
+      "link:write",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:4162"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/auth/me",
+    "channel": "merchant",
+    "authn": "none",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:1354"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/onboarding/join-request",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "onboarding:write",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:1512"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/onboarding/kyb-revalidations",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "onboarding:write",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:1590"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/onboarding/beneficial-owners",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "onboarding:write",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:1855"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/cashouts",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "cashout:read",
+      "cashout:request",
+      "link:write",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:2910"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/tokens",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "token:manage",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:3116"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/credential-sets",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "credential:manage",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:3288"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/credential-sets/:id",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "credential:manage",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:3442"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/users",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "user:manage",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:3512"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/pos/terminals",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "pos:manage",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:3712"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/pos/terminals/:id",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "pos:manage",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:3759"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/webhooks/event-types",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "merchant:read",
+      "merchant:write",
+      "application:manage"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:4218"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/webhooks/endpoints",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "merchant:read",
+      "merchant:write",
+      "application:manage"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:4227"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/webhooks/deliveries",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "merchant:read",
+      "merchant:write",
+      "application:manage"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchant.ts:4275"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/report-engine/studio/specs",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "report_engine:author",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchantReportEngine.ts:1405"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/report-engine/studio/needs-migration",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "report_engine:author",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchantReportEngine.ts:1434"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/report-engine/studio/specs/:id",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "report_engine:author",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchantReportEngine.ts:1507"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/report-engine/studio/usage",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "report_engine:author",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchantReportEngine.ts:1680"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/report-engine/studio/chrome",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "report_engine:author",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchantReportEngine.ts:770"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/report-engine/studio/chrome/needs-migration",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "report_engine:author",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchantReportEngine.ts:824"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/report-engine/studio/chrome/:id",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "report_engine:author",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchantReportEngine.ts:886"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/report-engine/catalog",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "report_engine:run",
+      "link:write",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchantReportEngine.ts:576"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/report-engine/autocomplete/:sourceKey",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "report_engine:run",
+      "link:write",
+      "merchant:read",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchantReportEngine.ts:735"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/report-engine/studio/transcript",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "report_engine:author",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchantReportEngine.ts:1161"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/report-engine/studio/chrome/transcript",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "report_engine:author",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchantReportEngine.ts:808"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/report-engine/studio/specs/:id/migration-prompt",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "report_engine:author",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchantReportEngine.ts:1470"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/merchant/report-engine/studio/chrome/:id/migration-prompt",
+    "channel": "merchant",
+    "authn": "session",
+    "authorities": [
+      "report_engine:author",
+      "merchant:write"
+    ],
+    "merchantScope": "required",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/merchantReportEngine.ts:1120"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/checkout/academy/certificates/:publicId",
+    "channel": "checkout",
+    "authn": "none",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/checkout.ts:57"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/checkout/pay/:linkKey",
+    "channel": "checkout",
+    "authn": "none",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/checkout.ts:1158"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/checkout/pay/:linkKey/logs/:attemptId",
+    "channel": "checkout",
+    "authn": "none",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/checkout.ts:1552"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/checkout/pay/:linkKey/logs/:attemptId/status",
+    "channel": "checkout",
+    "authn": "none",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/checkout.ts:1573"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/checkout/return/:attemptToken",
+    "channel": "checkout",
+    "authn": "none",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/checkout.ts:1793"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/checkout/pay/:linkKey/sandbox-accounts",
+    "channel": "checkout",
+    "authn": "none",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/checkout.ts:2068"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/checkout/pay/:linkKey/sandbox-accounts/:accountId/movements",
+    "channel": "checkout",
+    "authn": "none",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/checkout.ts:2120"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/checkout/pay/:linkKey/logs/:attemptId/sandbox-inspector",
+    "channel": "checkout",
+    "authn": "none",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/checkout.ts:2156"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/merchants",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:5253"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/merchants/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:5597"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/applications",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminCommerce.ts:740"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/applications/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminCommerce.ts:827"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/wallets",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminCommerce.ts:278"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/wallets/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminCommerce.ts:367"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/payment-links",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminCommerce.ts:1242"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/pos-terminals",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminCommerce.ts:1359"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/access-tokens",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminCommerce.ts:1137"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/assets",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:16841"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/assets/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:16847"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/finance/journal-entries/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminLedger.ts:127"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/finance/journal-entries/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminLedger.ts:132"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/finance/journal-entries",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminLedger.ts:153"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/finance/journal-entries/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminLedger.ts:218"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/finance/gl-accounts/:id/lines",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminLedger.ts:336"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/finance/gl-accounts/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminLedger.ts:346"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/finance/gl-accounts/:id/shards/:shardId/repair-plan",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminLedger.ts:478"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/finance/profitability",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:19340"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/finance/profitability/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:19345"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/finance/route-caps",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:19383"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/finance/liquidity",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:19625"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/finance/liquidity/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:19630"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/finance/invariant-check",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:19717"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/finance/invariant-check/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:19722"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/audit-logs",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "security:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:20005"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/audit-logs/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "security:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:20056"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/audit-logs/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "security:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:20147"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/audit-logs/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "security:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:20152"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/audit-logs/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "security:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:20184"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/transactions/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "attempt:read",
+      "merchant:read",
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminOperations.ts:73"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/transactions/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "attempt:read",
+      "merchant:read",
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminOperations.ts:78"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/transactions",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "attempt:read",
+      "merchant:read",
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminOperations.ts:105"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/attempts/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "attempt:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminOperations.ts:538"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/adjustments",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:18134"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/adjustments/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:18198"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/adjustments/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:18333"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/adjustments/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:18338"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/adjustments/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:18372"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/cashouts",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "cashout:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:18505"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/cashouts/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "cashout:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:18534"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/cashouts/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "cashout:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:18632"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/cashouts/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "cashout:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:18637"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/cashouts/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "cashout:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:18670"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/approvals",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "approval:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:6892"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/approvals/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "approval:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:6951"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/approvals/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "approval:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:7070"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/approvals/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "approval:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:7075"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/approvals/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "approval:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:7110"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/disputes",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "dispute:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:17583"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/disputes/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "dispute:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:17643"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/disputes/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "dispute:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:17763"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/disputes/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "dispute:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:17768"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/disputes/:id/attachments",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "dispute:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:17924"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/disputes/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "dispute:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:17802"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/reconciliation/sources",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "reconciliation:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:17077"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/reconciliation/runs",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "reconciliation:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:17258"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/reconciliation/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "reconciliation:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:17329"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/reconciliation/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "reconciliation:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:17334"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/reconciliation/runs/:id/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "reconciliation:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:17464"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/reconciliation/runs/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "reconciliation:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:17370"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/join-requests",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "kyb:read",
+      "compliance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:2663"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/join-requests/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "kyb:read",
+      "compliance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:2685"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/join-requests/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "kyb:read",
+      "compliance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:2794"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/join-requests/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "kyb:read",
+      "compliance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:2799"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/join-requests/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "kyb:read",
+      "compliance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:2824"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/kyb-documents",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "kyb:read",
+      "compliance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:3939"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/kyb-documents/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "kyb:read",
+      "compliance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:4092"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/kyb-documents/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "kyb:read",
+      "compliance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:4271"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/kyb-documents/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "kyb:read",
+      "compliance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:4276"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/kyb-documents/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "kyb:read",
+      "compliance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:4300"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/incidents/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:21191"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/incidents/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:21218"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/incidents",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:21256"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/incidents/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:21313"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/operator-cases",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "case:read",
+      "operator:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:11640"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/operator-cases/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "case:read",
+      "operator:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:11693"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/operator-cases/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "case:read",
+      "operator:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:11829"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/operator-cases/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "case:read",
+      "operator:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:11834"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/operator-cases/catalog",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "case:read",
+      "operator:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:12154"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/operator-cases/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "case:read",
+      "operator:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:12174"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/stats/recent-activity",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "security:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:1270"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/stats/overview",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read",
+      "finance:read",
+      "gateway:read",
+      "case:read",
+      "operator:read",
+      "kyb:read",
+      "compliance:read",
+      "aml:read",
+      "security:read",
+      "reconciliation:read",
+      "approval:read",
+      "cashout:read",
+      "dispute:read",
+      "attempt:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:1306"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/options/:kind",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read",
+      "finance:read",
+      "gateway:read",
+      "case:read",
+      "operator:read",
+      "kyb:read",
+      "compliance:read",
+      "aml:read",
+      "security:read",
+      "reconciliation:read",
+      "approval:read",
+      "cashout:read",
+      "dispute:read",
+      "attempt:read",
+      "user:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:1552"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/users",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "user:read",
+      "security:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:1653"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/users/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "user:read",
+      "security:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:1775"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/users/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "user:read",
+      "security:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:1815"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/settings",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "settings:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:20221"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/settings/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "settings:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:20543"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/settings/communication/status",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "settings:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:20227"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/settings/checkout-support",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "settings:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:19792"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/settings/checkout-support/history",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "settings:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:19806"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/settings/checkout-support/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "settings:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:19853"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/system/jobs-outbox/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "security:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminSystem.ts:51"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/system/jobs",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "security:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminSystem.ts:159"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/system/outbox",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "security:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminSystem.ts:236"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/system/audit-outbox",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "security:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminSystem.ts:285"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/system/notifications",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "security:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminSystem.ts:354"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/settings/notification-templates",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "settings:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminSystem.ts:470"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/object-storage/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "system:storage:read",
+      "system:storage:admin",
+      "system:storage:legal-hold"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/objectStorage.ts:123"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/object-storage/objects",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "system:storage:read",
+      "system:storage:admin",
+      "system:storage:legal-hold"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/objectStorage.ts:182"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/object-storage/objects/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "system:storage:read",
+      "system:storage:admin",
+      "system:storage:legal-hold"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/objectStorage.ts:226"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/object-storage/access-logs",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "system:storage:read",
+      "system:storage:admin",
+      "system:storage:legal-hold"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/objectStorage.ts:326"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/screenings",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:7733"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/screenings/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:7756"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/screenings/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:7826"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/screenings/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:7831"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/screenings/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:7864"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/cases",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:8202"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/cases/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:8234"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/cases/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:8321"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/cases/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:8326"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/cases/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:8361"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/cases/:id/evidence",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:8467"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/cases/:id/evidence/:evidenceId/content",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:8574"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/rules",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:8601"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/rules/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:8641"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/rules/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:8716"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/rules/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:8721"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/rules/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:8841"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/reporting-rules",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:8857"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/report-schemas",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:9136"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/report-schemas/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:9145"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/report-context-catalog",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:9495"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/report-schemas/:id/template",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:9682"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/reporting-rules/:id/schema-bindings",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:10006"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/reports/:id/requirements",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:10082"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/report-schema-defaults",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:10127"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/reports/:id/payload",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:10220"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/reports/:id/outputs/:format/download",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:10376"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/reports",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:10569"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/reports/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:10619"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/reports/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:10711"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/reports/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:10716"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/reports/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:10750"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/filing-adapters",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:20728"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/aml/reports/:id/submissions",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:20887"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/report-engine/catalog",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminReportEngine.ts:1902"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/report-engine/specs",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "report:review",
+      "report_engine:author",
+      "report:approve"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminReportEngine.ts:1175"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/report-engine/specs/needs-migration",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "report:review",
+      "report_engine:author",
+      "report:approve",
+      "security:read",
+      "security:write"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminReportEngine.ts:1215"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/report-engine/specs/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "report:review",
+      "report_engine:author",
+      "report:approve"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminReportEngine.ts:1351"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/report-engine/specs/:id/migration-prompt",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "report:review",
+      "report_engine:author",
+      "report:approve",
+      "security:write"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminReportEngine.ts:1287"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/report-engine/executions",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "report:review",
+      "report:approve",
+      "security:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminReportEngine.ts:1559"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/report-engine/aml-bypass/pending",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "security:write",
+      "report:approve"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminReportEngine.ts:1756"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/report-engine/chrome",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminReportEngine.ts:2213"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/report-engine/chrome/needs-migration",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "report:review",
+      "report:approve",
+      "report_engine:author",
+      "security:read",
+      "security:write"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminReportEngine.ts:2258"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/report-engine/chrome/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminReportEngine.ts:2458"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/report-engine/chrome/:id/migration-prompt",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "report:review",
+      "report:approve",
+      "report_engine:author",
+      "security:write"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminReportEngine.ts:2398"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/report-engine/autocomplete/:sourceKey",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminReportEngine.ts:1992"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/report-engine/merchant-reports",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "report:review",
+      "report:approve",
+      "security:read",
+      "security:write"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminReportEngine.ts:2670"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/report-engine/merchant-reports/:id/migration-prompt",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "report:review",
+      "report_engine:author",
+      "report:approve",
+      "security:read",
+      "security:write"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminReportEngine.ts:1317"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/report-engine/merchant-executions",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "report:review",
+      "report:approve",
+      "security:read",
+      "security:write"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminReportEngine.ts:2728"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/academy/progress",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/academy.ts:116"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/academy/exams/:examId/eligibility",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/academy.ts:127"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/academy/certificates/:trackId/verification",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/academy.ts:165"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/academy/team",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/academy.ts:205"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/academy/team/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/academy.ts:220"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/gateways",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:13006"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/gateways/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:13183"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/gateways/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:13221"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/gateways/:id/versions",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:13336"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/gateway-versions/:vid",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:14141"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/credential-sets",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "credential:read",
+      "credential:write",
+      "gateway:read",
+      "gateway:write"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:13802"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/credential-sets/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "credential:read",
+      "credential:write",
+      "gateway:read",
+      "gateway:write"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:13837"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/gateway-inquiries",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "case:read",
+      "operator:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:11868"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/gateway-inquiries/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "case:read",
+      "operator:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:11947"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/gateway-inquiries/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "case:read",
+      "operator:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:11979"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/rails",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:15854"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/rails/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:16017"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/rails/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:16056"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/routes",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:16299"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/routes/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:16427"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/routes/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:16467"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/routes/:id/health",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:16584"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/commission-profiles",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "commission:read",
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:18758"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/commission-profiles/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "commission:read",
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:18776"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/commission-profiles/:id/history",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "commission:read",
+      "finance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:18872"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/velocity-rules",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "velocity:read",
+      "compliance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:18955"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/velocity-rules/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "velocity:read",
+      "compliance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:19043"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/velocity-rules/:id/history",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "velocity:read",
+      "compliance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:18973"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/merchants/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:5346"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/merchants/summary",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:5492"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/merchants/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:5497"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/merchants/:id/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:5522"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/merchants/:id/transactions",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:5792"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/merchants/:id/applications",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:5905"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/merchants/:id/wallets",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:5969"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/merchants/:id/cashouts",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:6038"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/merchants/:id/disputes",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:6092"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/merchants/:id/adjustments",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:6150"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/merchants/:id/notifications",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:6209"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/merchants/:id/audit-events",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:6246"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/merchants/:id/stats",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:6303"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/merchants/:id/pending-changes",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:6790"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/merchants/:id/detail-changes",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:6850"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/merchants/:id/beneficial-owners",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read",
+      "kyb:read",
+      "kyb:write"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminCommerce.ts:1545"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/assets/:id/content",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:16982"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/kyb-documents/:id/content",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "kyb:read",
+      "compliance:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:3418"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/disputes/:id/attachments/:attachmentId/content",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "dispute:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:18001"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/reconciliation/runs/:id/statement",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "reconciliation:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:17426"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/inbound-events",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "attempt:read",
+      "case:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminOperations.ts:266"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/inbound-events/:id",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "attempt:read",
+      "case:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminOperations.ts:336"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/system/backups/overview",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "security:read",
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/backups.ts:236"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/system/backups/catalog",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "security:read",
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/backups.ts:580"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/gateways/:id/health",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/adminOperations.ts:554"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/gateways/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:13064"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/gateways/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:13188"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/rails/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:15910"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/rails/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:16022"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/routes/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:16338"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/routes/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "gateway:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:16432"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/gateway-inquiries/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "case:read",
+      "operator:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:11952"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/users/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "user:read",
+      "security:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:1689"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/users/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "user:read",
+      "security:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:1780"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/stats/recent-activity/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "security:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:1277"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/settings/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "settings:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:20477"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/settings/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "settings:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:20548"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/admin/settings/checkout-support/summary/export",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "settings:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:19858"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/overview",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:232"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/wallets/:walletId",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:733"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/wallets/:walletId/ledger",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:765"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/payments/:attemptId",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:831"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/studio/overview",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1571"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/studio/wallets/summary",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1698"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/studio/wallets",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1720"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/studio/wallets/:walletId",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1738"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/studio/applications/summary",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1779"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/studio/applications",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1789"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/studio/applications/:applicationId",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1814"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/studio/links/summary",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1825"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/studio/links",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1835"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/studio/links/:linkId",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1857"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/studio/payments/summary",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1865"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/studio/payments",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1880"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/studio/tokens/summary",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1916"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/studio/tokens",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1927"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/merchant/studio/tokens/:tokenId",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1952"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/admin/overview",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:2054"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/admin/merchants/summary",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1959"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/admin/merchants",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1980"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/admin/merchants/:merchantId",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:2007"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/admin/merchants/:merchantId/overview",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:2103"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/admin/audits",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:2036"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/fake-rails/accounts",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1113"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/fake-rails/accounts/:accountId",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1169"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/fake-rails/accounts/:accountId/movements",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1179"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/fake-rails/accounts/:accountId/holds",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1190"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/fake-rails/clearing/pools",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1357"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/admin/fake-rails/accounts/summary",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:1160"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/admin/fake-rails/scenarios",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:2135"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/admin/fake-rails/transactions",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:2175"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/admin/fake-rails/transactions/summary",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:2197"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/admin/fake-rails/transactions/:transactionId",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:2202"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/admin/fake-rails/webhooks",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:2238"
+  },
+  {
+    "method": "GET",
+    "path": "/internal/sandbox/admin/fake-rails/statements",
+    "channel": "sandbox",
+    "authn": "session",
+    "authorities": [],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "default",
+    "body": {
+      "kind": "none"
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/sandboxControl.ts:2267"
+  },
+  {
+    "method": "POST",
+    "path": "/internal/admin/search",
+    "channel": "admin",
+    "authn": "session",
+    "authorities": [
+      "merchant:read",
+      "finance:read",
+      "gateway:read",
+      "case:read",
+      "operator:read",
+      "kyb:read",
+      "compliance:read",
+      "aml:read",
+      "security:read",
+      "reconciliation:read",
+      "approval:read",
+      "cashout:read",
+      "dispute:read",
+      "attempt:read"
+    ],
+    "merchantScope": "not_applicable",
+    "mfa": "not_required",
+    "makerChecker": null,
+    "rateClass": "search",
+    "body": {
+      "kind": "json",
+      "limit": 1000000
+    },
+    "audit": "none",
+    "tsOrigin": "core-back/api/internal/admin.ts:1226"
+  }
+]

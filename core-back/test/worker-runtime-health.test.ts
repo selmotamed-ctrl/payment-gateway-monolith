@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   assertBackgroundJobQueueDrainable,
+  filterDisabledWorkers,
   readBackgroundJobQueueHealth,
 } from "../engine/workers/productionRuntime";
 import { createApp } from "../index";
@@ -74,6 +75,26 @@ describe("the durable queue startup guard", () => {
     ).toThrow(/WORKER_ENABLED/);
   });
 
+  test("allows a fully external worker runtime to drain the queue", () => {
+    expect(() =>
+      assertBackgroundJobQueueDrainable({
+        workerEnabled: false,
+        backgroundJobsEnabled: false,
+        backgroundJobsDrainedExternally: true,
+      }),
+    ).not.toThrow();
+  });
+
+  test("still refuses a local drain when only the external flag is absent", () => {
+    expect(() =>
+      assertBackgroundJobQueueDrainable({
+        workerEnabled: true,
+        backgroundJobsEnabled: false,
+        backgroundJobsDrainedExternally: false,
+      }),
+    ).toThrow(/WORKER_BACKGROUND_JOBS_ENABLED/);
+  });
+
   test("refuses to boot when the background job worker is disabled", () => {
     expect(() =>
       assertBackgroundJobQueueDrainable({
@@ -81,6 +102,17 @@ describe("the durable queue startup guard", () => {
         backgroundJobsEnabled: false,
       }),
     ).toThrow(/WORKER_BACKGROUND_JOBS_ENABLED/);
+  });
+});
+
+describe("WORKER_DISABLED filtering", () => {
+  test("removes exactly the named workers and keeps unknown names irrelevant", () => {
+    const workers = [{ name: "PollWorker" }, { name: "LedgerCheckpointWorker" }, { name: "OutboxRelayWorker" }];
+    const active = filterDisabledWorkers(workers, new Set(["PollWorker", "NoSuchWorker"]));
+    expect(active.map((worker) => worker.name)).toEqual([
+      "LedgerCheckpointWorker",
+      "OutboxRelayWorker",
+    ]);
   });
 });
 

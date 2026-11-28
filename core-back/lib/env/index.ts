@@ -135,6 +135,25 @@ export const envSchema = z.strictObject({
    * The startup guard refuses to boot when this is explicitly disabled.
    */
   WORKER_ENABLED: booleanFromEnvironment.default(true),
+  /**
+   * Comma-separated worker class names to disable in this process (P0-T03).
+   * The disabled workers are not started and do not appear in `/health.workers`; the remaining
+   * workers run normally. Use it for a hand-over to the Rust worker runtime.
+   */
+  WORKER_DISABLED: z
+    .string()
+    .default("")
+    .transform((value) =>
+      value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0),
+    ),
+  /**
+   * True when another process (the Rust worker runtime) drains `background_jobs`. It relaxes the
+   * boot guard that otherwise refuses a core with no local background-job drain.
+   */
+  WORKER_BACKGROUND_JOBS_DRAINED_EXTERNALLY: booleanFromEnvironment.default(false),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
   WORKER_BATCH_SIZE: z.coerce.number().int().positive().max(1000).default(50),
   WORKER_CONCURRENCY: z.coerce.number().int().positive().max(100).default(4),
@@ -629,6 +648,8 @@ const resolveEnvironment = (): CoreEnv => {
     TRUST_PROXY: false,
     LOG_LEVEL: "error",
     WORKER_ENABLED: true,
+    WORKER_DISABLED: [],
+    WORKER_BACKGROUND_JOBS_DRAINED_EXTERNALLY: false,
     WORKER_POLL_INTERVAL_MS: 5000,
     WORKER_BATCH_SIZE: 50,
     WORKER_CONCURRENCY: 4,
@@ -826,7 +847,7 @@ const redactedKeys = new Set([
   "MTLS_SERVER_KEY_PATH",
 ]);
 
-export const envSummary = (): Record<string, string | number | boolean> =>
+export const envSummary = (): Record<string, string | number | boolean | string[]> =>
   Object.fromEntries(
     Object.entries(resolveEnvironment()).map(([key, value]) => [
       key,

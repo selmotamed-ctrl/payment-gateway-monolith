@@ -19,6 +19,7 @@
 | `fake-rails-back/`, `fake-rails-front/` | Optional Fake Payment Rails emulator and tester portal. |
 | `companion-app/` | Offline Android Guide + Academy companion; canonical-content snapshot and signed APK build. |
 | `deploy/` | Multi-host deploy engine, storage provisioners, PKI, firewall, backup daemon. |
+| `backend-rs/` | Rust/ntex port workspace (`backend-rs/README.md`; Track P/D progress in `backend-rs/IMPLEMENTATION_TRACKER.md`). |
 | `tests/` | Playwright/Vitest suites, including live-stack journeys. |
 | `project-design/` | Canonical design, status, tracker and generated appendices. |
 
@@ -64,6 +65,10 @@ cd admin-front && bun run build
 cd merchant-front && bun run build
 cd checkout-front && bun run build
 cd companion-app && bun run content:check && bun run typecheck && bun test && bun run build
+cd backend-rs && cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
+bun backend-rs/tools/codegen/gen.ts --check
+bun backend-rs/tools/route-inventory/index.ts --check
+bun backend-rs/tools/golden/check.ts
 ```
 
 Database-backed suites require PostgreSQL 18 and Redis; report skipped suites explicitly. Run `scripts/run-benchmarks.sh` for storage benchmarks.

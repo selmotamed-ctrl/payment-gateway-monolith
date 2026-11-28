@@ -36,6 +36,42 @@ jobs:
         run: |
           if git rev-parse --verify -q HEAD^1 >/dev/null; then git diff --check HEAD^1 HEAD; fi
 
+  rust-tools:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Route inventory is current (P0-T04)
+        run: bun backend-rs/tools/route-inventory/index.ts --check
+      - name: Golden vectors are current (P0-T06)
+        run: bun backend-rs/tools/golden/check.ts
+      - name: Generated Prisma types are current (P0-T05)
+        run: bun backend-rs/tools/codegen/gen.ts --check
+
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend-rs
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.1"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend-rs
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+
   ui:
     runs-on: ubuntu-latest
     timeout-minutes: 15

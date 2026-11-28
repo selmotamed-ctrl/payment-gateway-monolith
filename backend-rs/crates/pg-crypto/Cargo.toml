@@ -1,0 +1,25 @@
+[package]
+name = "pg-crypto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64.workspace = true
+hex.workspace = true
+sha2 = { workspace = true, features = ["oid"] }
+sha1.workspace = true
+hmac.workspace = true
+hkdf.workspace = true
+aes-gcm.workspace = true
+rand.workspace = true
+subtle.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+rsa.workspace = true

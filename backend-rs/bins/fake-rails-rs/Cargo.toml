@@ -1,0 +1,26 @@
+[package]
+name = "fake-rails-rs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ntex.workspace = true
+tokio.workspace = true
+rusqlite.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+ipnet.workspace = true
+base64.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+pg-config.workspace = true
+mimalloc.workspace = true

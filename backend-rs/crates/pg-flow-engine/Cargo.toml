@@ -1,0 +1,28 @@
+[package]
+name = "pg-flow-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
+uuid.workspace = true
+rust_decimal.workspace = true
+num-bigint.workspace = true
+base64.workspace = true
+hex.workspace = true
+url.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+pg-crypto.workspace = true
+pg-domain-ledger.workspace = true
+pg-domain-flow.workspace = true
+pg-egress.workspace = true
+pg-db.workspace = true
+pg-ledger.workspace = true
+sqlx.workspace = true

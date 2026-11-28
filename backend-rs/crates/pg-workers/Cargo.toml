@@ -1,0 +1,24 @@
+[package]
+name = "pg-workers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+tokio.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+parking_lot.workspace = true
+futures-util.workspace = true
+sqlx.workspace = true
+uuid.workspace = true
+rust_decimal.workspace = true
+pg-db.workspace = true
+pg-domain-ledger.workspace = true
+pg-types.workspace = true

@@ -1,0 +1,51 @@
+[package]
+name = "merchant-edge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "merchant_edge"
+path = "src/lib.rs"
+
+[[bin]]
+name = "merchant-edge"
+path = "src/main.rs"
+
+[dependencies]
+ntex.workspace = true
+ntex-tls.workspace = true
+tokio.workspace = true
+futures-util.workspace = true
+async-trait.workspace = true
+bytes.workspace = true
+http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+thiserror.workspace = true
+clap.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+sha2.workspace = true
+hex.workspace = true
+base64.workspace = true
+reqwest.workspace = true
+url.workspace = true
+dashmap.workspace = true
+parking_lot.workspace = true
+ipnet.workspace = true
+pg-config.workspace = true
+pg-http.workspace = true
+pg-mtls.workspace = true
+pg-edge.workspace = true
+pg-upstream.workspace = true
+
+mimalloc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+rcgen.workspace = true

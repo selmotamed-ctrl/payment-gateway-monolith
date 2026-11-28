@@ -1,0 +1,20 @@
+[package]
+name = "pg-domain-auth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+sha2.workspace = true
+ipnet.workspace = true
+# jsonwebtoken 12 ships no crypto provider by default; HS256 needs the RustCrypto backend on this
+# build image (no cmake/NASM, same reason as DEV-001 in pg-crypto).
+jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
+pg-crypto.workspace = true

@@ -1,0 +1,320 @@
+{
+  "generatedBy": "backend-rs/tools/golden/generate.ts",
+  "contract": "JavaScript object key order: canonical array indices (decimal digits without a leading zero, <= 4294967294) first in ascending numeric order, then string keys in insertion order. stringified = JSON.stringify of the object built from insertion pairs; objectKeys = Object.keys of the same object.",
+  "cases": [
+    {
+      "id": "arrays-and-empty",
+      "insertion": [
+        [
+          "empty",
+          {}
+        ],
+        [
+          "arr",
+          []
+        ],
+        [
+          "nested",
+          [
+            {
+              "1": 1,
+              "2": 2
+            },
+            []
+          ]
+        ],
+        [
+          "2",
+          "two"
+        ]
+      ],
+      "objectKeys": [
+        "2",
+        "empty",
+        "arr",
+        "nested"
+      ],
+      "stringified": "{\"2\":\"two\",\"empty\":{},\"arr\":[],\"nested\":[{\"1\":1,\"2\":2},[]]}"
+    },
+    {
+      "id": "deep-nesting",
+      "insertion": [
+        [
+          "level1",
+          {
+            "2": "two",
+            "level2": {
+              "0": "zero",
+              "10": "ten",
+              "leaf": {
+                "1": 1,
+                "b": 2
+              }
+            }
+          }
+        ],
+        [
+          "a",
+          "first"
+        ]
+      ],
+      "objectKeys": [
+        "level1",
+        "a"
+      ],
+      "stringified": "{\"level1\":{\"2\":\"two\",\"level2\":{\"0\":\"zero\",\"10\":\"ten\",\"leaf\":{\"1\":1,\"b\":2}}},\"a\":\"first\"}"
+    },
+    {
+      "id": "index-boundary",
+      "insertion": [
+        [
+          "4294967294",
+          "max-index"
+        ],
+        [
+          "4294967295",
+          "not-index"
+        ],
+        [
+          "4294967296",
+          "not-index"
+        ],
+        [
+          "0",
+          "zero"
+        ]
+      ],
+      "objectKeys": [
+        "0",
+        "4294967294",
+        "4294967295",
+        "4294967296"
+      ],
+      "stringified": "{\"0\":\"zero\",\"4294967294\":\"max-index\",\"4294967295\":\"not-index\",\"4294967296\":\"not-index\"}"
+    },
+    {
+      "id": "mixed-basic",
+      "insertion": [
+        [
+          "b",
+          1
+        ],
+        [
+          "10",
+          2
+        ],
+        [
+          "2",
+          3
+        ],
+        [
+          "a",
+          4
+        ],
+        [
+          "0",
+          5
+        ]
+      ],
+      "objectKeys": [
+        "0",
+        "2",
+        "10",
+        "b",
+        "a"
+      ],
+      "stringified": "{\"0\":5,\"2\":3,\"10\":2,\"b\":1,\"a\":4}"
+    },
+    {
+      "id": "near-index-strings",
+      "insertion": [
+        [
+          "1.0",
+          1
+        ],
+        [
+          "-1",
+          2
+        ],
+        [
+          " 1",
+          3
+        ],
+        [
+          "1 ",
+          4
+        ],
+        [
+          "10",
+          5
+        ],
+        [
+          "0",
+          6
+        ]
+      ],
+      "objectKeys": [
+        "0",
+        "10",
+        "1.0",
+        "-1",
+        " 1",
+        "1 "
+      ],
+      "stringified": "{\"0\":6,\"10\":5,\"1.0\":1,\"-1\":2,\" 1\":3,\"1 \":4}"
+    },
+    {
+      "id": "nested-in-array",
+      "insertion": [
+        [
+          "list",
+          [
+            {
+              "1": "a",
+              "2": "b",
+              "x": true
+            },
+            "tail"
+          ]
+        ],
+        [
+          "1",
+          0
+        ]
+      ],
+      "objectKeys": [
+        "1",
+        "list"
+      ],
+      "stringified": "{\"1\":0,\"list\":[{\"1\":\"a\",\"2\":\"b\",\"x\":true},\"tail\"]}"
+    },
+    {
+      "id": "nested-index-object",
+      "insertion": [
+        [
+          "z",
+          0
+        ],
+        [
+          "outer",
+          {
+            "0": 5,
+            "2": 3,
+            "10": 2,
+            "b": 1,
+            "a": 4
+          }
+        ]
+      ],
+      "objectKeys": [
+        "z",
+        "outer"
+      ],
+      "stringified": "{\"z\":0,\"outer\":{\"0\":5,\"2\":3,\"10\":2,\"b\":1,\"a\":4}}"
+    },
+    {
+      "id": "non-canonical-indices",
+      "insertion": [
+        [
+          "01",
+          1
+        ],
+        [
+          "4294967295",
+          2
+        ],
+        [
+          "4294967294",
+          3
+        ]
+      ],
+      "objectKeys": [
+        "4294967294",
+        "01",
+        "4294967295"
+      ],
+      "stringified": "{\"4294967294\":3,\"01\":1,\"4294967295\":2}"
+    },
+    {
+      "id": "reverse-indices",
+      "insertion": [
+        [
+          "10",
+          10
+        ],
+        [
+          "9",
+          9
+        ],
+        [
+          "8",
+          8
+        ],
+        [
+          "3",
+          3
+        ],
+        [
+          "2",
+          2
+        ],
+        [
+          "1",
+          1
+        ],
+        [
+          "0",
+          0
+        ],
+        [
+          "ten",
+          "10"
+        ]
+      ],
+      "objectKeys": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "8",
+        "9",
+        "10",
+        "ten"
+      ],
+      "stringified": "{\"0\":0,\"1\":1,\"2\":2,\"3\":3,\"8\":8,\"9\":9,\"10\":10,\"ten\":\"10\"}"
+    },
+    {
+      "id": "unicode-keys",
+      "insertion": [
+        [
+          "مفتاح",
+          1
+        ],
+        [
+          "😀",
+          2
+        ],
+        [
+          "0",
+          3
+        ],
+        [
+          "�",
+          4
+        ],
+        [
+          "z",
+          5
+        ]
+      ],
+      "objectKeys": [
+        "0",
+        "مفتاح",
+        "😀",
+        "�",
+        "z"
+      ],
+      "stringified": "{\"0\":3,\"مفتاح\":1,\"😀\":2,\"�\":4,\"z\":5}"
+    }
+  ]
+}

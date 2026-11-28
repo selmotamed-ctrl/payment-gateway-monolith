@@ -1,0 +1,69 @@
+{
+  "generatedBy": "backend-rs/tools/golden/generate.ts",
+  "contract": "Standard Webhooks (core-back/lib/webhooks/standardWebhooks.ts): webhook-signature = 'v1,' + base64(HMAC-SHA256(base64decode(secret after 'whsec_'), '<webhook-id>.<timestamp-seconds>.<body>')). Multi-secret headers join one 'v1,...' per active secret with a single space.",
+  "signingSecret": "whsec_AwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dw=",
+  "rotationSecret": "whsec_//r18Ovm4dzX0s3Iw765tK+qpaCblpGMh4J9eHNuaWQ=",
+  "cases": [
+    {
+      "id": "webhook-arabic-body",
+      "kind": "sign",
+      "webhookId": "evt_0192f0a0-1c2d-7e3f-8a4b-5c6d7e8f9013",
+      "timestampSeconds": 1700000002,
+      "body": "{\"type\":\"cashout.paid\",\"data\":{\"note\":\"تم الدفع بنجاح\",\"amount\":\"250.5000\"}}",
+      "secret": "whsec_AwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dw=",
+      "signature": "v1,rY+KN1VF2w669G1V1PNyRDoqgKuDZ0jt38tLJhCwn8E="
+    },
+    {
+      "id": "webhook-emoji-body",
+      "kind": "sign",
+      "webhookId": "evt_0192f0a0-1c2d-7e3f-8a4b-5c6d7e8f9014",
+      "timestampSeconds": 1700000003,
+      "body": "{\"type\":\"dispute.opened\",\"data\":{\"reason\":\"😀 chargeback 😀\",\"reference\":\"DIS-1\"}}",
+      "secret": "whsec_AwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dw=",
+      "signature": "v1,jr74XnSI8QhMoBnZp0q9DCc6BIutg7wNTKsw1cyJjwU="
+    },
+    {
+      "id": "webhook-empty-object",
+      "kind": "sign",
+      "webhookId": "evt_00000000000000000000000000000001",
+      "timestampSeconds": 1700000000,
+      "body": "{}",
+      "secret": "whsec_AwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dw=",
+      "signature": "v1,UEXWlO9cQno7X2gfDJrWedIgA9pG+gfBUUEaYxpbczo="
+    },
+    {
+      "id": "webhook-long-body",
+      "kind": "sign",
+      "webhookId": "evt_0192f0a0-1c2d-7e3f-8a4b-5c6d7e8f9015",
+      "timestampSeconds": 1700000004,
+      "body": "{\"type\":\"link.expired\",\"data\":{\"note\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}",
+      "secret": "whsec_AwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dw=",
+      "signature": "v1,/QCPQlXqFnNB8HAUyPnTG4PUDVcJq0lEnKnNxnqV3+Y="
+    },
+    {
+      "id": "webhook-multi-secret-headers",
+      "kind": "headers",
+      "webhookId": "evt_0192f0a0-1c2d-7e3f-8a4b-5c6d7e8f9012",
+      "timestampSeconds": 1700000001,
+      "body": "{\"id\":\"evt_0192f0a0-1c2d-7e3f-8a4b-5c6d7e8f9012\",\"type\":\"payment.succeeded\",\"created\":1700000001,\"data\":{\"attemptId\":\"0192f0a0-0000-7000-8000-000000000002\",\"amount\":\"10.0000\",\"currency\":\"LYD\"}}",
+      "secrets": [
+        "whsec_AwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dw=",
+        "whsec_//r18Ovm4dzX0s3Iw765tK+qpaCblpGMh4J9eHNuaWQ="
+      ],
+      "headers": {
+        "webhook-id": "evt_0192f0a0-1c2d-7e3f-8a4b-5c6d7e8f9012",
+        "webhook-timestamp": "1700000001",
+        "webhook-signature": "v1,EIwvFW8UGurGo2wPaQgMaPuTync7hMPOL+kXr43QH5o= v1,M7xaHcAySP4YjCXjw7IODGLgewBeRjbJzwb/v/HRyF0="
+      }
+    },
+    {
+      "id": "webhook-payment-succeeded",
+      "kind": "sign",
+      "webhookId": "evt_0192f0a0-1c2d-7e3f-8a4b-5c6d7e8f9012",
+      "timestampSeconds": 1700000001,
+      "body": "{\"id\":\"evt_0192f0a0-1c2d-7e3f-8a4b-5c6d7e8f9012\",\"type\":\"payment.succeeded\",\"created\":1700000001,\"data\":{\"attemptId\":\"0192f0a0-0000-7000-8000-000000000002\",\"amount\":\"10.0000\",\"currency\":\"LYD\"}}",
+      "secret": "whsec_AwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dw=",
+      "signature": "v1,EIwvFW8UGurGo2wPaQgMaPuTync7hMPOL+kXr43QH5o="
+    }
+  ]
+}

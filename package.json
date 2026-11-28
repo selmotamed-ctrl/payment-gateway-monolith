@@ -8,6 +8,9 @@
     "ui:icons": "bun scripts/generate-ui-icons.ts",
     "ui:icons:check": "bun scripts/generate-ui-icons.ts --check",
     "ui:test": "cd packages/ui && bun run test",
-    "ui:typecheck": "cd packages/ui && bun run typecheck"
+    "ui:typecheck": "cd packages/ui && bun run typecheck",
+    "rs:check": "cd backend-rs && cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings",
+    "rs:test": "cd backend-rs && cargo test --workspace",
+    "rs:build": "cd backend-rs && cargo build --release --workspace"
   }
 }

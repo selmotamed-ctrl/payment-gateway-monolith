@@ -1,0 +1,326 @@
+{
+  "generatedBy": "backend-rs/tools/golden/generate.ts",
+  "contract": "FNV-1a 32-bit over UTF-16 code units (core-back/lib/storageEngine/shardBalances.ts): offset 0x811c9dc5, prime 0x01000193, charCodeAt per unit. shards[count] = fnv1a32 % count; MERCHANT_WALLET is pinned to shard 0 (walletShard16).",
+  "cases": [
+    {
+      "id": "fnv-01",
+      "value": "",
+      "utf16CodeUnits": 0,
+      "fnv1a32": 2166136261,
+      "fnv1a32Hex": "811c9dc5",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 1,
+        "16": 5,
+        "32": 5,
+        "128": 69,
+        "256": 197
+      }
+    },
+    {
+      "id": "fnv-02",
+      "value": "a",
+      "utf16CodeUnits": 1,
+      "fnv1a32": 3826002220,
+      "fnv1a32Hex": "e40c292c",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 0,
+        "16": 12,
+        "32": 12,
+        "128": 44,
+        "256": 44
+      }
+    },
+    {
+      "id": "fnv-03",
+      "value": "foobar",
+      "utf16CodeUnits": 6,
+      "fnv1a32": 3214735720,
+      "fnv1a32Hex": "bf9cf968",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 0,
+        "16": 8,
+        "32": 8,
+        "128": 104,
+        "256": 104
+      }
+    },
+    {
+      "id": "fnv-04",
+      "value": "ref-1",
+      "utf16CodeUnits": 5,
+      "fnv1a32": 3467005988,
+      "fnv1a32Hex": "cea65024",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 0,
+        "16": 4,
+        "32": 4,
+        "128": 36,
+        "256": 36
+      }
+    },
+    {
+      "id": "fnv-05",
+      "value": "attempt-0192f0a0-1c2d-7e3f-8a4b-5c6d7e8f9012",
+      "utf16CodeUnits": 44,
+      "fnv1a32": 2871369844,
+      "fnv1a32Hex": "ab25a074",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 0,
+        "16": 4,
+        "32": 20,
+        "128": 116,
+        "256": 116
+      }
+    },
+    {
+      "id": "fnv-06",
+      "value": "payment:link:pl_8f14e45fceea167a",
+      "utf16CodeUnits": 32,
+      "fnv1a32": 1332081050,
+      "fnv1a32Hex": "4f65f19a",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 0,
+        "16": 10,
+        "32": 26,
+        "128": 26,
+        "256": 154
+      }
+    },
+    {
+      "id": "fnv-07",
+      "value": "route-1:link-abc",
+      "utf16CodeUnits": 16,
+      "fnv1a32": 2147667431,
+      "fnv1a32Hex": "8002cde7",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 1,
+        "16": 7,
+        "32": 7,
+        "128": 103,
+        "256": 231
+      }
+    },
+    {
+      "id": "fnv-08",
+      "value": "merchant:0192f0a0-0000-7000-8000-00000000abcd",
+      "utf16CodeUnits": 45,
+      "fnv1a32": 1198310469,
+      "fnv1a32Hex": "476cc445",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 1,
+        "16": 5,
+        "32": 5,
+        "128": 69,
+        "256": 69
+      }
+    },
+    {
+      "id": "fnv-09",
+      "value": "مرحبا",
+      "utf16CodeUnits": 5,
+      "fnv1a32": 3187805171,
+      "fnv1a32Hex": "be020bf3",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 1,
+        "16": 3,
+        "32": 19,
+        "128": 115,
+        "256": 243
+      }
+    },
+    {
+      "id": "fnv-10",
+      "value": "الدفع الإلكتروني",
+      "utf16CodeUnits": 16,
+      "fnv1a32": 1926418213,
+      "fnv1a32Hex": "72d2cf25",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 1,
+        "16": 5,
+        "32": 5,
+        "128": 37,
+        "256": 37
+      }
+    },
+    {
+      "id": "fnv-11",
+      "value": "فاتورة-12345",
+      "utf16CodeUnits": 12,
+      "fnv1a32": 2944251779,
+      "fnv1a32Hex": "af7db783",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 1,
+        "16": 3,
+        "32": 3,
+        "128": 3,
+        "256": 131
+      }
+    },
+    {
+      "id": "fnv-12",
+      "value": "مبلغ ١٢٣٤٥ دينار",
+      "utf16CodeUnits": 16,
+      "fnv1a32": 3290446236,
+      "fnv1a32Hex": "c420399c",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 0,
+        "16": 12,
+        "32": 28,
+        "128": 28,
+        "256": 156
+      }
+    },
+    {
+      "id": "fnv-13",
+      "value": "😀",
+      "utf16CodeUnits": 2,
+      "fnv1a32": 3409036472,
+      "fnv1a32Hex": "cb31c4b8",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 0,
+        "16": 8,
+        "32": 24,
+        "128": 56,
+        "256": 184
+      }
+    },
+    {
+      "id": "fnv-14",
+      "value": "😀😀😀",
+      "utf16CodeUnits": 6,
+      "fnv1a32": 2480147504,
+      "fnv1a32Hex": "93d40c30",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 0,
+        "16": 0,
+        "32": 16,
+        "128": 48,
+        "256": 48
+      }
+    },
+    {
+      "id": "fnv-15",
+      "value": "𐍈",
+      "utf16CodeUnits": 2,
+      "fnv1a32": 1847805685,
+      "fnv1a32Hex": "6e2346f5",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 1,
+        "16": 5,
+        "32": 21,
+        "128": 117,
+        "256": 245
+      }
+    },
+    {
+      "id": "fnv-16",
+      "value": "a😀b",
+      "utf16CodeUnits": 4,
+      "fnv1a32": 2412414209,
+      "fnv1a32Hex": "8fca8501",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 1,
+        "16": 1,
+        "32": 1,
+        "128": 1,
+        "256": 1
+      }
+    },
+    {
+      "id": "fnv-17",
+      "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "utf16CodeUnits": 300,
+      "fnv1a32": 2533439733,
+      "fnv1a32Hex": "970138f5",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 1,
+        "16": 5,
+        "32": 21,
+        "128": 117,
+        "256": 245
+      }
+    },
+    {
+      "id": "fnv-18",
+      "value": "عقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقدعقد",
+      "utf16CodeUnits": 360,
+      "fnv1a32": 3981292549,
+      "fnv1a32Hex": "ed4db405",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 1,
+        "16": 5,
+        "32": 5,
+        "128": 5,
+        "256": 5
+      }
+    },
+    {
+      "id": "fnv-19",
+      "value": "  spaces and\ttab\nnewline  ",
+      "utf16CodeUnits": 26,
+      "fnv1a32": 2702418287,
+      "fnv1a32Hex": "a113a16f",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 1,
+        "16": 15,
+        "32": 15,
+        "128": 111,
+        "256": 111
+      }
+    },
+    {
+      "id": "fnv-20",
+      "value": "nul\u0000byte",
+      "utf16CodeUnits": 8,
+      "fnv1a32": 196272570,
+      "fnv1a32Hex": "0bb2e1ba",
+      "walletShard16": 0,
+      "shards": {
+        "1": 0,
+        "2": 0,
+        "16": 10,
+        "32": 26,
+        "128": 58,
+        "256": 186
+      }
+    }
+  ]
+}

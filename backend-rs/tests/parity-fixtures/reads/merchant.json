@@ -1,0 +1,44 @@
+{
+  "$comment": "Deterministic merchant read smoke cases. The synthetic session token only carries the edge audience; the fake core does not verify signatures.",
+  "channel": "merchant",
+  "cases": [
+    {
+      "name": "payments list",
+      "method": "GET",
+      "path": "/api/v1/merchant/payments?page=1&pageSize=20",
+      "headers": {
+        "accept": "application/json",
+        "authorization": "Bearer {{PARITY_MERCHANT_TOKEN}}",
+        "user-agent": "parity-harness/1",
+        "x-request-id": "parity-merchant-0001",
+        "x-forwarded-for": "203.0.113.11"
+      },
+      "notes": "List envelope: page/pageSize/total plus a generated item id and timestamps."
+    },
+    {
+      "name": "payment links list",
+      "method": "GET",
+      "path": "/api/v1/merchant/links?page=1&pageSize=20",
+      "headers": {
+        "accept": "application/json",
+        "authorization": "Bearer {{PARITY_MERCHANT_TOKEN}}",
+        "user-agent": "parity-harness/1",
+        "x-request-id": "parity-merchant-0002",
+        "x-forwarded-for": "203.0.113.11"
+      }
+    },
+    {
+      "name": "wallets list",
+      "method": "GET",
+      "path": "/api/v1/merchant/wallets",
+      "headers": {
+        "accept": "application/json",
+        "authorization": "Bearer {{PARITY_MERCHANT_TOKEN}}",
+        "user-agent": "parity-harness/1",
+        "x-request-id": "parity-merchant-0003",
+        "x-forwarded-for": "203.0.113.11"
+      },
+      "notes": "Money values are strings and must compare exactly (no normalisation)."
+    }
+  ]
+}

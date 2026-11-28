@@ -1,0 +1,96 @@
+{
+  "generatedBy": "backend-rs/tools/golden/generate.ts",
+  "contract": "JavaScript Date#toISOString(): UTC, exactly three fraction digits (milliseconds, truncated), 'Z' suffix, expanded six-digit years outside 0000-9999. invalid cases throw RangeError. iso-date-only is parsed as UTC midnight per ECMA-262.",
+  "cases": [
+    {
+      "id": "2023-11-14T22-13-20-123Z",
+      "kind": "epochMs",
+      "input": 1700000000123,
+      "epochMs": 1700000000123,
+      "iso": "2023-11-14T22:13:20.123Z"
+    },
+    {
+      "id": "2023-11-14T22-13-20Z",
+      "kind": "epochMs",
+      "input": 1700000000000,
+      "epochMs": 1700000000000,
+      "iso": "2023-11-14T22:13:20.000Z"
+    },
+    {
+      "id": "before-epoch-minus-one-ms",
+      "kind": "epochMs",
+      "input": -1,
+      "epochMs": -1,
+      "iso": "1969-12-31T23:59:59.999Z"
+    },
+    {
+      "id": "epoch-plus-one-ms",
+      "kind": "epochMs",
+      "input": 1,
+      "epochMs": 1,
+      "iso": "1970-01-01T00:00:00.001Z"
+    },
+    {
+      "id": "epoch-zero",
+      "kind": "epochMs",
+      "input": 0,
+      "epochMs": 0,
+      "iso": "1970-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "invalid-nan",
+      "kind": "invalid",
+      "input": null,
+      "error": "RangeError"
+    },
+    {
+      "id": "iso-date-only",
+      "kind": "iso",
+      "input": "2026-11-28",
+      "epochMs": 1795824000000,
+      "iso": "2026-11-28T00:00:00.000Z"
+    },
+    {
+      "id": "iso-fraction-one-digit",
+      "kind": "iso",
+      "input": "2026-11-28T10:20:30.1Z",
+      "epochMs": 1795861230100,
+      "iso": "2026-11-28T10:20:30.100Z"
+    },
+    {
+      "id": "iso-fraction-six-digits",
+      "kind": "iso",
+      "input": "2026-11-28T10:20:30.123456Z",
+      "epochMs": 1795861230123,
+      "iso": "2026-11-28T10:20:30.123Z"
+    },
+    {
+      "id": "iso-fraction-two-digits",
+      "kind": "iso",
+      "input": "2026-11-28T10:20:30.12Z",
+      "epochMs": 1795861230120,
+      "iso": "2026-11-28T10:20:30.120Z"
+    },
+    {
+      "id": "max-date",
+      "kind": "epochMs",
+      "input": 8640000000000000,
+      "epochMs": 8640000000000000,
+      "iso": "+275760-09-13T00:00:00.000Z"
+    },
+    {
+      "id": "year-1900",
+      "kind": "epochMs",
+      "input": -2208988800000,
+      "epochMs": -2208988800000,
+      "iso": "1900-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "year-9999",
+      "kind": "epochMs",
+      "input": 253402300799999,
+      "epochMs": 253402300799999,
+      "iso": "9999-12-31T23:59:59.999Z"
+    }
+  ]
+}

@@ -217,24 +217,47 @@ export interface ProductionWorkerRuntime {
 export interface BackgroundJobGating {
   workerEnabled: boolean;
   backgroundJobsEnabled: boolean;
+  /** Set when the Rust worker runtime (or another process) drains `background_jobs` (P0-T03). */
+  backgroundJobsDrainedExternally?: boolean;
 }
 
 export const assertBackgroundJobQueueDrainable = (gating: BackgroundJobGating): void => {
-  if (!gating.workerEnabled) {
+  const drainedExternally = gating.backgroundJobsDrainedExternally === true;
+  if (!gating.workerEnabled && !drainedExternally) {
     throw new Error(
       "Refusing to start core-back: WORKER_ENABLED is disabled while the statement " +
         "upload and the dispute intake are queue-only routes (202 Accepted). " +
-        "Enable WORKER_ENABLED or jobs will be accepted and never executed.",
+        "Enable WORKER_ENABLED, set WORKER_BACKGROUND_JOBS_DRAINED_EXTERNALLY=true, or jobs " +
+        "will be accepted and never executed.",
     );
   }
-  if (!gating.backgroundJobsEnabled) {
+  if (!gating.backgroundJobsEnabled && !drainedExternally) {
     throw new Error(
       "Refusing to start core-back: WORKER_BACKGROUND_JOBS_ENABLED is disabled while " +
         "the statement upload and the dispute intake are queue-only routes (202 Accepted). " +
-        "Every queued job would be stranded without a drain.",
+        "Every queued job would be stranded without a drain. Set " +
+        "WORKER_BACKGROUND_JOBS_DRAINED_EXTERNALLY=true when another runtime drains the queue.",
     );
   }
 };
+
+/** P0-T03: remove the workers a deployment handed to another process. */
+export const workerName = (worker: unknown): string | undefined => {
+  if (typeof worker !== "object" || worker === null || !("name" in worker)) {
+    return undefined;
+  }
+  const name = (worker as { name?: unknown }).name;
+  return typeof name === "string" ? name : undefined;
+};
+
+export const filterDisabledWorkers = <T>(
+  workers: readonly T[],
+  disabled: ReadonlySet<string>,
+): T[] =>
+  workers.filter((worker) => {
+    const name = workerName(worker);
+    return name === undefined || !disabled.has(name);
+  });
 
 /** The default age of the oldest queued job that the health probe tolerates. */
 export const DEFAULT_QUEUE_AGE_THRESHOLD_MS = 300_000;
@@ -802,15 +825,31 @@ export const createProductionWorkerRuntime = (
   });
   options.storage?.leaderElection?.setExpected?.(expectedLeaderKeys);
 
+  // P0-T03: a deployment can hand one or more workers to another process without changing the
+  // rest of the runtime. Disabled workers never start and are absent from `/health.workers`.
+  const disabledWorkers = new Set(env.WORKER_DISABLED);
+  const activeWorkers = filterDisabledWorkers(workers, disabledWorkers);
+  if (disabledWorkers.size > 0) {
+    const known = new Set(
+      workers
+        .map(workerName)
+        .filter((name): name is string => name !== undefined),
+    );
+    const unknown = [...disabledWorkers].filter((name) => !known.has(name));
+    console.log(
+      `Workers disabled by WORKER_DISABLED: ${[...disabledWorkers].join(", ") || "none"}` +
+        (unknown.length > 0 ? ` (unknown names: ${unknown.join(", ")})` : ""),
+    );
+  }
   return {
-    workers,
+    workers: activeWorkers,
     start: () => {
-      for (const worker of workers) {
+      for (const worker of activeWorkers) {
         worker.start();
       }
     },
     stop: () => {
-      for (const worker of workers) {
+      for (const worker of activeWorkers) {
         worker.stop();
       }
     },

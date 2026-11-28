@@ -1,0 +1,11 @@
+{
+  "name": "@pg/route-inventory",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "P0-T04 route, error-code and environment inventory for the Rust/ntex port",
+  "scripts": {
+    "inventory": "bun index.ts",
+    "check": "bun index.ts --check"
+  }
+}

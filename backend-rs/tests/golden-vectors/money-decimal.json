@@ -1,0 +1,637 @@
+{
+  "generatedBy": "backend-rs/tools/golden/generate.ts",
+  "contract": "decimal.js (the class behind Prisma.Decimal) at default precision 20. decimalToString = Decimal#toString (negative zero prints '0'); toFixed4 = Decimal#toFixed(4) with the default ROUND_HALF_UP; prismaJson.v = JSON.stringify(Prisma.Decimal) (negative zero prints '-0'). Rounding = toDecimalPlaces(4, mode) with the commission mapping of core-back/api/internal/checkout.ts:368-387.",
+  "notes": [
+    "decimal.js accepts exponent notation and negative zero; rust_decimal 1.43 FromStr falls back to from_scientific_lossy for e/E inputs (seven cases), and Decimal::from_scientific is the exact route.",
+    "toFixed(4) is decimal.js ROUND_HALF_UP at 4 dp and never prints the sign of zero; rust_decimal round_dp defaults to MidpointNearestEven and keeps -0."
+  ],
+  "cases": [
+    {
+      "id": "commission-01",
+      "kind": "commission",
+      "amount": "2469.13",
+      "percentageRate": "0.005",
+      "mode": "HALF_UP",
+      "decimalMode": "ROUND_HALF_UP",
+      "raw": "12.34565",
+      "commission": "12.3457",
+      "commissionToString": "12.3457"
+    },
+    {
+      "id": "commission-02",
+      "kind": "commission",
+      "amount": "2469.13",
+      "percentageRate": "0.005",
+      "mode": "HALF_EVEN",
+      "decimalMode": "ROUND_HALF_EVEN",
+      "raw": "12.34565",
+      "commission": "12.3456",
+      "commissionToString": "12.3456"
+    },
+    {
+      "id": "commission-03",
+      "kind": "commission",
+      "amount": "2469.13",
+      "percentageRate": "0.005",
+      "mode": "HALF_DOWN",
+      "decimalMode": "ROUND_HALF_DOWN",
+      "raw": "12.34565",
+      "commission": "12.3456",
+      "commissionToString": "12.3456"
+    },
+    {
+      "id": "commission-04",
+      "kind": "commission",
+      "amount": "2469.13",
+      "percentageRate": "0.005",
+      "mode": "UP",
+      "decimalMode": "ROUND_UP",
+      "raw": "12.34565",
+      "commission": "12.3457",
+      "commissionToString": "12.3457"
+    },
+    {
+      "id": "commission-05",
+      "kind": "commission",
+      "amount": "2469.13",
+      "percentageRate": "0.005",
+      "mode": "DOWN",
+      "decimalMode": "ROUND_DOWN",
+      "raw": "12.34565",
+      "commission": "12.3456",
+      "commissionToString": "12.3456"
+    },
+    {
+      "id": "commission-06",
+      "kind": "commission",
+      "amount": "2469.13",
+      "percentageRate": "0.005",
+      "mode": "CEILING",
+      "decimalMode": "ROUND_CEIL",
+      "raw": "12.34565",
+      "commission": "12.3457",
+      "commissionToString": "12.3457"
+    },
+    {
+      "id": "commission-07",
+      "kind": "commission",
+      "amount": "2469.13",
+      "percentageRate": "0.005",
+      "mode": "FLOOR",
+      "decimalMode": "ROUND_FLOOR",
+      "raw": "12.34565",
+      "commission": "12.3456",
+      "commissionToString": "12.3456"
+    },
+    {
+      "id": "decimal-01",
+      "kind": "decimal",
+      "input": "0",
+      "decimalToString": "0",
+      "toFixed4": "0.0000",
+      "prismaJson": {
+        "v": "0"
+      }
+    },
+    {
+      "id": "decimal-02",
+      "kind": "decimal",
+      "input": "-0",
+      "decimalToString": "0",
+      "toFixed4": "0.0000",
+      "prismaJson": {
+        "v": "-0"
+      }
+    },
+    {
+      "id": "decimal-03",
+      "kind": "decimal",
+      "input": "0.0000",
+      "decimalToString": "0",
+      "toFixed4": "0.0000",
+      "prismaJson": {
+        "v": "0"
+      }
+    },
+    {
+      "id": "decimal-04",
+      "kind": "decimal",
+      "input": "-0.0000",
+      "decimalToString": "0",
+      "toFixed4": "0.0000",
+      "prismaJson": {
+        "v": "-0"
+      }
+    },
+    {
+      "id": "decimal-05",
+      "kind": "decimal",
+      "input": "0.0001",
+      "decimalToString": "0.0001",
+      "toFixed4": "0.0001",
+      "prismaJson": {
+        "v": "0.0001"
+      }
+    },
+    {
+      "id": "decimal-06",
+      "kind": "decimal",
+      "input": "-0.0001",
+      "decimalToString": "-0.0001",
+      "toFixed4": "-0.0001",
+      "prismaJson": {
+        "v": "-0.0001"
+      }
+    },
+    {
+      "id": "decimal-07",
+      "kind": "decimal",
+      "input": "0.00001",
+      "decimalToString": "0.00001",
+      "toFixed4": "0.0000",
+      "prismaJson": {
+        "v": "0.00001"
+      }
+    },
+    {
+      "id": "decimal-08",
+      "kind": "decimal",
+      "input": "0.00005",
+      "decimalToString": "0.00005",
+      "toFixed4": "0.0001",
+      "prismaJson": {
+        "v": "0.00005"
+      }
+    },
+    {
+      "id": "decimal-09",
+      "kind": "decimal",
+      "input": "1",
+      "decimalToString": "1",
+      "toFixed4": "1.0000",
+      "prismaJson": {
+        "v": "1"
+      }
+    },
+    {
+      "id": "decimal-10",
+      "kind": "decimal",
+      "input": "-1",
+      "decimalToString": "-1",
+      "toFixed4": "-1.0000",
+      "prismaJson": {
+        "v": "-1"
+      }
+    },
+    {
+      "id": "decimal-11",
+      "kind": "decimal",
+      "input": "1.5",
+      "decimalToString": "1.5",
+      "toFixed4": "1.5000",
+      "prismaJson": {
+        "v": "1.5"
+      }
+    },
+    {
+      "id": "decimal-12",
+      "kind": "decimal",
+      "input": "-1.5",
+      "decimalToString": "-1.5",
+      "toFixed4": "-1.5000",
+      "prismaJson": {
+        "v": "-1.5"
+      }
+    },
+    {
+      "id": "decimal-13",
+      "kind": "decimal",
+      "input": "1.2300",
+      "decimalToString": "1.23",
+      "toFixed4": "1.2300",
+      "prismaJson": {
+        "v": "1.23"
+      }
+    },
+    {
+      "id": "decimal-14",
+      "kind": "decimal",
+      "input": "100.0000",
+      "decimalToString": "100",
+      "toFixed4": "100.0000",
+      "prismaJson": {
+        "v": "100"
+      }
+    },
+    {
+      "id": "decimal-15",
+      "kind": "decimal",
+      "input": "12345678901234.1234",
+      "decimalToString": "12345678901234.1234",
+      "toFixed4": "12345678901234.1234",
+      "prismaJson": {
+        "v": "12345678901234.1234"
+      }
+    },
+    {
+      "id": "decimal-16",
+      "kind": "decimal",
+      "input": "12345678901234.1235",
+      "decimalToString": "12345678901234.1235",
+      "toFixed4": "12345678901234.1235",
+      "prismaJson": {
+        "v": "12345678901234.1235"
+      }
+    },
+    {
+      "id": "decimal-17",
+      "kind": "decimal",
+      "input": "-12345678901234.1234",
+      "decimalToString": "-12345678901234.1234",
+      "toFixed4": "-12345678901234.1234",
+      "prismaJson": {
+        "v": "-12345678901234.1234"
+      }
+    },
+    {
+      "id": "decimal-18",
+      "kind": "decimal",
+      "input": "99999999999999.9999",
+      "decimalToString": "99999999999999.9999",
+      "toFixed4": "99999999999999.9999",
+      "prismaJson": {
+        "v": "99999999999999.9999"
+      }
+    },
+    {
+      "id": "decimal-19",
+      "kind": "decimal",
+      "input": "0.1234",
+      "decimalToString": "0.1234",
+      "toFixed4": "0.1234",
+      "prismaJson": {
+        "v": "0.1234"
+      }
+    },
+    {
+      "id": "decimal-20",
+      "kind": "decimal",
+      "input": "0.12345",
+      "decimalToString": "0.12345",
+      "toFixed4": "0.1235",
+      "prismaJson": {
+        "v": "0.12345"
+      }
+    },
+    {
+      "id": "decimal-21",
+      "kind": "decimal",
+      "input": "1.23445",
+      "decimalToString": "1.23445",
+      "toFixed4": "1.2345",
+      "prismaJson": {
+        "v": "1.23445"
+      }
+    },
+    {
+      "id": "decimal-22",
+      "kind": "decimal",
+      "input": "2.34555",
+      "decimalToString": "2.34555",
+      "toFixed4": "2.3456",
+      "prismaJson": {
+        "v": "2.34555"
+      }
+    },
+    {
+      "id": "decimal-23",
+      "kind": "decimal",
+      "input": "1e3",
+      "decimalToString": "1000",
+      "toFixed4": "1000.0000",
+      "prismaJson": {
+        "v": "1000"
+      }
+    },
+    {
+      "id": "decimal-24",
+      "kind": "decimal",
+      "input": "1e-3",
+      "decimalToString": "0.001",
+      "toFixed4": "0.0010",
+      "prismaJson": {
+        "v": "0.001"
+      }
+    },
+    {
+      "id": "decimal-25",
+      "kind": "decimal",
+      "input": "1e20",
+      "decimalToString": "100000000000000000000",
+      "toFixed4": "100000000000000000000.0000",
+      "prismaJson": {
+        "v": "100000000000000000000"
+      }
+    },
+    {
+      "id": "decimal-26",
+      "kind": "decimal",
+      "input": "1e21",
+      "decimalToString": "1e+21",
+      "toFixed4": "1000000000000000000000.0000",
+      "prismaJson": {
+        "v": "1e+21"
+      }
+    },
+    {
+      "id": "decimal-27",
+      "kind": "decimal",
+      "input": "1e-7",
+      "decimalToString": "1e-7",
+      "toFixed4": "0.0000",
+      "prismaJson": {
+        "v": "1e-7"
+      }
+    },
+    {
+      "id": "decimal-28",
+      "kind": "decimal",
+      "input": "1.5e-7",
+      "decimalToString": "1.5e-7",
+      "toFixed4": "0.0000",
+      "prismaJson": {
+        "v": "1.5e-7"
+      }
+    },
+    {
+      "id": "decimal-29",
+      "kind": "decimal",
+      "input": "9.999999999999999e20",
+      "decimalToString": "999999999999999900000",
+      "toFixed4": "999999999999999900000.0000",
+      "prismaJson": {
+        "v": "999999999999999900000"
+      }
+    },
+    {
+      "id": "decimal-30",
+      "kind": "decimal",
+      "input": "12.3456789012345678",
+      "decimalToString": "12.3456789012345678",
+      "toFixed4": "12.3457",
+      "prismaJson": {
+        "v": "12.3456789012345678"
+      }
+    },
+    {
+      "id": "rounding-01",
+      "kind": "rounding",
+      "value": "0.12345",
+      "mode": "HALF_UP",
+      "decimalMode": "ROUND_HALF_UP",
+      "decimalModeConstant": 4,
+      "rounded": "0.1235",
+      "roundedToString": "0.1235"
+    },
+    {
+      "id": "rounding-02",
+      "kind": "rounding",
+      "value": "0.12345",
+      "mode": "HALF_EVEN",
+      "decimalMode": "ROUND_HALF_EVEN",
+      "decimalModeConstant": 6,
+      "rounded": "0.1234",
+      "roundedToString": "0.1234"
+    },
+    {
+      "id": "rounding-03",
+      "kind": "rounding",
+      "value": "0.12345",
+      "mode": "HALF_DOWN",
+      "decimalMode": "ROUND_HALF_DOWN",
+      "decimalModeConstant": 5,
+      "rounded": "0.1234",
+      "roundedToString": "0.1234"
+    },
+    {
+      "id": "rounding-04",
+      "kind": "rounding",
+      "value": "0.12345",
+      "mode": "UP",
+      "decimalMode": "ROUND_UP",
+      "decimalModeConstant": 0,
+      "rounded": "0.1235",
+      "roundedToString": "0.1235"
+    },
+    {
+      "id": "rounding-05",
+      "kind": "rounding",
+      "value": "0.12345",
+      "mode": "DOWN",
+      "decimalMode": "ROUND_DOWN",
+      "decimalModeConstant": 1,
+      "rounded": "0.1234",
+      "roundedToString": "0.1234"
+    },
+    {
+      "id": "rounding-06",
+      "kind": "rounding",
+      "value": "0.12345",
+      "mode": "CEILING",
+      "decimalMode": "ROUND_CEIL",
+      "decimalModeConstant": 2,
+      "rounded": "0.1235",
+      "roundedToString": "0.1235"
+    },
+    {
+      "id": "rounding-07",
+      "kind": "rounding",
+      "value": "0.12345",
+      "mode": "FLOOR",
+      "decimalMode": "ROUND_FLOOR",
+      "decimalModeConstant": 3,
+      "rounded": "0.1234",
+      "roundedToString": "0.1234"
+    },
+    {
+      "id": "rounding-08",
+      "kind": "rounding",
+      "value": "1.23445",
+      "mode": "HALF_UP",
+      "decimalMode": "ROUND_HALF_UP",
+      "decimalModeConstant": 4,
+      "rounded": "1.2345",
+      "roundedToString": "1.2345"
+    },
+    {
+      "id": "rounding-09",
+      "kind": "rounding",
+      "value": "1.23445",
+      "mode": "HALF_EVEN",
+      "decimalMode": "ROUND_HALF_EVEN",
+      "decimalModeConstant": 6,
+      "rounded": "1.2344",
+      "roundedToString": "1.2344"
+    },
+    {
+      "id": "rounding-10",
+      "kind": "rounding",
+      "value": "1.23445",
+      "mode": "HALF_DOWN",
+      "decimalMode": "ROUND_HALF_DOWN",
+      "decimalModeConstant": 5,
+      "rounded": "1.2344",
+      "roundedToString": "1.2344"
+    },
+    {
+      "id": "rounding-11",
+      "kind": "rounding",
+      "value": "1.23445",
+      "mode": "UP",
+      "decimalMode": "ROUND_UP",
+      "decimalModeConstant": 0,
+      "rounded": "1.2345",
+      "roundedToString": "1.2345"
+    },
+    {
+      "id": "rounding-12",
+      "kind": "rounding",
+      "value": "1.23445",
+      "mode": "DOWN",
+      "decimalMode": "ROUND_DOWN",
+      "decimalModeConstant": 1,
+      "rounded": "1.2344",
+      "roundedToString": "1.2344"
+    },
+    {
+      "id": "rounding-13",
+      "kind": "rounding",
+      "value": "1.23445",
+      "mode": "CEILING",
+      "decimalMode": "ROUND_CEIL",
+      "decimalModeConstant": 2,
+      "rounded": "1.2345",
+      "roundedToString": "1.2345"
+    },
+    {
+      "id": "rounding-14",
+      "kind": "rounding",
+      "value": "1.23445",
+      "mode": "FLOOR",
+      "decimalMode": "ROUND_FLOOR",
+      "decimalModeConstant": 3,
+      "rounded": "1.2344",
+      "roundedToString": "1.2344"
+    },
+    {
+      "id": "rounding-15",
+      "kind": "rounding",
+      "value": "-2.34555",
+      "mode": "HALF_UP",
+      "decimalMode": "ROUND_HALF_UP",
+      "decimalModeConstant": 4,
+      "rounded": "-2.3456",
+      "roundedToString": "-2.3456"
+    },
+    {
+      "id": "rounding-16",
+      "kind": "rounding",
+      "value": "-2.34555",
+      "mode": "HALF_EVEN",
+      "decimalMode": "ROUND_HALF_EVEN",
+      "decimalModeConstant": 6,
+      "rounded": "-2.3456",
+      "roundedToString": "-2.3456"
+    },
+    {
+      "id": "rounding-17",
+      "kind": "rounding",
+      "value": "-2.34555",
+      "mode": "HALF_DOWN",
+      "decimalMode": "ROUND_HALF_DOWN",
+      "decimalModeConstant": 5,
+      "rounded": "-2.3455",
+      "roundedToString": "-2.3455"
+    },
+    {
+      "id": "rounding-18",
+      "kind": "rounding",
+      "value": "-2.34555",
+      "mode": "UP",
+      "decimalMode": "ROUND_UP",
+      "decimalModeConstant": 0,
+      "rounded": "-2.3456",
+      "roundedToString": "-2.3456"
+    },
+    {
+      "id": "rounding-19",
+      "kind": "rounding",
+      "value": "-2.34555",
+      "mode": "DOWN",
+      "decimalMode": "ROUND_DOWN",
+      "decimalModeConstant": 1,
+      "rounded": "-2.3455",
+      "roundedToString": "-2.3455"
+    },
+    {
+      "id": "rounding-20",
+      "kind": "rounding",
+      "value": "-2.34555",
+      "mode": "CEILING",
+      "decimalMode": "ROUND_CEIL",
+      "decimalModeConstant": 2,
+      "rounded": "-2.3455",
+      "roundedToString": "-2.3455"
+    },
+    {
+      "id": "rounding-21",
+      "kind": "rounding",
+      "value": "-2.34555",
+      "mode": "FLOOR",
+      "decimalMode": "ROUND_FLOOR",
+      "decimalModeConstant": 3,
+      "rounded": "-2.3456",
+      "roundedToString": "-2.3456"
+    },
+    {
+      "id": "rounding-alias-01",
+      "kind": "roundingAlias",
+      "inputMode": "BANKERS",
+      "resolvedMode": "HALF_EVEN",
+      "decimalMode": "ROUND_HALF_EVEN",
+      "decimalModeConstant": 6,
+      "value": "1.23445",
+      "rounded": "1.2344"
+    },
+    {
+      "id": "rounding-alias-02",
+      "kind": "roundingAlias",
+      "inputMode": "CEIL",
+      "resolvedMode": "CEILING",
+      "decimalMode": "ROUND_CEIL",
+      "decimalModeConstant": 2,
+      "value": "1.23445",
+      "rounded": "1.2345"
+    },
+    {
+      "id": "rounding-alias-03",
+      "kind": "roundingAlias",
+      "inputMode": "ROUND_UP",
+      "resolvedMode": "UP",
+      "decimalMode": "ROUND_UP",
+      "decimalModeConstant": 0,
+      "value": "1.23445",
+      "rounded": "1.2345"
+    },
+    {
+      "id": "rounding-alias-04",
+      "kind": "roundingAlias",
+      "inputMode": "NONSENSE",
+      "resolvedMode": "HALF_UP",
+      "decimalMode": "ROUND_HALF_UP",
+      "decimalModeConstant": 4,
+      "value": "1.23445",
+      "rounded": "1.2345"
+    }
+  ]
+}

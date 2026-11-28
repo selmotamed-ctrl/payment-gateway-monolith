@@ -315,6 +315,7 @@ export const start = async () => {
   assertBackgroundJobQueueDrainable({
     workerEnabled: env.WORKER_ENABLED,
     backgroundJobsEnabled: env.WORKER_BACKGROUND_JOBS_ENABLED,
+    backgroundJobsDrainedExternally: env.WORKER_BACKGROUND_JOBS_DRAINED_EXTERNALLY,
   });
   const closeInvalidationTransport = await configureRedisInvalidation();
   const server = createHttpsServer();

@@ -1,0 +1,54 @@
+{
+  "$comment": "Deterministic checkout read smoke cases. Every case must reach the fake core exactly once.",
+  "channel": "checkout",
+  "cases": [
+    {
+      "name": "payer link view",
+      "method": "GET",
+      "path": "/api/v1/pay/LNKPARITY01",
+      "headers": {
+        "accept": "application/json",
+        "user-agent": "parity-harness/1",
+        "x-request-id": "parity-checkout-0001",
+        "x-forwarded-for": "203.0.113.10"
+      },
+      "notes": "GET /internal/checkout/pay/:linkKey; response carries a generated UUID, timestamps and a set-like visible_rails array."
+    },
+    {
+      "name": "attempt log timeline",
+      "method": "GET",
+      "path": "/api/v1/pay/LNKPARITY01/logs/ATT-PARITY-0001",
+      "headers": {
+        "accept": "application/json",
+        "user-agent": "parity-harness/1",
+        "x-request-id": "parity-checkout-0002",
+        "x-forwarded-for": "203.0.113.10"
+      },
+      "notes": "Timeline entries contain timestamps (default drop rule applies)."
+    },
+    {
+      "name": "browser return redirect",
+      "method": "GET",
+      "path": "/api/v1/return/RETPARITYTOKEN01",
+      "headers": {
+        "accept": "application/json",
+        "user-agent": "parity-harness/1",
+        "x-request-id": "parity-checkout-0003",
+        "x-forwarded-for": "203.0.113.10"
+      },
+      "notes": "Edge builds a Location header; the normaliser compares it (allowlist) after placeholder replacement."
+    },
+    {
+      "name": "public certificate verification",
+      "method": "GET",
+      "path": "/api/v1/verify/certificate/ABCDEF0123456789",
+      "headers": {
+        "accept": "application/json",
+        "user-agent": "parity-harness/1",
+        "x-request-id": "parity-checkout-0004",
+        "x-forwarded-for": "203.0.113.10"
+      },
+      "notes": "Certificate payload has earnedAt/expiresAt timestamps and a request id."
+    }
+  ]
+}

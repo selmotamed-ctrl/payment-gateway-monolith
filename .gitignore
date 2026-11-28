@@ -29,3 +29,5 @@ deploy.env
 **/blob-report/
 **/tsconfig.tsbuildinfo
 **/.report-assets
+# Rust port build output
+backend-rs/target/

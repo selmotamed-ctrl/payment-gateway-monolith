@@ -17,7 +17,7 @@
 
 `index.ts` exposes `createApp()`, `createHttpsServer()` and `start()`:
 
-1. `assertBackgroundJobQueueDrainable()` refuses to boot when `WORKER_ENABLED` or `WORKER_BACKGROUND_JOBS_ENABLED` is false. Statement upload and dispute intake are queue-only routes; accepting work without a drain would strand it.
+1. `assertBackgroundJobQueueDrainable()` refuses to boot when `WORKER_ENABLED` or `WORKER_BACKGROUND_JOBS_ENABLED` is false. Statement upload and dispute intake are queue-only routes; accepting work without a drain would strand it. A deployment that hands the queue to the Rust worker runtime sets `WORKER_BACKGROUND_JOBS_DRAINED_EXTERNALLY=true`. `WORKER_DISABLED` (comma-separated class names) starts only the named-off subset and removes them from `/health.workers`.
 2. `configureRedisInvalidation()` connects a publisher and subscriber when `REDIS_URL` or the first `REDIS_NODES` entry is configured. A Redis failure logs a warning and leaves invalidation process-local.
 3. `createHttpsServer()` builds the Express app, reads the server key, certificate and internal CA, and creates the TLS 1.3 listener with `requestCert: true` and `rejectUnauthorized: true`.
 4. `getStorageEngine()` creates the process-wide storage engine: primary Prisma client, optional replica clients, read store, unit of work, cache/velocity adapter, audit driver and log sink.

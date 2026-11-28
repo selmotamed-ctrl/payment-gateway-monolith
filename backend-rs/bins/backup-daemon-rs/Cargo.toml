@@ -1,0 +1,40 @@
+[package]
+name = "backup-daemon-rs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "backup_daemon"
+path = "src/lib.rs"
+
+[[bin]]
+name = "backup-daemon-rs"
+path = "src/main.rs"
+
+[dependencies]
+ntex.workspace = true
+ntex-tls.workspace = true
+tokio.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+hkdf.workspace = true
+aes-gcm.workspace = true
+hex.workspace = true
+tempfile.workspace = true
+pg-config.workspace = true
+pg-mtls.workspace = true
+
+mimalloc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

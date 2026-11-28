@@ -1,0 +1,180 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/pg-config",
+  "crates/pg-types",
+  "crates/pg-crypto",
+  "crates/pg-http",
+  "crates/pg-mtls",
+  "crates/pg-db",
+  "crates/pg-redis",
+  "crates/pg-objstore",
+  "crates/pg-upstream",
+  "crates/pg-edge",
+  "crates/pg-domain-auth",
+  "crates/pg-domain-flow",
+  "crates/pg-domain-ledger",
+  "crates/pg-ledger",
+  "crates/pg-flow-engine",
+  "crates/pg-domain-gov",
+  "crates/pg-domain-comms",
+  "crates/pg-domain-recon",
+  "crates/pg-domain-academy",
+  "crates/pg-egress",
+  "crates/pg-workers",
+  "crates/pg-report-engine",
+  "crates/pg-compliance",
+  "crates/pg-office",
+  "crates/pg-search",
+  "crates/pg-deploy-config",
+  "crates/pg-deploy-plan",
+  "bins/core-rs",
+  "bins/admin-edge",
+  "bins/merchant-edge",
+  "bins/checkout-edge",
+  "bins/fake-rails-rs",
+  "bins/backup-daemon-rs",
+  "bins/wal-fetch",
+  "bins/object-storage-daemon-rs",
+  "bins/pgctl",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.97"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+# HTTP / runtime (chapter 3 §12)
+ntex = { version = "4.11.1", features = ["tokio", "rustls", "compress", "cookie"] }
+ntex-tls = { version = "4.9.0", default-features = false, features = ["rustls"] }
+tokio = { version = "1.54.1", features = ["full"] }
+tokio-util = { version = "0.7.20", features = ["io"] }
+futures-util = "0.3"
+async-trait = "0.1.92"
+bytes = "1"
+http = "1"
+
+# TLS / X.509
+rustls = { version = "0.23.46", default-features = false, features = ["std", "ring"] }
+rustls-pemfile = "2.2"
+rustls-pki-types = "1.16"
+x509-parser = "0.18.1"
+rcgen = "0.14.10"
+
+# Serialisation
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+toml = "1.2"
+ryu-js = "1.0.4"
+schemars = "1.2.3"
+
+# Money / time / ids
+rust_decimal = { version = "1.43", features = ["serde-with-str"] }
+bigdecimal = "0.4.11"
+num-bigint = "0.5.1"
+chrono = { version = "0.4.45", features = ["serde"] }
+chrono-tz = "0.10.4"
+uuid = { version = "1.29.3", features = ["v4", "v7", "serde"] }
+croner = "5.0.1"
+
+# Database / cache
+sqlx = { version = "0.9.1", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "rust_decimal", "json", "migrate", "derive"] }
+redis = { version = "1.8.3", features = ["tokio-comp", "connection-manager"] }
+
+# Crypto (RustCrypto instead of aws-lc-rs; see DEVIATIONS.md DEV-001 — no cmake/NASM in the build image)
+sha2 = "0.11.2"
+sha1 = "0.10"
+hmac = "0.13"
+hkdf = "0.13"
+aes-gcm = "0.11.1"
+subtle = "2"
+base64 = "0.23.1"
+hex = "0.4.3"
+bcrypt = "0.19.3"
+rsa = { version = "0.10.0", features = ["pkcs1v15"] }
+jsonwebtoken = "12.0"
+ed25519-dalek = "3.0"
+rand = "0.9"
+secrecy = "0.10.3"
+zeroize = { version = "1.9.2", features = ["derive"] }
+
+# HTTP client / network
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "json", "stream", "gzip", "brotli", "deflate", "zstd"] }
+ipnet = "2.12.2"
+url = "2"
+
+# Logging / CLI
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+clap = { version = "4.6.10", features = ["derive", "env"] }
+sd-notify = "0.5.0"
+
+# Utilities
+thiserror = "2.0.21"
+anyhow = "1.0.105"
+parking_lot = "0.13"
+dashmap = "6.2.1"
+moka = { version = "0.12.16", features = ["sync"] }
+tempfile = "3.27"
+mimalloc = "0.1.52"
+brotli = "9.1.3"
+walkdir = "2.5"
+
+# Wave 2 additions (plan-pinned crates)
+rusqlite = { version = "0.43", features = ["bundled", "chrono", "serde_json", "uuid"] }
+russh = "0.65.4"
+ssh-key = "0.6.7"
+minijinja = "3.1.0"
+minisign = "0.10"
+nix = { version = "0.32", features = ["fs", "user", "net", "signal"] }
+sysinfo = "0.40"
+globset = "0.4"
+
+# Workspace crates
+pg-config = { path = "crates/pg-config" }
+pg-types = { path = "crates/pg-types" }
+pg-crypto = { path = "crates/pg-crypto" }
+pg-http = { path = "crates/pg-http" }
+pg-mtls = { path = "crates/pg-mtls" }
+pg-db = { path = "crates/pg-db" }
+pg-redis = { path = "crates/pg-redis" }
+pg-objstore = { path = "crates/pg-objstore" }
+pg-upstream = { path = "crates/pg-upstream" }
+pg-edge = { path = "crates/pg-edge" }
+pg-domain-auth = { path = "crates/pg-domain-auth" }
+pg-domain-flow = { path = "crates/pg-domain-flow" }
+pg-domain-ledger = { path = "crates/pg-domain-ledger" }
+pg-ledger = { path = "crates/pg-ledger" }
+pg-flow-engine = { path = "crates/pg-flow-engine" }
+pg-domain-gov = { path = "crates/pg-domain-gov" }
+pg-domain-comms = { path = "crates/pg-domain-comms" }
+pg-domain-recon = { path = "crates/pg-domain-recon" }
+pg-domain-academy = { path = "crates/pg-domain-academy" }
+pg-egress = { path = "crates/pg-egress" }
+pg-workers = { path = "crates/pg-workers" }
+pg-report-engine = { path = "crates/pg-report-engine" }
+pg-compliance = { path = "crates/pg-compliance" }
+pg-office = { path = "crates/pg-office" }
+pg-search = { path = "crates/pg-search" }
+pg-deploy-config = { path = "crates/pg-deploy-config" }
+pg-deploy-plan = { path = "crates/pg-deploy-plan" }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
+debug = "line-tables-only"
+strip = "none"
+incremental = false
+
+[profile.dev]
+opt-level = 1
+debug = 1
+
+# A single request must fail, not a payment process (AD-10); tests use unwinding anyway.
+[profile.test]
+panic = "unwind"

@@ -1,0 +1,1155 @@
+{
+  "engineVersion": "1.0.0",
+  "institutionName": "Libyan National Payment Gateway",
+  "defaultCurrency": "LYD",
+  "defaultTimezone": "Africa/Tripoli",
+  "models": [
+    {
+      "modelName": "merchants",
+      "tableName": "merchants",
+      "domain": "MERCHANTS",
+      "description": "Merchant master records.",
+      "columns": [
+        {
+          "name": "id",
+          "dbColumnName": "id",
+          "type": "uuid",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "INTERNAL",
+          "description": "merchants.id"
+        },
+        {
+          "name": "version",
+          "dbColumnName": "version",
+          "type": "int",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "merchants.version"
+        },
+        {
+          "name": "created_at",
+          "dbColumnName": "created_at",
+          "type": "datetime",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "PUBLIC",
+          "description": "merchants.created_at"
+        },
+        {
+          "name": "updated_at",
+          "dbColumnName": "updated_at",
+          "type": "datetime",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "merchants.updated_at"
+        },
+        {
+          "name": "legal_name",
+          "dbColumnName": "legal_name",
+          "type": "string",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "merchants.legal_name"
+        },
+        {
+          "name": "trade_name",
+          "dbColumnName": "trade_name",
+          "type": "string",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "merchants.trade_name"
+        },
+        {
+          "name": "display_name",
+          "dbColumnName": "display_name",
+          "type": "string",
+          "nullable": true,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "merchants.display_name"
+        },
+        {
+          "name": "business_category",
+          "dbColumnName": "business_category",
+          "type": "string",
+          "nullable": true,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "merchants.business_category"
+        },
+        {
+          "name": "status",
+          "dbColumnName": "status",
+          "type": "enum",
+          "enumName": "MerchantStatus",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "PUBLIC",
+          "description": "merchants.status"
+        },
+        {
+          "name": "kyb_status",
+          "dbColumnName": "kyb_status",
+          "type": "enum",
+          "enumName": "KybStatus",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "PUBLIC",
+          "description": "merchants.kyb_status"
+        },
+        {
+          "name": "risk_tier",
+          "dbColumnName": "risk_tier",
+          "type": "enum",
+          "enumName": "RiskTier",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "PUBLIC",
+          "description": "merchants.risk_tier"
+        },
+        {
+          "name": "country",
+          "dbColumnName": "country",
+          "type": "string",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "merchants.country"
+        },
+        {
+          "name": "activated_at",
+          "dbColumnName": "activated_at",
+          "type": "datetime",
+          "nullable": true,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "merchants.activated_at"
+        },
+        {
+          "name": "suspended_at",
+          "dbColumnName": "suspended_at",
+          "type": "datetime",
+          "nullable": true,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "merchants.suspended_at"
+        },
+        {
+          "name": "next_kyb_review_at",
+          "dbColumnName": "next_kyb_review_at",
+          "type": "datetime",
+          "nullable": true,
+          "indexed": true,
+          "sensitivity": "PUBLIC",
+          "description": "merchants.next_kyb_review_at"
+        }
+      ],
+      "relations": [
+        {
+          "name": "applications",
+          "targetModel": "applications",
+          "cardinality": "ONE_TO_MANY",
+          "sourceKey": "id",
+          "targetKey": "merchant_id"
+        },
+        {
+          "name": "wallets",
+          "targetModel": "wallets",
+          "cardinality": "ONE_TO_MANY",
+          "sourceKey": "id",
+          "targetKey": "merchant_id"
+        },
+        {
+          "name": "cashoutRequests",
+          "targetModel": "cashout_requests",
+          "cardinality": "ONE_TO_MANY",
+          "sourceKey": "id",
+          "targetKey": "merchant_id"
+        },
+        {
+          "name": "paymentAttempts",
+          "targetModel": "payment_attempts",
+          "cardinality": "ONE_TO_MANY",
+          "sourceKey": "id",
+          "targetKey": "merchant_id"
+        }
+      ],
+      "requiredAuthorities": [
+        "report_engine:run"
+      ],
+      "naturalRoles": [
+        "MERCHANT_ADMIN",
+        "MERCHANT_STAFF"
+      ],
+      "confidentialAmlOnly": false,
+      "merchantScopable": {
+        "merchantIdColumn": "id"
+      },
+      "optimizationRule": {
+        "requireIndexedFilter": false,
+        "maxRowsReturned": 10000,
+        "transcriptOptimizationNote": "Prefer indexed filters (ids, status, created_at) when querying merchants."
+      }
+    },
+    {
+      "modelName": "applications",
+      "tableName": "applications",
+      "domain": "MERCHANTS",
+      "description": "Merchant applications/channels.",
+      "columns": [
+        {
+          "name": "id",
+          "dbColumnName": "id",
+          "type": "uuid",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "INTERNAL",
+          "description": "applications.id"
+        },
+        {
+          "name": "created_at",
+          "dbColumnName": "created_at",
+          "type": "datetime",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "applications.created_at"
+        },
+        {
+          "name": "updated_at",
+          "dbColumnName": "updated_at",
+          "type": "datetime",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "applications.updated_at"
+        },
+        {
+          "name": "merchant_id",
+          "dbColumnName": "merchant_id",
+          "type": "uuid",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "INTERNAL",
+          "description": "applications.merchant_id"
+        },
+        {
+          "name": "name",
+          "dbColumnName": "name",
+          "type": "string",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "applications.name"
+        },
+        {
+          "name": "business_use_description",
+          "dbColumnName": "business_use_description",
+          "type": "string",
+          "nullable": true,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "applications.business_use_description"
+        },
+        {
+          "name": "expected_monthly_volume",
+          "dbColumnName": "expected_monthly_volume",
+          "type": "decimal",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "applications.expected_monthly_volume"
+        },
+        {
+          "name": "expected_monthly_volume_minor",
+          "dbColumnName": "expected_monthly_volume",
+          "type": "bigint",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "applications.expected_monthly_volume in minor units (scale 1000).",
+          "minorUnitScale": 1000
+        },
+        {
+          "name": "assigned_wallet_id",
+          "dbColumnName": "assigned_wallet_id",
+          "type": "uuid",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "INTERNAL",
+          "description": "applications.assigned_wallet_id"
+        },
+        {
+          "name": "status",
+          "dbColumnName": "status",
+          "type": "enum",
+          "enumName": "ApplicationStatus",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "PUBLIC",
+          "description": "applications.status"
+        }
+      ],
+      "relations": [
+        {
+          "name": "merchant",
+          "targetModel": "merchants",
+          "cardinality": "MANY_TO_ONE",
+          "sourceKey": "merchant_id",
+          "targetKey": "id"
+        },
+        {
+          "name": "assignedWallet",
+          "targetModel": "wallets",
+          "cardinality": "MANY_TO_ONE",
+          "sourceKey": "assigned_wallet_id",
+          "targetKey": "id"
+        },
+        {
+          "name": "paymentAttempts",
+          "targetModel": "payment_attempts",
+          "cardinality": "ONE_TO_MANY",
+          "sourceKey": "id",
+          "targetKey": "application_id"
+        }
+      ],
+      "requiredAuthorities": [
+        "report_engine:run"
+      ],
+      "naturalRoles": [
+        "MERCHANT_ADMIN",
+        "MERCHANT_STAFF"
+      ],
+      "confidentialAmlOnly": false,
+      "merchantScopable": {
+        "merchantIdColumn": "merchant_id"
+      },
+      "optimizationRule": {
+        "requireIndexedFilter": false,
+        "maxRowsReturned": 10000,
+        "transcriptOptimizationNote": "Prefer indexed filters (ids, status, created_at) when querying applications."
+      }
+    },
+    {
+      "modelName": "wallets",
+      "tableName": "wallets",
+      "domain": "PAYMENTS",
+      "description": "Merchant wallets.",
+      "columns": [
+        {
+          "name": "id",
+          "dbColumnName": "id",
+          "type": "uuid",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "INTERNAL",
+          "description": "wallets.id"
+        },
+        {
+          "name": "created_at",
+          "dbColumnName": "created_at",
+          "type": "datetime",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "wallets.created_at"
+        },
+        {
+          "name": "updated_at",
+          "dbColumnName": "updated_at",
+          "type": "datetime",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "wallets.updated_at"
+        },
+        {
+          "name": "merchant_id",
+          "dbColumnName": "merchant_id",
+          "type": "uuid",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "INTERNAL",
+          "description": "wallets.merchant_id"
+        },
+        {
+          "name": "gl_account_id",
+          "dbColumnName": "gl_account_id",
+          "type": "uuid",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "INTERNAL",
+          "description": "wallets.gl_account_id"
+        },
+        {
+          "name": "currency",
+          "dbColumnName": "currency",
+          "type": "string",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "wallets.currency"
+        },
+        {
+          "name": "status",
+          "dbColumnName": "status",
+          "type": "enum",
+          "enumName": "WalletStatus",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "PUBLIC",
+          "description": "wallets.status"
+        }
+      ],
+      "relations": [
+        {
+          "name": "merchant",
+          "targetModel": "merchants",
+          "cardinality": "MANY_TO_ONE",
+          "sourceKey": "merchant_id",
+          "targetKey": "id"
+        },
+        {
+          "name": "applications",
+          "targetModel": "applications",
+          "cardinality": "ONE_TO_MANY",
+          "sourceKey": "id",
+          "targetKey": "assigned_wallet_id"
+        },
+        {
+          "name": "cashoutRequests",
+          "targetModel": "cashout_requests",
+          "cardinality": "ONE_TO_MANY",
+          "sourceKey": "id",
+          "targetKey": "wallet_id"
+        }
+      ],
+      "requiredAuthorities": [
+        "report_engine:run"
+      ],
+      "naturalRoles": [
+        "MERCHANT_ADMIN",
+        "MERCHANT_STAFF"
+      ],
+      "confidentialAmlOnly": false,
+      "merchantScopable": {
+        "merchantIdColumn": "merchant_id"
+      },
+      "optimizationRule": {
+        "requireIndexedFilter": false,
+        "maxRowsReturned": 10000,
+        "transcriptOptimizationNote": "Prefer indexed filters (ids, status, created_at) when querying wallets."
+      }
+    },
+    {
+      "modelName": "payment_attempts",
+      "tableName": "payment_attempts",
+      "domain": "PAYMENTS",
+      "description": "Payment attempts across every rail.",
+      "columns": [
+        {
+          "name": "id",
+          "dbColumnName": "id",
+          "type": "uuid",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.id"
+        },
+        {
+          "name": "created_at",
+          "dbColumnName": "created_at",
+          "type": "datetime",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "PUBLIC",
+          "description": "payment_attempts.created_at"
+        },
+        {
+          "name": "updated_at",
+          "dbColumnName": "updated_at",
+          "type": "datetime",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "payment_attempts.updated_at"
+        },
+        {
+          "name": "reference",
+          "dbColumnName": "reference",
+          "type": "string",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "PUBLIC",
+          "description": "payment_attempts.reference"
+        },
+        {
+          "name": "link_id",
+          "dbColumnName": "link_id",
+          "type": "uuid",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.link_id"
+        },
+        {
+          "name": "application_id",
+          "dbColumnName": "application_id",
+          "type": "uuid",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.application_id"
+        },
+        {
+          "name": "merchant_id",
+          "dbColumnName": "merchant_id",
+          "type": "uuid",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.merchant_id"
+        },
+        {
+          "name": "rail_id",
+          "dbColumnName": "rail_id",
+          "type": "uuid",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.rail_id"
+        },
+        {
+          "name": "status",
+          "dbColumnName": "status",
+          "type": "enum",
+          "enumName": "AttemptStatus",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "PUBLIC",
+          "description": "payment_attempts.status"
+        },
+        {
+          "name": "substatus",
+          "dbColumnName": "substatus",
+          "type": "string",
+          "nullable": true,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "payment_attempts.substatus"
+        },
+        {
+          "name": "requested_amount",
+          "dbColumnName": "requested_amount",
+          "type": "decimal",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.requested_amount"
+        },
+        {
+          "name": "requested_amount_minor",
+          "dbColumnName": "requested_amount",
+          "type": "bigint",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.requested_amount in minor units (scale 1000).",
+          "minorUnitScale": 1000
+        },
+        {
+          "name": "surcharge_amount",
+          "dbColumnName": "surcharge_amount",
+          "type": "decimal",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.surcharge_amount"
+        },
+        {
+          "name": "surcharge_amount_minor",
+          "dbColumnName": "surcharge_amount",
+          "type": "bigint",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.surcharge_amount in minor units (scale 1000).",
+          "minorUnitScale": 1000
+        },
+        {
+          "name": "total_charged_amount",
+          "dbColumnName": "total_charged_amount",
+          "type": "decimal",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.total_charged_amount"
+        },
+        {
+          "name": "total_charged_amount_minor",
+          "dbColumnName": "total_charged_amount",
+          "type": "bigint",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.total_charged_amount in minor units (scale 1000).",
+          "minorUnitScale": 1000
+        },
+        {
+          "name": "settled_amount",
+          "dbColumnName": "settled_amount",
+          "type": "decimal",
+          "nullable": true,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.settled_amount"
+        },
+        {
+          "name": "settled_amount_minor",
+          "dbColumnName": "settled_amount",
+          "type": "bigint",
+          "nullable": true,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.settled_amount in minor units (scale 1000).",
+          "minorUnitScale": 1000
+        },
+        {
+          "name": "gateway_fee_amount",
+          "dbColumnName": "gateway_fee_amount",
+          "type": "decimal",
+          "nullable": true,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.gateway_fee_amount"
+        },
+        {
+          "name": "gateway_fee_amount_minor",
+          "dbColumnName": "gateway_fee_amount",
+          "type": "bigint",
+          "nullable": true,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.gateway_fee_amount in minor units (scale 1000).",
+          "minorUnitScale": 1000
+        },
+        {
+          "name": "platform_commission_amount",
+          "dbColumnName": "platform_commission_amount",
+          "type": "decimal",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.platform_commission_amount"
+        },
+        {
+          "name": "platform_commission_amount_minor",
+          "dbColumnName": "platform_commission_amount",
+          "type": "bigint",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.platform_commission_amount in minor units (scale 1000).",
+          "minorUnitScale": 1000
+        },
+        {
+          "name": "net_merchant_amount",
+          "dbColumnName": "net_merchant_amount",
+          "type": "decimal",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.net_merchant_amount"
+        },
+        {
+          "name": "net_merchant_amount_minor",
+          "dbColumnName": "net_merchant_amount",
+          "type": "bigint",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "payment_attempts.net_merchant_amount in minor units (scale 1000).",
+          "minorUnitScale": 1000
+        },
+        {
+          "name": "fee_bearer",
+          "dbColumnName": "fee_bearer",
+          "type": "enum",
+          "enumName": "FeeBearer",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "payment_attempts.fee_bearer"
+        },
+        {
+          "name": "settlement_target",
+          "dbColumnName": "settlement_target",
+          "type": "enum",
+          "enumName": "SettlementTarget",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "payment_attempts.settlement_target"
+        },
+        {
+          "name": "currency",
+          "dbColumnName": "currency",
+          "type": "string",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "payment_attempts.currency"
+        },
+        {
+          "name": "expires_at",
+          "dbColumnName": "expires_at",
+          "type": "datetime",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "payment_attempts.expires_at"
+        },
+        {
+          "name": "terminal_at",
+          "dbColumnName": "terminal_at",
+          "type": "datetime",
+          "nullable": true,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "payment_attempts.terminal_at"
+        }
+      ],
+      "relations": [
+        {
+          "name": "application",
+          "targetModel": "applications",
+          "cardinality": "MANY_TO_ONE",
+          "sourceKey": "application_id",
+          "targetKey": "id"
+        },
+        {
+          "name": "merchant",
+          "targetModel": "merchants",
+          "cardinality": "MANY_TO_ONE",
+          "sourceKey": "merchant_id",
+          "targetKey": "id"
+        }
+      ],
+      "requiredAuthorities": [
+        "report_engine:run"
+      ],
+      "naturalRoles": [
+        "MERCHANT_ADMIN",
+        "MERCHANT_STAFF"
+      ],
+      "confidentialAmlOnly": false,
+      "merchantScopable": {
+        "merchantIdColumn": "merchant_id",
+        "applicationIdColumn": "application_id"
+      },
+      "optimizationRule": {
+        "mandatoryFilterColumns": [
+          {
+            "column": "created_at",
+            "allowedOperators": [
+              "between",
+              "gte_lte"
+            ],
+            "maxDateRangeDays": 180,
+            "rationale": "payment_attempts is a large history table; a bounded created_at range keeps the report query indexed.",
+            "aiFixHint": "Add a WHERE predicate on column 'created_at' with op='between' bound to a 'daterange' input with validation.max_range_days <= 180."
+          }
+        ],
+        "requireIndexedFilter": true,
+        "maxRowsReturned": 10000,
+        "transcriptOptimizationNote": "Always bound payment_attempts.created_at and filter on an indexed column such as merchant_id."
+      }
+    },
+    {
+      "modelName": "cashout_requests",
+      "tableName": "cashout_requests",
+      "domain": "PAYMENTS",
+      "description": "Merchant cash-out requests.",
+      "columns": [
+        {
+          "name": "id",
+          "dbColumnName": "id",
+          "type": "uuid",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "INTERNAL",
+          "description": "cashout_requests.id"
+        },
+        {
+          "name": "created_at",
+          "dbColumnName": "created_at",
+          "type": "datetime",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "PUBLIC",
+          "description": "cashout_requests.created_at"
+        },
+        {
+          "name": "updated_at",
+          "dbColumnName": "updated_at",
+          "type": "datetime",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "cashout_requests.updated_at"
+        },
+        {
+          "name": "merchant_id",
+          "dbColumnName": "merchant_id",
+          "type": "uuid",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "INTERNAL",
+          "description": "cashout_requests.merchant_id"
+        },
+        {
+          "name": "wallet_id",
+          "dbColumnName": "wallet_id",
+          "type": "uuid",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "INTERNAL",
+          "description": "cashout_requests.wallet_id"
+        },
+        {
+          "name": "amount",
+          "dbColumnName": "amount",
+          "type": "decimal",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "cashout_requests.amount"
+        },
+        {
+          "name": "amount_minor",
+          "dbColumnName": "amount",
+          "type": "bigint",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "cashout_requests.amount in minor units (scale 1000).",
+          "minorUnitScale": 1000
+        },
+        {
+          "name": "state",
+          "dbColumnName": "state",
+          "type": "enum",
+          "enumName": "CashoutState",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "PUBLIC",
+          "description": "cashout_requests.state"
+        },
+        {
+          "name": "adjustment_id",
+          "dbColumnName": "adjustment_id",
+          "type": "uuid",
+          "nullable": true,
+          "indexed": true,
+          "sensitivity": "INTERNAL",
+          "description": "cashout_requests.adjustment_id"
+        }
+      ],
+      "relations": [
+        {
+          "name": "merchant",
+          "targetModel": "merchants",
+          "cardinality": "MANY_TO_ONE",
+          "sourceKey": "merchant_id",
+          "targetKey": "id"
+        },
+        {
+          "name": "wallet",
+          "targetModel": "wallets",
+          "cardinality": "MANY_TO_ONE",
+          "sourceKey": "wallet_id",
+          "targetKey": "id"
+        }
+      ],
+      "requiredAuthorities": [
+        "report_engine:run"
+      ],
+      "naturalRoles": [
+        "MERCHANT_ADMIN",
+        "MERCHANT_STAFF"
+      ],
+      "confidentialAmlOnly": false,
+      "merchantScopable": {
+        "merchantIdColumn": "merchant_id"
+      },
+      "optimizationRule": {
+        "requireIndexedFilter": false,
+        "maxRowsReturned": 10000,
+        "transcriptOptimizationNote": "Prefer indexed filters (ids, status, created_at) when querying cashout_requests."
+      }
+    },
+    {
+      "modelName": "rm_merchant_daily_stats",
+      "tableName": "rm_merchant_daily_stats",
+      "domain": "OPERATIONS",
+      "description": "Reportable table rm_merchant_daily_stats.",
+      "columns": [
+        {
+          "name": "merchant_id",
+          "dbColumnName": "merchant_id",
+          "type": "uuid",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "rm_merchant_daily_stats.merchant_id"
+        },
+        {
+          "name": "day",
+          "dbColumnName": "day",
+          "type": "datetime",
+          "nullable": false,
+          "indexed": true,
+          "sensitivity": "PUBLIC",
+          "description": "rm_merchant_daily_stats.day"
+        },
+        {
+          "name": "currency",
+          "dbColumnName": "currency",
+          "type": "string",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "rm_merchant_daily_stats.currency"
+        },
+        {
+          "name": "attempt_count",
+          "dbColumnName": "attempt_count",
+          "type": "int",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "rm_merchant_daily_stats.attempt_count"
+        },
+        {
+          "name": "success_count",
+          "dbColumnName": "success_count",
+          "type": "int",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "rm_merchant_daily_stats.success_count"
+        },
+        {
+          "name": "failure_count",
+          "dbColumnName": "failure_count",
+          "type": "int",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "rm_merchant_daily_stats.failure_count"
+        },
+        {
+          "name": "gross_amount",
+          "dbColumnName": "gross_amount",
+          "type": "decimal",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "rm_merchant_daily_stats.gross_amount"
+        },
+        {
+          "name": "gross_amount_minor",
+          "dbColumnName": "gross_amount",
+          "type": "bigint",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "rm_merchant_daily_stats.gross_amount in minor units (scale 1000).",
+          "minorUnitScale": 1000
+        },
+        {
+          "name": "net_amount",
+          "dbColumnName": "net_amount",
+          "type": "decimal",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "rm_merchant_daily_stats.net_amount"
+        },
+        {
+          "name": "net_amount_minor",
+          "dbColumnName": "net_amount",
+          "type": "bigint",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "rm_merchant_daily_stats.net_amount in minor units (scale 1000).",
+          "minorUnitScale": 1000
+        },
+        {
+          "name": "success_amount",
+          "dbColumnName": "success_amount",
+          "type": "decimal",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "rm_merchant_daily_stats.success_amount"
+        },
+        {
+          "name": "success_amount_minor",
+          "dbColumnName": "success_amount",
+          "type": "bigint",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "rm_merchant_daily_stats.success_amount in minor units (scale 1000).",
+          "minorUnitScale": 1000
+        },
+        {
+          "name": "success_net_amount",
+          "dbColumnName": "success_net_amount",
+          "type": "decimal",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "rm_merchant_daily_stats.success_net_amount"
+        },
+        {
+          "name": "success_net_amount_minor",
+          "dbColumnName": "success_net_amount",
+          "type": "bigint",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "INTERNAL",
+          "description": "rm_merchant_daily_stats.success_net_amount in minor units (scale 1000).",
+          "minorUnitScale": 1000
+        },
+        {
+          "name": "updated_at",
+          "dbColumnName": "updated_at",
+          "type": "datetime",
+          "nullable": false,
+          "indexed": false,
+          "sensitivity": "PUBLIC",
+          "description": "rm_merchant_daily_stats.updated_at"
+        }
+      ],
+      "relations": [],
+      "requiredAuthorities": [
+        "report_engine:run"
+      ],
+      "naturalRoles": [
+        "MERCHANT_ADMIN",
+        "MERCHANT_STAFF"
+      ],
+      "confidentialAmlOnly": false,
+      "merchantScopable": {
+        "merchantIdColumn": "merchant_id"
+      },
+      "optimizationRule": {
+        "requireIndexedFilter": false,
+        "maxRowsReturned": 10000,
+        "transcriptOptimizationNote": "Prefer indexed filters (ids, status, created_at) when querying rm_merchant_daily_stats."
+      }
+    }
+  ],
+  "enums": {
+    "MerchantStatus": [
+      "PENDING",
+      "ACTIVE",
+      "SUSPENDED",
+      "REJECTED",
+      "CLOSED"
+    ],
+    "KybStatus": [
+      "UNVERIFIED",
+      "PENDING",
+      "VERIFIED",
+      "REJECTED"
+    ],
+    "RiskTier": [
+      "LOW",
+      "STANDARD",
+      "HIGH"
+    ],
+    "ApplicationStatus": [
+      "DRAFT",
+      "PENDING",
+      "ACTIVE",
+      "SUSPENDED",
+      "CLOSED"
+    ],
+    "WalletStatus": [
+      "PENDING",
+      "ACTIVE",
+      "FROZEN",
+      "CLOSED"
+    ],
+    "AttemptStatus": [
+      "CREATED",
+      "INITIATING",
+      "AWAITING_CUSTOMER",
+      "AUTHORIZING",
+      "VERIFYING",
+      "UNKNOWN",
+      "SUCCEEDED",
+      "FAILED",
+      "EXPIRED",
+      "CANCELLED",
+      "BLOCKED",
+      "PARTIALLY_REFUNDED",
+      "REFUNDED",
+      "DISPUTED"
+    ],
+    "FeeBearer": [
+      "MERCHANT_ABSORBS",
+      "PAYER_SURCHARGE",
+      "SPLIT"
+    ],
+    "SettlementTarget": [
+      "PLATFORM_CLEARING",
+      "MERCHANT_DIRECT",
+      "PROVIDER_HELD"
+    ],
+    "CashoutState": [
+      "PENDING",
+      "REJECTED",
+      "PROCESSING",
+      "COMPLETE",
+      "SUBTRACTED"
+    ]
+  },
+  "chromeVariables": [
+    "institutionName",
+    "reportTitle",
+    "reportSubtitle",
+    "reportCode",
+    "reportVersion",
+    "generatedAtIso",
+    "generatedAtFormatted",
+    "actorName",
+    "actorEmail",
+    "actorRole",
+    "selectedLocale",
+    "merchantTradeName",
+    "merchantLegalName",
+    "merchantDisplayName",
+    "periodSummary",
+    "defaultCurrency",
+    "classificationBadge",
+    "verificationHashShort",
+    "pageNumber",
+    "totalPages"
+  ],
+  "examples": {
+    "descriptor": "{\n  \"spec_kind\": \"REPORT_DESCRIPTOR\",\n  \"spec_version\": \"1.0\",\n  \"report\": {\n    \"code\": \"merchant-settlement-summary\",\n    \"version\": 1,\n    \"category\": \"MERCHANT_SETTLEMENT\",\n    \"audience_scope\": \"BOTH\",\n    \"merchant_scope_input_key\": \"merchantId\",\n    \"classification\": \"MERCHANT_CONFIDENTIAL\"\n  },\n  \"page_layout\": {\n    \"paper_size\": \"A4\",\n    \"orientation\": \"PORTRAIT\",\n    \"header_mode\": \"GLOBAL_DEFAULT\",\n    \"footer_mode\": \"GLOBAL_DEFAULT\"\n  },\n  \"required_assets\": [],\n  \"suggested_access\": {\n    \"roles\": [\n      \"OPERATOR\",\n      \"FINANCE\",\n      \"SUPPORT\"\n    ],\n    \"authorities\": [\n      \"merchant:read\"\n    ]\n  },\n  \"i18n\": {\n    \"default_locale\": \"en\",\n    \"prompt_user_when_multi_locale\": true,\n    \"locales\": {\n      \"en\": {\n        \"report.title\": \"Merchant Settlement Summary\",\n        \"input.merchant\": \"Target Merchant\",\n        \"input.period\": \"Statement Period\",\n        \"kpi.title\": \"Settlement Summary\",\n        \"kpi.total\": \"Total Movement\",\n        \"table.title\": \"Daily Turnover\",\n        \"table.day\": \"Day\",\n        \"table.amount\": \"Amount\"\n      },\n      \"ar\": {\n        \"report.title\": \"ملخص تسويات التاجر\",\n        \"input.merchant\": \"التاجر المستهدف\",\n        \"input.period\": \"فترة الكشف\",\n        \"kpi.title\": \"ملخص التسوية\",\n        \"kpi.total\": \"إجمالي الحركة\",\n        \"table.title\": \"الحركة اليومية\",\n        \"table.day\": \"اليوم\",\n        \"table.amount\": \"المبلغ\"\n      }\n    }\n  },\n  \"inputs\": [\n    {\n      \"key\": \"merchantId\",\n      \"label_i18n_key\": \"input.merchant\",\n      \"type\": \"entity_autocomplete\",\n      \"required\": true,\n      \"autocomplete\": {\n        \"source\": \"merchants\"\n      }\n    },\n    {\n      \"key\": \"periodRange\",\n      \"label_i18n_key\": \"input.period\",\n      \"type\": \"daterange\",\n      \"required\": true,\n      \"validation\": {\n        \"max_range_days\": 180\n      },\n      \"default_value\": {\n        \"preset\": \"CURRENT_MONTH\"\n      }\n    }\n  ],\n  \"datasets\": [\n    {\n      \"dataset_id\": \"totals\",\n      \"description\": \"Merchant payment totals by currency for the selected period\",\n      \"from_model\": \"payment_attempts\",\n      \"from_alias\": \"pa\",\n      \"select\": [\n        {\n          \"alias\": \"currency\",\n          \"column\": \"currency\"\n        },\n        {\n          \"alias\": \"total\",\n          \"column\": \"total_charged_amount_minor\",\n          \"aggregate\": \"SUM\",\n          \"format_hint\": \"CURRENCY_MINOR\"\n        }\n      ],\n      \"where\": {\n        \"kind\": \"GROUP\",\n        \"logic\": \"AND\",\n        \"conditions\": [\n          {\n            \"kind\": \"PREDICATE\",\n            \"column\": \"merchant_id\",\n            \"op\": \"eq\",\n            \"binding\": {\n              \"source\": \"INPUT\",\n              \"input_key\": \"merchantId\"\n            }\n          },\n          {\n            \"kind\": \"PREDICATE\",\n            \"column\": \"created_at\",\n            \"op\": \"between\",\n            \"binding\": {\n              \"source\": \"INPUT\",\n              \"input_key\": \"periodRange\",\n              \"range_bound\": \"BOTH\"\n            }\n          }\n        ]\n      },\n      \"group_by\": [\n        \"currency\"\n      ],\n      \"limit\": 10\n    }\n  ],\n  \"transforms\": [],\n  \"sections\": [\n    {\n      \"section_type\": \"KPI_GRID\",\n      \"section_id\": \"kpis\",\n      \"title_i18n_key\": \"kpi.title\",\n      \"columns\": 2,\n      \"cards\": [\n        {\n          \"label_i18n_key\": \"kpi.total\",\n          \"dataset_id\": \"totals\",\n          \"value_field\": \"total\",\n          \"format_hint\": \"CURRENCY_MINOR\",\n          \"tone\": \"PRIMARY\"\n        }\n      ]\n    }\n  ]\n}",
+    "merchantDescriptor": "{\n  \"spec_kind\": \"REPORT_DESCRIPTOR\",\n  \"spec_version\": \"1.0\",\n  \"report\": {\n    \"code\": \"merchant-settlement-summary\",\n    \"version\": 1,\n    \"category\": \"MERCHANT_SETTLEMENT\",\n    \"audience_scope\": \"BOTH\",\n    \"merchant_scope_input_key\": \"merchantId\",\n    \"classification\": \"MERCHANT_CONFIDENTIAL\"\n  },\n  \"page_layout\": {\n    \"paper_size\": \"A4\",\n    \"orientation\": \"PORTRAIT\",\n    \"header_mode\": \"GLOBAL_DEFAULT\",\n    \"footer_mode\": \"GLOBAL_DEFAULT\"\n  },\n  \"required_assets\": [],\n  \"i18n\": {\n    \"default_locale\": \"en\",\n    \"prompt_user_when_multi_locale\": true,\n    \"locales\": {\n      \"en\": {\n        \"report.title\": \"Merchant Settlement Summary\",\n        \"input.merchant\": \"Target Merchant\",\n        \"input.period\": \"Statement Period\",\n        \"kpi.title\": \"Settlement Summary\",\n        \"kpi.total\": \"Total Movement\",\n        \"table.title\": \"Daily Turnover\",\n        \"table.day\": \"Day\",\n        \"table.amount\": \"Amount\"\n      },\n      \"ar\": {\n        \"report.title\": \"ملخص تسويات التاجر\",\n        \"input.merchant\": \"التاجر المستهدف\",\n        \"input.period\": \"فترة الكشف\",\n        \"kpi.title\": \"ملخص التسوية\",\n        \"kpi.total\": \"إجمالي الحركة\",\n        \"table.title\": \"الحركة اليومية\",\n        \"table.day\": \"اليوم\",\n        \"table.amount\": \"المبلغ\"\n      }\n    }\n  },\n  \"inputs\": [\n    {\n      \"key\": \"merchantId\",\n      \"label_i18n_key\": \"input.merchant\",\n      \"type\": \"entity_autocomplete\",\n      \"required\": true,\n      \"autocomplete\": {\n        \"source\": \"merchants\"\n      }\n    },\n    {\n      \"key\": \"periodRange\",\n      \"label_i18n_key\": \"input.period\",\n      \"type\": \"daterange\",\n      \"required\": true,\n      \"validation\": {\n        \"max_range_days\": 90\n      },\n      \"default_value\": {\n        \"preset\": \"CURRENT_MONTH\"\n      }\n    }\n  ],\n  \"datasets\": [\n    {\n      \"dataset_id\": \"totals\",\n      \"description\": \"Merchant payment totals by currency for the selected period\",\n      \"from_model\": \"payment_attempts\",\n      \"from_alias\": \"pa\",\n      \"select\": [\n        {\n          \"alias\": \"currency\",\n          \"column\": \"currency\"\n        },\n        {\n          \"alias\": \"total\",\n          \"column\": \"total_charged_amount_minor\",\n          \"aggregate\": \"SUM\",\n          \"format_hint\": \"CURRENCY_MINOR\"\n        }\n      ],\n      \"where\": {\n        \"kind\": \"GROUP\",\n        \"logic\": \"AND\",\n        \"conditions\": [\n          {\n            \"kind\": \"PREDICATE\",\n            \"column\": \"merchant_id\",\n            \"op\": \"eq\",\n            \"binding\": {\n              \"source\": \"INPUT\",\n              \"input_key\": \"merchantId\"\n            }\n          },\n          {\n            \"kind\": \"PREDICATE\",\n            \"column\": \"created_at\",\n            \"op\": \"between\",\n            \"binding\": {\n              \"source\": \"INPUT\",\n              \"input_key\": \"periodRange\",\n              \"range_bound\": \"BOTH\"\n            }\n          }\n        ]\n      },\n      \"group_by\": [\n        \"currency\"\n      ],\n      \"limit\": 10\n    }\n  ],\n  \"transforms\": [],\n  \"sections\": [\n    {\n      \"section_type\": \"KPI_GRID\",\n      \"section_id\": \"kpis\",\n      \"title_i18n_key\": \"kpi.title\",\n      \"columns\": 2,\n      \"cards\": [\n        {\n          \"label_i18n_key\": \"kpi.total\",\n          \"dataset_id\": \"totals\",\n          \"value_field\": \"total\",\n          \"format_hint\": \"CURRENCY_MINOR\",\n          \"tone\": \"PRIMARY\"\n        }\n      ]\n    }\n  ]\n}",
+    "topTen": "{\n  \"spec_kind\": \"REPORT_DESCRIPTOR\",\n  \"spec_version\": \"1.0\",\n  \"report\": {\n    \"code\": \"top-ten-merchants-by-volume\",\n    \"version\": 1,\n    \"category\": \"MERCHANT_SETTLEMENT\",\n    \"audience_scope\": \"BACKOFFICE_INTERNAL\",\n    \"classification\": \"INTERNAL\"\n  },\n  \"page_layout\": {\n    \"paper_size\": \"A4\",\n    \"orientation\": \"PORTRAIT\",\n    \"header_mode\": \"GLOBAL_DEFAULT\",\n    \"footer_mode\": \"GLOBAL_DEFAULT\"\n  },\n  \"required_assets\": [],\n  \"suggested_access\": {\n    \"roles\": [\n      \"OPERATOR\",\n      \"FINANCE\"\n    ],\n    \"authorities\": [\n      \"merchant:read\"\n    ]\n  },\n  \"i18n\": {\n    \"default_locale\": \"en\",\n    \"prompt_user_when_multi_locale\": true,\n    \"locales\": {\n      \"en\": {\n        \"report.title\": \"Top 10 Merchants by Volume\",\n        \"input.period\": \"Period\",\n        \"table.title\": \"Top Merchants\",\n        \"table.merchant\": \"Merchant\",\n        \"table.attempts\": \"Attempts\",\n        \"table.volume\": \"Volume\"\n      },\n      \"ar\": {\n        \"report.title\": \"أفضل 10 تجار حسب الحجم\",\n        \"input.period\": \"الفترة\",\n        \"table.title\": \"أفضل التجار\",\n        \"table.merchant\": \"التاجر\",\n        \"table.attempts\": \"المحاولات\",\n        \"table.volume\": \"الحجم\"\n      }\n    }\n  },\n  \"inputs\": [\n    {\n      \"key\": \"periodRange\",\n      \"label_i18n_key\": \"input.period\",\n      \"type\": \"daterange\",\n      \"required\": true,\n      \"validation\": {\n        \"max_range_days\": 180\n      },\n      \"default_value\": {\n        \"preset\": \"LAST_30_DAYS\"\n      }\n    }\n  ],\n  \"datasets\": [\n    {\n      \"dataset_id\": \"top_merchants\",\n      \"description\": \"Top merchants by settled volume\",\n      \"from_model\": \"payment_attempts\",\n      \"from_alias\": \"pa\",\n      \"joins\": [\n        {\n          \"join_type\": \"LEFT\",\n          \"relation_name\": \"merchant\",\n          \"target_model\": \"merchants\",\n          \"alias\": \"m\"\n        }\n      ],\n      \"select\": [\n        {\n          \"alias\": \"merchant_id\",\n          \"column\": \"id\",\n          \"table_alias\": \"m\"\n        },\n        {\n          \"alias\": \"merchant_name\",\n          \"column\": \"trade_name\",\n          \"table_alias\": \"m\"\n        },\n        {\n          \"alias\": \"attempts\",\n          \"column\": \"id\",\n          \"aggregate\": \"COUNT\",\n          \"format_hint\": \"INTEGER\"\n        },\n        {\n          \"alias\": \"volume_minor\",\n          \"column\": \"total_charged_amount_minor\",\n          \"aggregate\": \"SUM\",\n          \"format_hint\": \"CURRENCY_MINOR\"\n        }\n      ],\n      \"where\": {\n        \"kind\": \"PREDICATE\",\n        \"column\": \"created_at\",\n        \"op\": \"between\",\n        \"binding\": {\n          \"source\": \"INPUT\",\n          \"input_key\": \"periodRange\",\n          \"range_bound\": \"BOTH\"\n        }\n      },\n      \"group_by\": [\n        \"merchant_id\",\n        \"merchant_name\"\n      ],\n      \"order_by\": [\n        {\n          \"field\": \"volume_minor\",\n          \"direction\": \"DESC\"\n        }\n      ],\n      \"limit\": 10\n    }\n  ],\n  \"transforms\": [],\n  \"sections\": [\n    {\n      \"section_type\": \"DATA_TABLE\",\n      \"section_id\": \"top_table\",\n      \"title_i18n_key\": \"table.title\",\n      \"dataset_id\": \"top_merchants\",\n      \"columns\": [\n        {\n          \"field\": \"merchant_name\",\n          \"header_i18n_key\": \"table.merchant\",\n          \"width_percent\": 50\n        },\n        {\n          \"field\": \"attempts\",\n          \"header_i18n_key\": \"table.attempts\",\n          \"align\": \"END\",\n          \"width_percent\": 20,\n          \"format_hint\": \"INTEGER\"\n        },\n        {\n          \"field\": \"volume_minor\",\n          \"header_i18n_key\": \"table.volume\",\n          \"align\": \"END\",\n          \"width_percent\": 30,\n          \"format_hint\": \"CURRENCY_MINOR\"\n        }\n      ]\n    }\n  ]\n}",
+    "chrome": "{\n  \"spec_kind\": \"REPORT_CHROME\",\n  \"spec_version\": \"1.0\",\n  \"chrome\": {\n    \"code\": \"institutional-header-v1\",\n    \"name\": \"Institutional Header\",\n    \"chrome_type\": \"HEADER\",\n    \"description\": \"Bilingual institutional header\",\n    \"height_mm\": 22,\n    \"show_on_first_page\": true,\n    \"border_style\": \"THIN_RULE\"\n  },\n  \"required_assets\": [\n    {\n      \"asset_key\": \"institution_logo\",\n      \"file_name\": \"institution-crest.svg\",\n      \"mime_type\": \"image/svg+xml\",\n      \"alt_i18n_key\": \"chrome.logo_alt\",\n      \"max_width_mm\": 38,\n      \"max_height_mm\": 16\n    }\n  ],\n  \"i18n\": {\n    \"default_locale\": \"en\",\n    \"locales\": {\n      \"en\": {\n        \"chrome.logo_alt\": \"Institution official crest\",\n        \"chrome.division\": \"Financial Operations\",\n        \"chrome.page\": \"Page\",\n        \"chrome.of\": \"of\"\n      },\n      \"ar\": {\n        \"chrome.logo_alt\": \"الشعار الرسمي للمؤسسة\",\n        \"chrome.division\": \"العمليات المالية\",\n        \"chrome.page\": \"صفحة\",\n        \"chrome.of\": \"من\"\n      }\n    }\n  },\n  \"template\": {\n    \"html\": \"<div style=\\\"display:flex;justify-content:space-between;align-items:center\\\"><div><img src=\\\"asset://institution_logo\\\" alt=\\\"{{$t.chrome.logo_alt}}\\\" style=\\\"height:14mm\\\" /><strong>{{institutionName}}</strong> — {{$t.chrome.division}}</div><div>{{reportTitle}} ({{reportCode}} v{{reportVersion}}) — {{$t.chrome.page}} <span class=\\\"report-page-number\\\"></span> {{$t.chrome.of}} <span class=\\\"report-total-pages\\\"></span></div></div>\",\n    \"scoped_css\": \"\",\n    \"used_variables\": [\n      \"institutionName\",\n      \"reportTitle\",\n      \"reportCode\",\n      \"reportVersion\",\n      \"pageNumber\",\n      \"totalPages\"\n    ]\n  }\n}"
+  }
+}

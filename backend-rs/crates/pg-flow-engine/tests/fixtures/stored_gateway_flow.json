@@ -1,0 +1,219 @@
+{
+  "flows": [
+    {
+      "phase": "INITIATE",
+      "railId": "otp",
+      "subMode": null,
+      "steps": [
+        {
+          "id": "send-otp",
+          "orderIndex": 0,
+          "type": "HTTP",
+          "method": "POST",
+          "urlTemplate": "{api}/verify",
+          "contentType": "APPLICATION_JSON",
+          "sideEffect": "SENDS_NOTIFICATION",
+          "retryPolicy": "SAFE_WITH_COOLDOWN",
+          "idempotencyConfig": {
+            "mode": "NONE"
+          },
+          "parameters": [
+            {
+              "place": "BODY",
+              "key": "mobile_number",
+              "source": "CUSTOMER_FIELD",
+              "selector": "customer_mobile",
+              "transforms": [
+                {
+                  "op": "phone_normalize",
+                  "args": [
+                    "LOCAL_09"
+                  ]
+                }
+              ]
+            },
+            {
+              "place": "BODY",
+              "key": "amount",
+              "source": "ATTEMPT",
+              "selector": "totalChargedAmount",
+              "transforms": [
+                {
+                  "op": "format_decimal",
+                  "args": [
+                    2
+                  ]
+                }
+              ]
+            },
+            {
+              "place": "BODY",
+              "key": "invoice_no",
+              "source": "ATTEMPT",
+              "selector": "reference"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "process_id",
+              "selector": "result.process_id",
+              "storeAs": "STATE",
+              "required": true
+            }
+          ]
+        },
+        {
+          "id": "show-otp",
+          "orderIndex": 1,
+          "type": "RENDER",
+          "method": "SHOW_OTP_FORM",
+          "outputs": [
+            {
+              "name": "actionType",
+              "selector": "actionType",
+              "storeAs": "PUBLIC",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "SUBMIT",
+      "railId": "otp",
+      "subMode": null,
+      "steps": [
+        {
+          "id": "confirm-otp",
+          "orderIndex": 0,
+          "type": "HTTP",
+          "method": "POST",
+          "urlTemplate": "{api}/confirm",
+          "contentType": "APPLICATION_JSON",
+          "sideEffect": "MOVES_MONEY",
+          "retryPolicy": "NEVER",
+          "pointOfNoReturn": true,
+          "idempotencyConfig": {
+            "mode": "NONE"
+          },
+          "parameters": [
+            {
+              "place": "BODY",
+              "key": "process_id",
+              "source": "STATE",
+              "selector": "process_id"
+            },
+            {
+              "place": "BODY",
+              "key": "code",
+              "source": "CUSTOMER_FIELD",
+              "selector": "otp"
+            },
+            {
+              "place": "BODY",
+              "key": "amount",
+              "source": "ATTEMPT",
+              "selector": "totalChargedAmount",
+              "transforms": [
+                {
+                  "op": "format_decimal",
+                  "args": [
+                    2
+                  ]
+                }
+              ]
+            }
+          ],
+          "outputs": [
+            {
+              "name": "transaction_id",
+              "selector": "transaction_id",
+              "storeAs": "PROVIDER_REF",
+              "required": true
+            },
+            {
+              "name": "settled_amount",
+              "selector": "amount",
+              "storeAs": "SETTLED_AMOUNT"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "VERIFY",
+      "railId": "otp",
+      "subMode": null,
+      "steps": [
+        {
+          "id": "inquiry",
+          "orderIndex": 0,
+          "type": "HTTP",
+          "method": "POST",
+          "urlTemplate": "{api}/inquiry",
+          "contentType": "APPLICATION_JSON",
+          "sideEffect": "READ_ONLY",
+          "retryPolicy": "SAFE",
+          "parameters": [
+            {
+              "place": "BODY",
+              "key": "invoice_no",
+              "source": "ATTEMPT",
+              "selector": "reference"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "selector": "status",
+              "storeAs": "STATE",
+              "required": true
+            },
+            {
+              "name": "transaction_id",
+              "selector": "transaction_id",
+              "storeAs": "PROVIDER_REF"
+            },
+            {
+              "name": "settled_amount",
+              "selector": "amount",
+              "storeAs": "SETTLED_AMOUNT"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "statusRules": [
+    {
+      "selector": "status",
+      "op": "EQUALS",
+      "valueJson": "SUCCESS",
+      "canonicalStatus": "SUCCEEDED",
+      "phase": "SUBMIT"
+    },
+    {
+      "selector": "status",
+      "op": "EQUALS",
+      "valueJson": "INVALID_OTP",
+      "canonicalStatus": "AWAITING_CUSTOMER",
+      "canonicalError": "RETRYABLE_OTP",
+      "phase": "SUBMIT"
+    },
+    {
+      "selector": "status",
+      "op": "EQUALS",
+      "valueJson": "DECLINED",
+      "canonicalStatus": "FAILED",
+      "canonicalError": "TERMINAL_DECLINE",
+      "phase": "SUBMIT"
+    },
+    {
+      "phase": "VERIFY",
+      "selector": "status",
+      "op": "EQUALS",
+      "valueJson": "SUCCESS",
+      "canonicalStatus": "SUCCEEDED"
+    }
+  ]
+}

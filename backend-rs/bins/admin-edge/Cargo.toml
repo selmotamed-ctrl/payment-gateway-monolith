@@ -1,0 +1,40 @@
+[package]
+name = "admin-edge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ntex.workspace = true
+tokio.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+pg-config.workspace = true
+pg-http.workspace = true
+pg-mtls.workspace = true
+pg-edge.workspace = true
+pg-upstream.workspace = true
+url.workspace = true
+bytes.workspace = true
+reqwest.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+sha2.workspace = true
+hex.workspace = true
+uuid.workspace = true
+dashmap.workspace = true
+parking_lot.workspace = true
+futures-util.workspace = true
+ipnet.workspace = true
+chrono.workspace = true
+sd-notify.workspace = true
+
+mimalloc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,0 +1,126 @@
+{
+  "generatedBy": "backend-rs/tools/golden/generate.ts",
+  "contract": "Vault column encryption (core-back/engine/crypto/Vault.ts): payload = keyId:b64(iv12):b64(tag16):b64(ct), AES-256-GCM with AAD = utf8(keyId); key = HKDF-SHA256(masterKey, salt = utf8(keyId), info = 'payment-gateway:vault:aes-256-gcm:v1', 32). masterKey is the 32 ASCII bytes of KMS_MASTER_KEY used as-is. sign = hex HMAC-SHA256(data) under the same derived key.",
+  "notes": [
+    "encrypt payloads contain a random 12-byte IV by construction; the generator reuses the committed payload after proving it decrypts, so regeneration is byte-stable. --refresh-random mints new ones.",
+    "resolution=env uses new Vault() with KMS_MASTER_KEY set and KMS_KEYS_JSON cleared; resolution=explicit uses new Vault({ masterKey })."
+  ],
+  "kmsMasterKey": "0123456789abcdef0123456789abcdef",
+  "keyEncoding": "utf8-32-bytes",
+  "cases": [
+    {
+      "id": "vault-encrypt-credential-set-json",
+      "kind": "encrypt",
+      "keyId": "credential-set",
+      "plaintext": "{\"apiKey\":\"sk_live_test_0123456789\",\"merchant\":\"مرحبا\",\"enabled\":true}",
+      "resolution": "explicit",
+      "payload": "credential-set:77zcOqehdbvimGRP:R4DwBiqlHg9DSiOBPfhGCg==:582kQJVzWvThUrdg9U9wAQ+dDvy8ROft8XVMhxSTrfbU0CWVrNsIgkViyBdOJuve97jefDnlfLDMTqMsBHNSyVFaycaeKpcjv6Sg"
+    },
+    {
+      "id": "vault-encrypt-credential-set-long",
+      "kind": "encrypt",
+      "keyId": "credential-set",
+      "plaintext": "credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-credential-",
+      "resolution": "explicit",
+      "payload": "credential-set:n7Vs/jzup5wyANTC:Y4C8LSNtxBaEufcjaz2Qrg==:A6PDITv4TFU76J0+p9wz3g8Y/rI1/B9qKlikTGhkUtqMLuU//X1vgr1uQlghfmUY5FKYB8AyPIYFvLnWbVF1gXI2GNAQQ8okMKABc74oXaWskSHiLsJAmT7OWupa9FPCqf1VFTZ4EQ0EOnwugCXIZBRxIVXQxdVkTNby/jgXeMrWdYE/gktrZHNzVcbFSks9Zjq5iZpt4gmlxiDBio85INOWJzQRgUdsffEYvyp29quUSpki21JH4x28lDfcSDEzXyxnjkrgbF73VQ56Wq8FVWNeO9j9VP82YYYZgU9kJtK0qxOXzUY3Dci32yH1qm+vEWrnTPTTKjciT5qNtXnLWotNrsr3mwqBEfM0pGbfJMICjqzwgLw6Ad/mRGxsqPERZcMzB6isXnXo9XW/chGUOInZI2QBKxiwavsccrhOTCSwLo70zrCbX9jU2NmGlWYKfp9IMVfQB3e2HuXMXI/Hh99RegradOI7KngBSuwhi1ny9aZmjzi19ShAPohGDStL6zQHA2aqRf8XbG0w8iO196XY2evpYJlbMx6NUSqjG6Npzh1L9BweU8HsxdEKKLjF4DM61PIQ907TgUDF3pGwSKUVty8HQP7jgRKr3B/uSuNpuY466hetWvwvn+NujiYffjHiY+t0eeY7QEAyeab/+pGkEAODQ60VcXu7PkWjTUUjqLDQwDkQg3WWD39xverrJ1oI2xHrYZeJg73335gufVBhGN8Myk/ot2dpGIgKOkOCCcrvJsj8kQA1jUvHhKmjbbnf66ytpAFLDm5i2tbeQ4FvPHuh0xe6QpJ9vd9LAPjpnMzzQ1aqdGI2PZu0u1yJWJgc2yqrxyXCNujFDrZGP2kgMFpiYSejC77TEx379VKAoQE75P9e7cvPCSgDlN2jkk00IKjFadJy+TdoyClxlCS7KKAhO5pFc9FKfOYs0vECRKkaTGY8OyLh7Bpc8SSuRZ2BWXOGohbsmwwdVQfrLiyaQ4uo9MQZj+sbujvwvkgJUKR8oiC38jDgEgqXJk+0BmVaZHyGj73sq3TEH+4ermjmPeZ7HrHqhNQ0ly2b9zs9u84v4xzGk3qEPUlIWZVML/7WuLAS7EwZS1r15dKiO50tAjS775CHeq7HfXqNaYJIZH3xbp/05VDs5dtXEKne/dgqnp7cViMabcsvNk49kY/lxytTdu6oPxpLHqaUlFngv45/TfW7pB5RvfTHj7IJtMvkw7ZFI5Xcw2z4kmp1fR5ebsuhDdSd/MzP9d8tnj1W95rVcHTreatjVFr8w5NiWXCdInkEF6A1/kSyYquQHflWPnHWTPdC2k9gXF4YMk5vyDriiA41+0PUwneserq0Y8ql3XC5hVgcHNSjftq/MIE8vpcjDyjrm6dmWr91TFdg+OcqZMEOqvkwEWmv/6yxOEC8sWbXVjealAPBC8WT6p/kIKLZEgDvPNx4FXf5eh0s0w+/pOqZcWRgLZ/tf1n5PXEisFeJlqE1027OUFGLYpW3v6mcFmxgepEERvXfbT6kmUgMZR+XNKjXj/pxSNmyVmRsMt7Cc2QeBeb9UnzQTe1+bxQVcL8fI5Gw9d+yrGG+7oSTke58/BXwLMrTW1Bixu40CmxqG+7i1ci23Ic1pVSohBDJSLtUoplrUPTA/KPjKUOC/WpIoSWC/9VY+0AUZSOMOFbNkyHUcQiU5ixnS8a+KdgEfUfzDsZgC9AHsVDStyb3CI9bNYFJAI8IDw6nHQ/TUoMJUUZnq7krpfbWeUbfQMlYvObUpM6QjDAMrYObmv+zMk9GWr0gn+krtYRt0ZDA8kLSZOXiI276XHhpqlbB8pDkXkXnxMNErg11xOL/BlM2CP88WmpboZUz0nXB2DlnUladJ9TvOH2so2Fyox0kC29MmyZbc/OQgI27g1pI10irRso+4u2Bg5I7AeO3ThCWcW7+XwKsR41XvcC1j9/mv8Vn1ujV9UdMfV5VPbRFALlvoWAMdsiUts+w1dJe05UIu8YkuYx8GgBy1mWRde2U5ZhAkXwnVdayp/KDxhQbCf4WsehlvH8NSQnzEYJPChzMY3Zi1wg1jtEOi9SO3NX+drM+RTs0Y/YfGrwnQjMgJF9uRspVgRXajTw15cOXIbrhfPwadl0d2m8qdf3c39u5YeGTin15MFjqBk0CC+kU9IzlJ44xkLSdSGFsbbHVwKV8WGtdBk3bzdstVeZDXj1xXkibP6L0U0giOj/iQSa2zeXJl8wkZ1yd1/7G4Qf2EVYDHRwqbK1Rua0gYzOhxngKju2pz1jkMKPDERiYPAO98ZZNvAt+vQxep3tajnyrYb+m8WKbFR5RnOJ7+8tJF710TbB4Ce8aShGOSIeMGdsyXZcotI4Q/qrPYdFdlrKpe524QliqHD4hXNw1UyW5IwK3HgxlKEep0VGh1FhwI3k968+8GR9XXWNN7IASLmdYfYnM5W+1AtPKZUtVSySRc8m0hblL8qH2/dStsoYxZ1ngYNY8iBxYLCWdNWVqZBqNrsJM2be6trsoLKfKgcFxF/aT6wGdBM8yFC1B8iuIBB7arJosTWPruvS4JMWZq81qwaqMdOBZibQ6YNPay/2pLqpUOvl701I6WYkNIqUjrOdiQ5Yxz0H6VEOW2zRAymKK2eHDcs7fa820VKItcj/ONS7SWbv5VRlW154ZKDM4SesNCchqWqHMAneiExY32tu4Hc4G8frVzm4127Mcu3PW3EktJirH4oYfFRdn/hklOm733OuRL1ChXAsj/yN8jxyq8Vt6V4iVUW0xYbHAg9kjEhgjFfy4eHcYHXOzwPRI12GIbwI4iEqcUY0jS5afXa9rhC7WuaOBC5p7Sp7khKNHD8d85rg5D+IlGTOaV4R9538QaqkfSio30WSuWOQT2rBoYPXit/6wVSmC81sx/8sjmTsYTlFY682WwFXq3C7uA5+X3qJ2cfOktw=="
+    },
+    {
+      "id": "vault-encrypt-env-master-key",
+      "kind": "encrypt",
+      "keyId": "test-key",
+      "plaintext": "resolved from KMS_MASTER_KEY",
+      "resolution": "env",
+      "payload": "test-key:4UizWIqPE+CsQ+DK:xWoVSQdUPz+ZWoyw9vmxGw==:X4dL3EJIA/GP0klicG8zOFWOkUzOtQQEJ5n/Kw=="
+    },
+    {
+      "id": "vault-encrypt-mfa-sms-arabic",
+      "kind": "encrypt",
+      "keyId": "mfa-sms",
+      "plaintext": "رمز التحقق ٤٨٣٩٢٠",
+      "resolution": "explicit",
+      "payload": "mfa-sms:QLbvnW8hUcaDF0Ot:KB+4uX+x4QCFuo4vN1Aetg==:vPRQ73z1zbsmdE+YmODSbLeSWugWc/S5S9/6D7b+yQg="
+    },
+    {
+      "id": "vault-encrypt-mfa-sms-code",
+      "kind": "encrypt",
+      "keyId": "mfa-sms",
+      "plaintext": "483920",
+      "resolution": "explicit",
+      "payload": "mfa-sms:1XTTMboxtabdkpCG:YxIrNKCLNDEVES/5hIRBVw==:f+TThRNX"
+    },
+    {
+      "id": "vault-encrypt-reporting-xml",
+      "kind": "encrypt",
+      "keyId": "reporting-xml",
+      "plaintext": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Report><Memo>😀 تقرير</Memo></Report>",
+      "resolution": "explicit",
+      "payload": "reporting-xml:ulCqJFT+y8cPwsMc:FYcQ1BuB6mw5NdfhVzq7wg==:WW2RUXFDqJVZXlFcieU/bFr0oHxyKWtnOk6NgZiKzajZAOlJUdXY+7FrTqz+un07hhlVY50TyX/rjyc5MS/EW86sjQkV5AjKSTvjA3e7coly5X0="
+    },
+    {
+      "id": "vault-encrypt-test-key-basic",
+      "kind": "encrypt",
+      "keyId": "test-key",
+      "plaintext": "hello vault",
+      "resolution": "explicit",
+      "payload": "test-key:A94zmJ2tXaMoF2z5:Qwbm3Rrs55beV/cEJoZiAw==:JQgTWTIc9FYEsnA="
+    },
+    {
+      "id": "vault-encrypt-test-key-empty",
+      "kind": "encrypt",
+      "keyId": "test-key",
+      "plaintext": "",
+      "resolution": "explicit",
+      "payload": "test-key:REiQ/c3xkogsF52C:p84oty6F/PD094yBIix6vA==:"
+    },
+    {
+      "id": "vault-encrypt-test-key-long-arabic",
+      "kind": "encrypt",
+      "keyId": "test-key",
+      "plaintext": "عقد الدفع الإلكتروني عقد الدفع الإلكتروني عقد الدفع الإلكتروني عقد الدفع الإلكتروني عقد الدفع الإلكتروني عقد الدفع الإلكتروني عقد الدفع الإلكتروني عقد الدفع الإلكتروني عقد الدفع الإلكتروني عقد الدفع الإلكتروني عقد الدفع الإلكتروني عقد الدفع الإلكتروني عقد الدفع الإلكتروني عقد الدفع الإلكتروني عقد الدفع الإلكتروني ",
+      "resolution": "explicit",
+      "payload": "test-key:jrjufZza7yW+fhom:FrU4QUMPjxUbT5Divs2VUw==:OpIK9BwKAMiX5bll4LY5sSm/I1TgPQeNC2dbKt6QAW5xvSb0F6miL5AVhjQzNNckTMK0i3/dyrJUwAR8xcea/qGZINvvseHcKQo69uRKiuW3G05wpvs0fuuf+BJy+eBOAqMiMWLIsdp2zbcW9m/N73hUoE7u4j1+bYL+WXOdoC9CwxHLf9HzI6gtnMw22B+UlXhA4Ns78tclAOecrIlVs0VPY/OKoAdsY2L8fFfUrwyKEZAwT0etKW8o26cON6MgF7QSmAk2WlggDQIoxqKiqG3aGWO8NtcRhkb447plcbuAs6x6xXnumKXiODoP66wOshSdEklwo6Je4P1wLUI76CGXh4v7PQMn/+V1I6CQWzDWsfomxL0O/X/UG4uDNT4sYDbUAOpzB+U3q6sAwnx6KPIBnG4Y0QEd+aF5ELWWS6gitPKzupwKAS63x4W+u5Wda58VPX2MYc8oolUpr+0TSsDx4eb2Hnp1TPKHmQytXaXF6mcUGB+xHGHD8xrC8RQaSC7pCwfBbktgW84Twofb7WEbgntDPyuD+/Uh0NSYcQm62iejEiAeO0rp20RvNX/63j0xvoB0CgfxGzfTU0pdjEH6Jw2s5IyP0QT/dSCgtKC59z2XbVgCFxjJ06grbQfgO2Ku1aGGY2dAok2fFBD2h36qECz2VIQwOFVDDU4/myPe7v6gsK4pxAv6z2hTNk8nkZFoGrhxECBWUxGQLL8EDp3gNKQNilQX4TPa/NT2LfurkAZEz+Zoqtb/nMi23uMR+0inSXtV7FSg"
+    },
+    {
+      "id": "vault-sign-arabic",
+      "kind": "sign",
+      "keyId": "reporting-xml",
+      "data": "تقرير شهري ٢٠٢٦",
+      "signature": "bc3b052c008fc74dbcc9970d96d1cb9ff5d6664bccf0bc2c32d39ca20fd56f6c"
+    },
+    {
+      "id": "vault-sign-audit-anchor",
+      "kind": "sign",
+      "keyId": "audit-anchor-v1",
+      "data": "audit-anchor/v1|42|abc123|10",
+      "signature": "eb84196f5938e4da18d70c2d98901833740e3221c7cf59565c41fa894d8d08ee"
+    },
+    {
+      "id": "vault-sign-audit-anchor-empty",
+      "kind": "sign",
+      "keyId": "audit-anchor-v1",
+      "data": "",
+      "signature": "cdd341960960f6f723213f910bb13cc0e9151b442b223f94933e6de7701a7f40"
+    },
+    {
+      "id": "vault-sign-mfa-sms",
+      "kind": "sign",
+      "keyId": "mfa-sms",
+      "data": "user:0192f0a0-0000-7000-8000-000000000001",
+      "signature": "e5d5f677fb275d479237c13d061a7e17006740b483e9c90a2024eb123a85a786"
+    },
+    {
+      "id": "vault-sign-test-key",
+      "kind": "sign",
+      "keyId": "test-key",
+      "data": "the quick brown fox",
+      "signature": "fb7ad102cc23cccd16a94fedf797db27e8c4fda73666494d7973e762a091a5c3"
+    },
+    {
+      "id": "vault-sign-webhook-secret",
+      "kind": "sign",
+      "keyId": "webhook-secret",
+      "data": "evt_0192f0a0|1700000000|{}",
+      "signature": "8ad0e705741f6704d6cff480f8801a6784c730d0ee3a3cbd77c0037820d85a6e"
+    }
+  ]
+}

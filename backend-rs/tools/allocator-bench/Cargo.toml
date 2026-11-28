@@ -1,0 +1,37 @@
+# Standalone project (empty [workspace] below) so it does not join the backend-rs workspace.
+[workspace]
+
+[package]
+name = "allocator-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "P0-T09 micro-benchmark: system vs mimalloc vs jemalloc on JSON/serde allocation workloads"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+mimalloc = { version = "0.1", optional = true }
+tikv-jemallocator = { version = "0.6", optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[features]
+default = []
+mimalloc = ["dep:mimalloc"]
+jemalloc = ["dep:tikv-jemallocator"]
+
+[[bench]]
+name = "alloc"
+harness = false
+
+# Match the port's release profile (backend-rs/Cargo.toml) so the numbers are comparable
+# with `cargo bench` inside the workspace.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
+[profile.bench]
+lto = "fat"
+codegen-units = 1

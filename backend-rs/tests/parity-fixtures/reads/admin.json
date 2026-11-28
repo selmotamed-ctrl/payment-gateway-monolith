@@ -1,0 +1,43 @@
+{
+  "$comment": "Deterministic admin read smoke cases. The synthetic token carries authorities ['*'] so edge guards pass; core verifies the signature in a real run.",
+  "channel": "admin",
+  "cases": [
+    {
+      "name": "dashboard overview",
+      "method": "GET",
+      "path": "/api/v1/admin/stats/overview?period=7d",
+      "headers": {
+        "accept": "application/json",
+        "authorization": "Bearer {{PARITY_ADMIN_TOKEN}}",
+        "user-agent": "parity-harness/1",
+        "x-request-id": "parity-admin-0001",
+        "x-forwarded-for": "203.0.113.12"
+      },
+      "notes": "Metrics include generatedAt, requestId and a byCurrency array."
+    },
+    {
+      "name": "merchants list",
+      "method": "GET",
+      "path": "/api/v1/admin/merchants?page=1&pageSize=20",
+      "headers": {
+        "accept": "application/json",
+        "authorization": "Bearer {{PARITY_ADMIN_TOKEN}}",
+        "user-agent": "parity-harness/1",
+        "x-request-id": "parity-admin-0002",
+        "x-forwarded-for": "203.0.113.12"
+      }
+    },
+    {
+      "name": "rails list",
+      "method": "GET",
+      "path": "/api/v1/admin/rails",
+      "headers": {
+        "accept": "application/json",
+        "authorization": "Bearer {{PARITY_ADMIN_TOKEN}}",
+        "user-agent": "parity-harness/1",
+        "x-request-id": "parity-admin-0003",
+        "x-forwarded-for": "203.0.113.12"
+      }
+    }
+  ]
+}

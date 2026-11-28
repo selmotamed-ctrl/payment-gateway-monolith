@@ -1,0 +1,221 @@
+{
+  "generatedBy": "backend-rs/tools/golden/generate.ts",
+  "contract": "CryptoEngine canonicalisation (core-back/engine/crypto/CryptoEngine.ts:193-230): SORTED_KEY_VALUE_AMP sorts keys with JS .sort() (UTF-16 code units) and renders key=value joined by '&' (null/undefined -> '', objects -> JSON.stringify); SORTED_VALUES_HASH sorts keys then joins values with valueSeparator (default '') and hides 'hashed' unless excludedFields is given; JSON_CANONICAL recursively sorts and JSON.stringify's; TEMPLATE_STRING replaces {{a.b}} and {a.b}. include/exclude match field names case-insensitively and exclusion wins.",
+  "notes": [
+    "json-integer-like-keys asserts JS's own re-ordering of canonical array indices during JSON.stringify after the recursive sort."
+  ],
+  "cases": [
+    {
+      "id": "json-integer-like-keys",
+      "mode": "JSON_CANONICAL",
+      "fields": {
+        "0": "zero",
+        "2": "two",
+        "10": "ten",
+        "b": 1
+      },
+      "expected": "{\"0\":\"zero\",\"2\":\"two\",\"10\":\"ten\",\"b\":1}"
+    },
+    {
+      "id": "json-nested",
+      "mode": "JSON_CANONICAL",
+      "fields": {
+        "b": {
+          "z": 1,
+          "a": 2
+        },
+        "a": [
+          {
+            "y": 1,
+            "x": 2
+          }
+        ]
+      },
+      "expected": "{\"a\":[{\"x\":2,\"y\":1}],\"b\":{\"a\":2,\"z\":1}}"
+    },
+    {
+      "id": "json-unicode-null-number",
+      "mode": "JSON_CANONICAL",
+      "fields": {
+        "مفتاح": "قيمة",
+        "😀": true,
+        "n": null,
+        "num": 1.5
+      },
+      "expected": "{\"n\":null,\"num\":1.5,\"مفتاح\":\"قيمة\",\"😀\":true}"
+    },
+    {
+      "id": "skv-basic",
+      "mode": "SORTED_KEY_VALUE_AMP",
+      "fields": {
+        "b": "2",
+        "a": "x",
+        "C": null,
+        "amount": "10.0000"
+      },
+      "expected": "C=&a=x&amount=10.0000&b=2"
+    },
+    {
+      "id": "skv-excluded-case-insensitive",
+      "mode": "SORTED_KEY_VALUE_AMP",
+      "fields": {
+        "amount": "1",
+        "secret": "s",
+        "token": "t"
+      },
+      "excludedFields": [
+        "SECRET",
+        "Token"
+      ],
+      "expected": "amount=1"
+    },
+    {
+      "id": "skv-included",
+      "mode": "SORTED_KEY_VALUE_AMP",
+      "fields": {
+        "amount": "1",
+        "currency": "LYD",
+        "secret": "s"
+      },
+      "includedFields": [
+        "amount",
+        "currency"
+      ],
+      "expected": "amount=1&currency=LYD"
+    },
+    {
+      "id": "skv-included-and-excluded",
+      "mode": "SORTED_KEY_VALUE_AMP",
+      "fields": {
+        "a": "1",
+        "b": "2",
+        "c": "3",
+        "d": "4"
+      },
+      "includedFields": [
+        "a",
+        "b",
+        "c"
+      ],
+      "excludedFields": [
+        "b"
+      ],
+      "expected": "a=1&c=3"
+    },
+    {
+      "id": "skv-nested-and-empty",
+      "mode": "SORTED_KEY_VALUE_AMP",
+      "fields": {
+        "meta": {
+          "z": 1,
+          "a": 2
+        },
+        "note": "a b",
+        "empty": ""
+      },
+      "expected": "empty=&meta={\"z\":1,\"a\":2}&note=a b"
+    },
+    {
+      "id": "skv-unicode-keys",
+      "mode": "SORTED_KEY_VALUE_AMP",
+      "fields": {
+        "مبلغ": "10",
+        "😀": "e",
+        "�": "r"
+      },
+      "expected": "مبلغ=10&😀=e&�=r"
+    },
+    {
+      "id": "svh-default-hashed-exclusion",
+      "mode": "SORTED_VALUES_HASH",
+      "fields": {
+        "a": "1",
+        "hashed": "x"
+      },
+      "expected": "1"
+    },
+    {
+      "id": "svh-included",
+      "mode": "SORTED_VALUES_HASH",
+      "fields": {
+        "amount": "5",
+        "currency": "LYD",
+        "secret": "x"
+      },
+      "includedFields": [
+        "amount",
+        "currency"
+      ],
+      "expected": "5LYD"
+    },
+    {
+      "id": "svh-joined",
+      "mode": "SORTED_VALUES_HASH",
+      "fields": {
+        "a": "2",
+        "b": "1"
+      },
+      "expected": "21"
+    },
+    {
+      "id": "svh-separator",
+      "mode": "SORTED_VALUES_HASH",
+      "fields": {
+        "z": "9",
+        "a": "1",
+        "m": "5"
+      },
+      "valueSeparator": "|",
+      "expected": "1|5|9"
+    },
+    {
+      "id": "tpl-double-and-single",
+      "mode": "TEMPLATE_STRING",
+      "fields": {
+        "amount": "10.0000",
+        "currency": "LYD",
+        "missing": null
+      },
+      "templateString": "{{amount}}|{currency}|{{missing}}",
+      "expected": "10.0000|LYD|"
+    },
+    {
+      "id": "tpl-included-fields",
+      "mode": "TEMPLATE_STRING",
+      "fields": {
+        "id": 42,
+        "m": {
+          "amount": "9"
+        },
+        "ignored": "x"
+      },
+      "includedFields": [
+        "id",
+        "m"
+      ],
+      "templateString": "id={{id}}&m={m.amount}",
+      "expected": "id=42&m=9"
+    },
+    {
+      "id": "tpl-literal-braces",
+      "mode": "TEMPLATE_STRING",
+      "fields": {
+        "a": 1
+      },
+      "templateString": "{a}|{not valid!}|{ }|{{a}}",
+      "expected": "1|{not valid!}|{ }|1"
+    },
+    {
+      "id": "tpl-nested-and-missing",
+      "mode": "TEMPLATE_STRING",
+      "fields": {
+        "a": {
+          "b": 7,
+          "c": "x"
+        }
+      },
+      "templateString": "{a.b}-{a.c}-{nope.here}",
+      "expected": "7-x-"
+    }
+  ]
+}

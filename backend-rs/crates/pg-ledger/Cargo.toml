@@ -1,0 +1,26 @@
+[package]
+name = "pg-ledger"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+rust_decimal.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+parking_lot.workspace = true
+sha2.workspace = true
+hex.workspace = true
+pg-db.workspace = true
+pg-types.workspace = true
+pg-domain-ledger.workspace = true
+pg-domain-flow.workspace = true
+pg-egress.workspace = true
